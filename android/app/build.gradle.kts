@@ -120,3 +120,21 @@ dependencies {
     testImplementation(libs.compose.ui.test.junit4)
     debugImplementation(libs.compose.ui.test.manifest)
 }
+
+// Robolectric normally downloads the Android framework jar at test time (and can hit Maven Central rate limits,
+// HTTP 429). Resolve it through Gradle instead (cached, retried) and run Robolectric offline from that copy.
+val robolectricRuntime: Configuration by configurations.creating
+dependencies {
+    // Version string matches what Robolectric 4.16.1 requests for SDK 34 (see @Config(sdk = [34])).
+    robolectricRuntime("org.robolectric:android-all-instrumented:14-robolectric-10818077-i7")
+}
+val robolectricJars = layout.buildDirectory.dir("robolectric-jars")
+val prepareRobolectricJars by tasks.registering(Copy::class) {
+    from(robolectricRuntime)
+    into(robolectricJars)
+}
+tasks.withType<Test>().configureEach {
+    dependsOn(prepareRobolectricJars)
+    systemProperty("robolectric.offline", "true")
+    systemProperty("robolectric.dependency.dir", robolectricJars.get().asFile.absolutePath)
+}

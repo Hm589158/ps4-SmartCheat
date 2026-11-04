@@ -3,6 +3,8 @@
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
 ## 0.7.0
+- CI: Robolectric's Android framework jar is resolved by Gradle and used offline (a Maven Central HTTP 429 at
+  test time had failed the release gate).
 - First hardware report (owner): FW 11.00 + GoldHEN + ps4debug-NG v1.3.3 — connect, auth, process list, Turbo Scan,
   refines and a write to a real game worked. Recorded in docs/COMPATIBILITY.md.
 - Automatic reconnection after dropped/server-closed connections (exponential backoff, "Reconnecting" state).
