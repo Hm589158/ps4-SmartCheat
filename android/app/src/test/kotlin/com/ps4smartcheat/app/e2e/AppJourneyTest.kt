@@ -14,6 +14,9 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureScreenRoboImage
+import org.junit.rules.TestWatcher
+import org.junit.runner.Description
 import com.ps4smartcheat.app.MainActivity
 import com.ps4smartcheat.core.util.Address
 import com.ps4smartcheat.mockserver.DemoGame
@@ -38,7 +41,28 @@ import java.io.File
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class AppJourneyTest {
-    @get:Rule val compose = createAndroidComposeRule<MainActivity>()
+    @get:Rule(order = 0) val compose = createAndroidComposeRule<MainActivity>()
+
+    /** On failure: whole-screen capture (works even when Compose is not idle) + last step in the log. */
+    @get:Rule(order = 1) val watcher = object : TestWatcher() {
+        override fun failed(e: Throwable, d: Description) {
+            println("E2E FAILED in ${d.methodName} after step '$lastStep': ${e.javaClass.simpleName}: ${e.message?.take(300)}")
+            runCatching { File(OUT).mkdirs(); captureScreenRoboImage("$OUT/FAILED_${d.methodName}.png") }
+                .onFailure { println("E2E failure screenshot failed: $it") }
+        }
+    }
+
+    private var lastStep = "start"
+
+    private fun step(name: String) {
+        lastStep = name
+        println("E2E step: $name")
+    }
+
+    /** Screen capture that does not wait for Compose to be idle. */
+    private fun screen(name: String) {
+        runCatching { File(OUT).mkdirs(); captureScreenRoboImage("$OUT/$name.png") }
+    }
 
     private lateinit var server: MockPs4DebugServer
 
@@ -84,6 +108,7 @@ class AppJourneyTest {
         shot("01_connection_empty")
 
         // 1. Connect.
+        step("connect")
         tag("host").performTextInput("127.0.0.1")
         tag("port").performTextClearance()
         tag("port").performTextInput(server.port.toString())
@@ -93,6 +118,7 @@ class AppJourneyTest {
         shot("02_connected_ng")
 
         // 2. Pick the game process.
+        step("pick process")
         tab("Processes")
         waitTag("process-eboot.bin")
         shot("03_processes")
@@ -102,6 +128,7 @@ class AppJourneyTest {
         shot("04_process_selected")
 
         // 3. First scan for the coin value shown in game.
+        step("first scan")
         tab("Scanner")
         waitTag("scanValue")
         tag("scanValue").performTextInput("5000")
@@ -111,6 +138,7 @@ class AppJourneyTest {
         shot("05_first_scan")
 
         // 4. The game spends coins; refine.
+        step("refine")
         server.pokeInt32(DemoGame.PID, DemoGame.COINS_ADDRESS, 4200)
         tag("scanValue").performTextClearance()
         tag("scanValue").performTextInput("4200")
@@ -121,12 +149,14 @@ class AppJourneyTest {
         shot("06_refined")
 
         // 5. Editor is read-only by default.
+        step("editor read-only")
         tag("result-$coins").performClick()
         waitText("Read-only mode")
         waitText("4200")
         shot("07_editor_readonly")
 
         // 6. Enable editing in Settings (with confirmation).
+        step("enable editing")
         tab("Settings")
         waitTag("editingSwitch")
         tag("editingSwitch").performClick()
@@ -135,6 +165,7 @@ class AppJourneyTest {
         tag("confirm").performClick()
 
         // 7. Back to the result, write a new value, confirm, verify on the "console".
+        step("write")
         tab("Scanner")
         compose.waitUntil(20_000) { exists("scannerList") || exists("newValue") }
         if (!exists("newValue")) {
@@ -153,14 +184,20 @@ class AppJourneyTest {
         shot("10_write_verified")
 
         // 8. Restore the original value.
+        step("restore")
         tag("restore").performScrollTo().performClick()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
         assertEquals(4200, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
 
         // 9. Save as a cheat.
+        step("save cheat: type value")
         tag("newValue").performTextClearance()
         tag("newValue").performTextInput("99999")
+        step("save cheat: open dialog")
         tag("saveCheat").performScrollTo().performClick()
+        repeat(5) { compose.mainClock.advanceTimeBy(100); Thread.sleep(50) }
+        screen("10b_after_save_click_raw")
+        step("save cheat: wait for dialog")
         waitTag("cheatName")
         tag("cheatName").performTextInput("Infinite coins")
         shot("11_save_cheat_dialog")
@@ -168,16 +205,19 @@ class AppJourneyTest {
         waitText("Saved \"Infinite coins\"")
 
         // 10. Memory viewer around the address.
+        step("memory viewer")
         tag("viewMemory").performScrollTo().performClick()
         waitText("byte(s) changed")
         shot("12_memory_viewer")
 
         // 11. Cheat library shows the saved cheat.
+        step("cheat library")
         tab("Cheats")
         waitText("Infinite coins")
         shot("13_cheat_library")
 
         // 12. Settings overview.
+        step("settings")
         tab("Settings")
         waitTag("editingSwitch")
         shot("14_settings")

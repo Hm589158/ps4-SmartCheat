@@ -18,6 +18,8 @@ jobs:
   build:
     name: Test and build debug APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # only used to publish UI screenshots to the ci-screenshots branch
     timeout-minutes: 45
     defaults:
       run:
@@ -59,6 +61,31 @@ jobs:
           path: android/app/build/outputs/roborazzi/*.png
           retention-days: 14
           if-no-files-found: warn
+
+      - name: Publish UI screenshots to the ci-screenshots branch
+        # Lets reviewers (and coding agents without artifact access) browse the latest UI journey.
+        if: always() && github.event_name == 'push'
+        working-directory: .
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          SRC=android/app/build/outputs/roborazzi
+          ls "$SRC"/*.png >/dev/null 2>&1 || { echo "no screenshots"; exit 0; }
+          OUT=$(mktemp -d)
+          cp "$SRC"/*.png "$OUT"/
+          cp android/app/build/test-results/testDebugUnitTest/*.xml "$OUT"/ 2>/dev/null || true
+          {
+            echo "# UI journey screenshots"
+            echo
+            echo "Commit ${GITHUB_SHA} on ${GITHUB_REF_NAME}, CI run ${GITHUB_RUN_NUMBER}. Mock ps4debug-NG server, Robolectric — not a PS4."
+            echo
+            for f in $(ls "$OUT" | grep '\.png$' | sort); do echo "## $f"; echo "![$f]($f)"; echo; done
+          } > "$OUT/README.md"
+          cd "$OUT"
+          git init -q -b ci-screenshots
+          git add -A
+          git -c user.name="ci" -c user.email="ci@users.noreply.github.com" commit -q -m "UI screenshots for ${GITHUB_SHA}"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-screenshots
 
       - name: Upload test APK (debug-signed, short retention)
         uses: actions/upload-artifact@v4
