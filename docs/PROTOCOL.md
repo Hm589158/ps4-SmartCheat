@@ -1,4 +1,7 @@
-# ps4debug protocol (as implemented)
+# ps4debug-NG / ps4debug protocol (as implemented)
+
+PS4 SmartCheat targets **ps4debug-NG** as its primary backend. The base commands below are shared with classic
+(GoldHEN) ps4debug, which is supported in compatibility mode without server-side scanning.
 
 This file separates **verified facts** (read in upstream source code) from **assumptions**.
 Only the commands listed under "Used by PS4 SmartCheat" are sent by the app.
@@ -71,7 +74,17 @@ Detection on connect (each probe uses a short timeout; on timeout/EOF the socket
    The keystream is L'Ecuyer's combined Tausworthe generator (lfsr113) re-seeded with 200/300/400/500 for every
    handshake, low byte per step (`proc.c` `auth_lfsr_next`, `proc_auth_xor_keystream`). ps4debug-NG's PROTOCOL.md calls
    it "intentionally undocumented"; it is implemented here from the GPL source for interoperability with the
-   user's own console. The auth flag is **server-global** (`g_proc_auth_bits`, reset only at payload start).
+   user's own console.
+   * **Verification:** the two upstream C functions were compiled verbatim with gcc and their output is pinned as test
+     vectors in `NgAuthTest` (all-zero and ramp challenges).
+   * **Challenge:** 64 bytes from the server's `rand()`; the client never needs to predict it.
+   * **Permissions:** the client requests `flags = 0x2`. Only bit `0x2` is checked anywhere (`SCAN_REQUIRE_AUTH`
+     in proc.c and every Turbo handler except CAPS); bit `0x1` is stored but never tested.
+   * **Scope:** `g_proc_auth_bits` is **server-global** and only reset when the payload starts (`server.c`), not per
+     connection as ps4debug-NG's PROTOCOL.md §1.8 states; `free_client` does not touch it. The client still re-runs
+     the handshake after every reconnect so a restarted payload is re-authorised automatically.
+   * **Failure:** `CMD_DATA_NULL` and the server closes the connection; the client reopens it and marks scanning as
+     unauthorised (scans then run on Android).
 3. `TURBO_CAPS 0xBDAACC10` (no auth) → `CMD_SUCCESS` + `{u32 version; u32 engines; u32 max_threads; u32 reserved}`.
    Release build reports `engines = 0x7FF`; `TSE_SERVER_RESIDENT = 0x4` is required for the Turbo tier.
 

@@ -1,7 +1,10 @@
 # Compatibility status
 
+Primary backend: **ps4debug-NG**. Classic/GoldHEN ps4debug: compatibility mode (Android-side scanning only).
+
 | Item | Status |
 |---|---|
+| ps4debug-NG CMD_PROC_AUTH (automatic) | Keystream verified against the upstream C code (test vectors); handshake verified against mock; **hardware pending** |
 | ps4debug wire protocol (commands used) | Implemented from upstream source; verified against mock server only |
 | GoldHEN ps4debug v1.1.x on PS4 FW 11.00 | **Pending hardware verification** |
 | ps4debug-NG | Same commands; expected compatible from source review; **not tested on hardware** |

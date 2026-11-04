@@ -118,6 +118,13 @@ class MockPs4DebugServer(
     }
 
     @Volatile private var authBits = 0
+    /** Flags word of the last CMD_PROC_AUTH request (for tests). */
+    @Volatile var lastAuthFlags = -1
+        private set
+    val authAttempts = AtomicInteger()
+
+    /** Simulates a payload restart: the server-global scan authorisation is cleared. */
+    fun revokeAuth() { authBits = 0 }
     @Volatile private var turboCancelPid = 0
     val serverScanCommands = AtomicInteger()
     /** Bytes of process memory the mock "scanned" on the server side. */
@@ -362,6 +369,8 @@ class MockPs4DebugServer(
         fun auth(body: ByteBuffer, inp: DataInputStream, out: OutputStream): Boolean {
             if (body.capacity() < 8 || body.int != AUTH_MAGIC) { status(out, CMD_DATA_NULL); return false }
             val flags = body.int
+            lastAuthFlags = flags
+            authAttempts.incrementAndGet()
             status(out, CMD_SUCCESS)
             val challenge = ByteArray(64).also { java.util.Random().nextBytes(it) }
             out.write(le(2).putShort(64).array()); out.write(challenge); out.flush()

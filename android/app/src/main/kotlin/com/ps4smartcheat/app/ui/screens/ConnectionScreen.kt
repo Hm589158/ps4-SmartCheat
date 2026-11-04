@@ -96,7 +96,7 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )
             OutlinedTextField(
-                value = port, onValueChange = vm::setPort, label = { Text("Port (ps4debug default 744)") },
+                value = port, onValueChange = vm::setPort, label = { Text("Port (ps4debug-NG default 744)") },
                 singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
@@ -120,7 +120,15 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                 is ConnectionState.Connected -> {
                     KeyValue("Console", "${s.info.host}:${s.info.port}", mono = true)
                     val caps = s.info.capabilities
-                    KeyValue("Backend", "ps4debug (standard protocol)")
+                    KeyValue("Backend", if (caps.isNg) "ps4debug-NG (primary)" else "classic ps4debug (compatibility mode)")
+                    KeyValue(
+                        "Scan auth",
+                        when {
+                            !caps.isNg -> "n/a — server-side scanning needs ps4debug-NG"
+                            caps.scanAuthorized -> "granted (CMD_PROC_AUTH)"
+                            else -> "failed"
+                        },
+                    )
                     KeyValue("Debugger ver.", s.info.debuggerVersion.ifBlank { "unknown" })
                     KeyValue("Branding", caps.brand ?: "not reported")
                     KeyValue("Firmware", s.info.firmwareText ?: "unknown (not reported by payload)")
@@ -144,7 +152,7 @@ fun ConnectionScreen(onConnected: () -> Unit) {
         )
         SectionCard("Before connecting") {
             Text(
-                "1. Jailbroken PS4 with GoldHEN.\n2. Load the ps4debug payload (GoldHEN → Plugins/Payloads, or send ps4debug.bin).\n" +
+                "1. Jailbroken PS4 with GoldHEN.\n2. Load the ps4debug-NG payload (recommended; classic ps4debug works without server-side scanning).\n" +
                     "3. Phone and PS4 on the same Wi-Fi/LAN.\n4. Start the offline game you want to inspect.",
                 style = MaterialTheme.typography.bodyMedium,
             )

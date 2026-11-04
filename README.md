@@ -1,7 +1,8 @@
 # PS4 SmartCheat
 
-An Android memory scanner and cheat tool for your own jailbroken PlayStation 4 (GoldHEN + ps4debug),
-for offline games and homebrew you control. It talks to the standard **ps4debug** payload over your local network.
+An Android memory scanner and cheat tool for your own jailbroken PlayStation 4 (GoldHEN + **ps4debug-NG**),
+for offline games and homebrew you control. ps4debug-NG is the primary backend (automatic CMD_PROC_AUTH unlocks
+server-side and Turbo scanning); classic ps4debug works in compatibility mode with Android-side scanning.
 
 > **Status:** the protocol client, scanner, editor and cheat library are implemented and tested against a
 > mock ps4debug server. **Real-console operation has not been verified yet** — see
@@ -9,7 +10,7 @@ for offline games and homebrew you control. It talks to the standard **ps4debug*
 > and kernel editing are out of scope.
 
 ## Features
-* Connect to ps4debug (default port 744), see debugger version and firmware (when the payload reports it)
+* Connect to ps4debug-NG (default port 744; classic ps4debug also works), see branding, firmware and the scan backends unlocked by authentication
 * List processes, inspect title ID and the memory map of the selected game
 * Three scan backends chosen automatically: **Turbo Scan** and **server-side scan** on the PS4 (ps4debug-NG),
   falling back to an optimized **chunked scan on Android** — with live elapsed time, MiB/s, network bytes and the
@@ -30,7 +31,7 @@ for offline games and homebrew you control. It talks to the standard **ps4debug*
 3. Check `SHA256SUMS.txt` from the release if you want to verify the download.
 
 ## Use
-1. On the PS4: GoldHEN, then load the ps4debug payload; start the game.
+1. On the PS4: GoldHEN, then load the ps4debug-NG payload; start the game.
 2. In the app: Connect → enter the PS4 IP → Processes → select `eboot.bin` → Scanner.
 3. First scan the value you see, change it in game, next scan, repeat. Tap a result to open the editor.
 4. Settings → enable memory editing (resets on every app start) → Write → confirm.

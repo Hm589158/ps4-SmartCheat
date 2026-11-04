@@ -39,8 +39,10 @@ import java.net.UnknownHostException
 import java.util.concurrent.atomic.AtomicLong
 
 /**
- * Client for the standard ps4debug TCP protocol (port 744), compatible with GoldHEN's ps4debug
- * and ps4debug-NG for the command subset used here.
+ * Client for ps4debug-NG (primary backend) over the ps4debug TCP protocol (port 744). The base command set is
+ * shared with classic/GoldHEN ps4debug, which is supported in compatibility mode. On connect the client
+ * identifies the payload (CMD_BRANDING) and, for ps4debug-NG, performs the CMD_PROC_AUTH challenge–response
+ * automatically (again after every reconnect) to unlock server-side scanning.
  *
  * Important server behaviours (verified in ps4debug-NG server.c/proc.c):
  *  - When a handler fails it usually returns 1 and the server closes the connection. This client
@@ -55,7 +57,7 @@ class Ps4DebugClient(
     val maxReadChunk: Int = 1 shl 20,
 ) : DebugBackend, ServerScanTransport {
 
-    override val name: String = "ps4debug"
+    override val name: String get() = if (capabilities.isNg) "ps4debug-NG" else "ps4debug"
 
     private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     override val state: StateFlow<ConnectionState> = _state.asStateFlow()

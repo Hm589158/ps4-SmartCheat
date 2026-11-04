@@ -99,8 +99,8 @@ fun SettingsScreen() {
                 style = MaterialTheme.typography.bodySmall,
             )
             LabeledSwitch(
-                "Detect ps4debug-NG server-side scanning", s.probeServerScan, { v -> vm.update { it.copy(probeServerScan = v) } },
-                "Sends CMD_BRANDING on connect, then the NG scan handshake only if the payload identifies as ps4debug-NG.",
+                "ps4debug-NG detection and auto-authentication", s.probeServerScan, { v -> vm.update { it.copy(probeServerScan = v) } },
+                "On connect: CMD_BRANDING, then the CMD_PROC_AUTH challenge–response (re-done after reconnects) only if the payload identifies as ps4debug-NG.",
             )
             LabeledSwitch(
                 "Turbo page-table aliasing reads", s.turboAliasing, { v -> vm.update { it.copy(turboAliasing = v) } },
@@ -137,7 +137,8 @@ fun SettingsScreen() {
         SectionCard("About") {
             Text("PS4 SmartCheat ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE})")
             Text(
-                "Backend: standard ps4debug protocol (port 744). Tested against an automated mock server only; " +
+                "Primary backend: ps4debug-NG (port 744) with automatic CMD_PROC_AUTH for server-side scanning; classic ps4debug is " +
+                    "supported in compatibility mode. Tested against an automated mock server only; " +
                     "real PS4 11.00 + GoldHEN behaviour is pending hardware verification. For offline games and homebrew you control.",
                 style = MaterialTheme.typography.bodySmall,
             )
