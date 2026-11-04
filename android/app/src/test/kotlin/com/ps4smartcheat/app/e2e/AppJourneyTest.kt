@@ -139,7 +139,23 @@ class AppJourneyTest {
      * coroutines resuming on Main (each read/write step of an edit) keep running while we wait.
      */
     private fun waitMock(timeoutMs: Long = 20_000, cond: () -> Boolean) {
-        compose.waitUntil(timeoutMs) { cond() }
+        try {
+            compose.waitUntil(timeoutMs) { cond() }
+        } catch (e: Throwable) {
+            dumpThreads()
+            throw e
+        }
+    }
+
+    /** Stacks of app, mock and coroutine threads while the mock server is still running (diagnoses stalls). */
+    private fun dumpThreads() {
+        println("E2E thread dump:")
+        for ((t, st) in Thread.getAllStackTraces()) {
+            val frames = st.take(25)
+            if (frames.none { it.className.contains("ps4smartcheat") || it.className.contains("kotlinx.coroutines.sync") }) continue
+            println("  thread ${t.name} (${t.state})")
+            frames.forEach { println("    at $it") }
+        }
     }
 
     @Test fun fullUserJourney() {
