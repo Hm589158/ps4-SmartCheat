@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -129,6 +130,112 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    // ------------------------------------------------------------------ GoldHEN cheat files (session only)
+
+    private val _gh = MutableStateFlow<com.ps4smartcheat.core.cheat.GhImportFile?>(null)
+    /** GoldHEN file opened in this session (not stored). */
+    val gh = _gh.asStateFlow()
+    private val _ghChecks = MutableStateFlow<Map<Int, com.ps4smartcheat.core.cheat.ModCheck>>(emptyMap())
+    val ghChecks = _ghChecks.asStateFlow()
+    private val _ghMismatch = MutableStateFlow<String?>(null)
+    val ghMismatch = _ghMismatch.asStateFlow()
+
+    /** Toggle waiting for confirmation: mod index, enable?, one verified-write plan per patch. */
+    data class GhToggle(val index: Int, val enable: Boolean, val plans: List<WritePlan>)
+    private val _ghToggle = MutableStateFlow<GhToggle?>(null)
+    val ghToggle = _ghToggle.asStateFlow()
+
+    fun openGoldHen(resolver: ContentResolver, uri: Uri) = viewModelScope.launch {
+        try {
+            val text = withContext(Dispatchers.IO) {
+                resolver.openInputStream(uri)!!.use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(8192)
+                    while (out.size() <= 2 * 1024 * 1024) { val n = input.read(buf); if (n < 0) break; out.write(buf, 0, n) }
+                    out.toString("UTF-8")
+                }
+            }
+            openGoldHenText(text)
+        } catch (e: Exception) {
+            _error.value = "Could not open the file: ${e.message}"
+        }
+    }
+
+    /** Parses a GoldHEN file and checks it against the selected game. */
+    fun openGoldHenText(text: String) {
+        try {
+            _gh.value = com.ps4smartcheat.core.cheat.GoldHenImport.parse(text)
+            _ghChecks.value = emptyMap()
+            _error.value = null
+            checkGoldHen()
+        } catch (e: com.ps4smartcheat.core.cheat.GoldHenImport.FormatException) {
+            _error.value = e.message
+        }
+    }
+
+    fun closeGoldHen() { _gh.value = null; _ghChecks.value = emptyMap(); _ghMismatch.value = null }
+
+    /** Reads the bytes of every applicable mod in the selected game (read-only). */
+    fun checkGoldHen() {
+        val f = _gh.value ?: return
+        val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: run { _ghMismatch.value = "Select the running game to check this file."; return }
+        _ghMismatch.value = com.ps4smartcheat.core.cheat.GoldHenImport.mismatch(f, sel.titleId, sel.name)
+        if (_ghMismatch.value != null) { _ghChecks.value = emptyMap(); return }
+        viewModelScope.launch {
+            try {
+                val regions = c.backend.getMemoryRegions(sel.pid)
+                _ghChecks.value = f.mods.withIndex().filter { it.value.applicable }.associate { (i, m) ->
+                    i to com.ps4smartcheat.core.cheat.GoldHenImport.check(c.backend, sel.pid, f, m, regions)
+                }
+            } catch (e: BackendException) {
+                _error.value = e.message
+            }
+        }
+    }
+
+    fun prepareGoldHenToggle(index: Int, enable: Boolean) {
+        val f = _gh.value ?: return
+        val sel = c.selectedProcess.value ?: return
+        viewModelScope.launch {
+            try {
+                val regions = c.backend.getMemoryRegions(sel.pid)
+                val check = com.ps4smartcheat.core.cheat.GoldHenImport.check(c.backend, sel.pid, f, f.mods[index], regions)
+                _ghChecks.value = _ghChecks.value + (index to check)
+                if (if (enable) !check.canEnable else !check.canDisable) {
+                    _error.value = "\"${f.mods[index].name}\" is ${check.states.joinToString { it.label }} — nothing written."
+                    return@launch
+                }
+                val plans = check.mod.patches.mapIndexed { i, p -> c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.on else p.off) }
+                _ghToggle.value = GhToggle(index, enable, plans)
+            } catch (e: EditDeniedException) {
+                _error.value = e.message
+            } catch (e: BackendException) {
+                _error.value = e.message
+            }
+        }
+    }
+
+    fun dismissGoldHenToggle() { _ghToggle.value = null }
+
+    fun confirmGoldHenToggle() {
+        val t = _ghToggle.value ?: return
+        _ghToggle.value = null
+        val name = _gh.value?.mods?.getOrNull(t.index)?.name ?: "mod"
+        viewModelScope.launch {
+            for (p in t.plans) {
+                val out = c.editor.execute(p)
+                if (out !is WriteOutcome.Verified) {
+                    _error.value = "\"$name\": ${out.message} (stopped; earlier patches of this mod were written — use Undo in the editor)"
+                    checkGoldHen()
+                    return@launch
+                }
+            }
+            _message.value = "\"$name\" ${if (t.enable) "enabled" else "disabled"}: ${t.plans.size} patch(es) verified"
+            c.log.info("GoldHEN mod $name ${if (t.enable) "on" else "off"}")
+            checkGoldHen()
+        }
+    }
+
     fun deleteProfile(p: CheatProfile) = viewModelScope.launch { c.cheats.deleteProfile(p.id); _checks.value = _checks.value - p.id }
     fun deleteCheat(p: CheatProfile, e: CheatEntry) = viewModelScope.launch { c.cheats.deleteCheat(p.id, e.id) }
 
@@ -214,6 +321,13 @@ fun CheatsScreen() {
     var editCheat by remember { mutableStateOf<Pair<CheatProfile, CheatEntry>?>(null) }
     var deleteProfile by remember { mutableStateOf<CheatProfile?>(null) }
     var goldHenProfile by remember { mutableStateOf<CheatProfile?>(null) }
+    val gh by vm.gh.collectAsStateWithLifecycle()
+    val ghChecks by vm.ghChecks.collectAsStateWithLifecycle()
+    val ghMismatch by vm.ghMismatch.collectAsStateWithLifecycle()
+    val ghToggle by vm.ghToggle.collectAsStateWithLifecycle()
+    val ghOpen = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.openGoldHen(resolver, uri)
+    }
 
     val exportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) vm.exportTo(resolver, uri)
@@ -231,10 +345,14 @@ fun CheatsScreen() {
                 OutlinedButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Import") }
                 OutlinedButton(onClick = { exportLauncher.launch("smartcheat-cheats.json") }, enabled = profiles.isNotEmpty()) { Text("Export all") }
             }
+            OutlinedButton(onClick = { ghOpen.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Open GoldHEN file…") }
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
             ErrorText(error)
             WarningBanner("Saved absolute addresses are only valid for the game session they were found in. Validate a profile before re-applying; nothing is applied automatically.")
             if (profiles.isEmpty()) Text("No cheats saved yet. Save one from the Memory Editor.", modifier = Modifier.padding(top = 8.dp))
+        }
+        gh?.let { f ->
+            item { GoldHenCard(f, ghChecks, ghMismatch, canWrite = selected?.exited == false, onCheck = vm::checkGoldHen, onClose = vm::closeGoldHen, onToggle = vm::prepareGoldHenToggle) }
         }
         items(profiles, key = { it.id }) { p ->
             val check = checks[p.id]
@@ -275,6 +393,22 @@ fun CheatsScreen() {
                 }
             }
         }
+    }
+
+    ghToggle?.let { t ->
+        val name = gh?.mods?.getOrNull(t.index)?.name ?: "mod"
+        ConfirmDialog(
+            title = if (t.plans.any { it.dangerous }) "Confirm risky patches" else if (t.enable) "Enable cheat" else "Disable cheat",
+            text = buildString {
+                append("${if (t.enable) "Enable" else "Disable"} \"$name\" (${t.plans.size} patch(es))?\n")
+                t.plans.forEach { p -> append("\n${Address.format(p.target.address)}: ${com.ps4smartcheat.core.util.Hex.encode(p.original, " ")} → ${p.replacementText}") }
+                val w = t.plans.flatMap { it.warnings }.distinct()
+                if (w.isNotEmpty()) append("\n\nWarnings:\n• " + w.joinToString("\n• "))
+            },
+            confirmLabel = if (t.enable) "Enable" else "Disable",
+            onConfirm = vm::confirmGoldHenToggle,
+            onDismiss = vm::dismissGoldHenToggle,
+        )
     }
 
     plan?.let { pl ->
@@ -372,3 +506,46 @@ private fun CheatRow(entry: CheatEntry, check: CheatCheck?, canApply: Boolean, o
     }
 }
 
+
+@Composable
+private fun GoldHenCard(
+    f: com.ps4smartcheat.core.cheat.GhImportFile,
+    checks: Map<Int, com.ps4smartcheat.core.cheat.ModCheck>,
+    mismatch: String?,
+    canWrite: Boolean,
+    onCheck: () -> Unit,
+    onClose: () -> Unit,
+    onToggle: (Int, Boolean) -> Unit,
+) {
+    SectionCard("GoldHEN file: ${f.name.ifBlank { "unnamed" }}") {
+        Text("${f.titleId.ifBlank { "no title ID" }} · v${f.version.ifBlank { "?" }} · ${f.process} · ${f.mods.size} mod(s)", style = MaterialTheme.typography.bodySmall)
+        Text(
+            "Offsets are read as relative to the start of ${f.process} (PS4CheaterNeo's interpretation; unverified on hardware). " +
+                "A mod is only enabled when the memory holds exactly its \"off\" bytes, so files for another game version are refused.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        f.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        mismatch?.let { WarningBanner(it) }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(onClick = onCheck, modifier = Modifier.testTag("ghCheck")) { Text("Check") }
+            TextButton(onClick = onClose) { Text("Close") }
+        }
+        f.mods.forEachIndexed { i, m ->
+            HorizontalDivider()
+            val ck = checks[i]
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.testTag("ghMod-$i")) {
+                Column(Modifier.weight(1f)) {
+                    Text(m.name, style = MaterialTheme.typography.bodyMedium)
+                    val status = when {
+                        !m.applicable -> "not applicable: " + m.problems.joinToString("; ")
+                        ck == null -> "${m.patches.size} patch(es) — not checked"
+                        else -> "${m.patches.size} patch(es) — " + (ck.state?.label ?: ck.states.joinToString { it.label })
+                    }
+                    Text(status, style = MaterialTheme.typography.bodySmall, color = if (m.applicable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary)
+                }
+                if (ck != null && ck.canEnable) Button(onClick = { onToggle(i, true) }, enabled = canWrite, modifier = Modifier.testTag("ghEnable-$i")) { Text("Enable") }
+                if (ck != null && ck.canDisable) OutlinedButton(onClick = { onToggle(i, false) }, enabled = canWrite, modifier = Modifier.testTag("ghDisable-$i")) { Text("Disable") }
+            }
+        }
+    }
+}

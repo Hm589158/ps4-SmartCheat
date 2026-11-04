@@ -8,6 +8,15 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 - Undo/redo of verified writes in this session (editor → History): each step is confirmed, shows the bytes in
   memory now and warns when the game changed them since; it is verified by a fresh read. History is per session,
   never persisted, never replayed automatically, and dropped when the game exits.
+- Scan session save/resume: after every completed step the session (≤1 M results; snapshot-based sessions are not
+  saved) is written to app storage. When the exact same game instance (pid, name, title ID, path) is selected
+  after the app restarts, the Scanner offers "Resume"/"Discard". Resumed values are the ones from save time.
+- GoldHEN cheat files can be opened in the cheat library ("Open GoldHEN file…", session only). Each checkbox mod
+  is checked against the running game: title ID/process must match, and every patch must currently hold exactly
+  its "off" bytes to be enabled (or "on" bytes to be disabled) — files for another game build are refused without
+  writing. Enable/Disable shows every patch (address, current → new bytes) for confirmation and goes through the
+  editor (policy, region checks, verification, undo history). Mods with "section", non-checkbox types, invalid or
+  mismatched on/off bytes, or patches over 64 bytes are listed as not applicable.
 
 ## 0.9.0
 - Address list → cheat library: "Save as cheat…" on an entry stores it with a value (module-relative when inside a

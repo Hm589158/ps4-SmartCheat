@@ -70,6 +70,10 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     val status = c.scanner.status
     val session = c.scanner.session
     val stats = c.scanner.lastStats
+    val resumable = c.resumable
+
+    fun resume() { if (c.resumeSession()) { _page.value = 0; loadPage() } }
+    fun discardSaved() = c.discardSavedSession()
 
     private val _type = MutableStateFlow(ValueType.INT32)
     val type = _type.asStateFlow()
@@ -226,6 +230,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit, onPatternSearch: () -> Unit
     val rowsLoading by vm.rowsLoading.collectAsStateWithLifecycle()
     val stats by vm.stats.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
+    val resumable by vm.resumable.collectAsStateWithLifecycle()
     val resolver = LocalContext.current.contentResolver
     val csvLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
         if (uri != null) vm.exportCsv(resolver, uri)
@@ -256,6 +261,22 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit, onPatternSearch: () -> Unit
                 Text("Process: ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
             }
             if (!connected) Text("Not connected.", color = MaterialTheme.colorScheme.error)
+        }
+        resumable?.let { saved ->
+            item {
+                SectionCard("Saved scan") {
+                    Text(
+                        "Scan ${saved.step}: ${plural(saved.results.count.toLong(), "result")} (${saved.type.label}), saved " +
+                            java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(saved.savedAtMillis)) +
+                            " for this same game instance. Values shown as \"prev\" are from that time.",
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = vm::resume, enabled = !running, modifier = Modifier.testTag("resumeScan")) { Text("Resume") }
+                        TextButton(onClick = vm::discardSaved) { Text("Discard") }
+                    }
+                }
+            }
         }
         item {
             SectionCard(null) {

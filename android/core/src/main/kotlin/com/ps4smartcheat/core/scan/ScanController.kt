@@ -1,5 +1,7 @@
 package com.ps4smartcheat.core.scan
 
+import com.ps4smartcheat.core.process.ProcessIdentity
+
 import com.ps4smartcheat.core.backend.CommandFailedException
 import com.ps4smartcheat.core.backend.DebugBackend
 import com.ps4smartcheat.core.backend.Traffic
@@ -376,6 +378,36 @@ class ScanController(
     }
 
     fun hasSession(pid: Int): Boolean = sessions.containsKey(pid)
+
+    /**
+     * The session of [identity]'s process for saving, or null (no session, running, snapshot-based or too big).
+     * Turbo sessions are saved as their local result list; a resumed session refines from that list.
+     */
+    fun exportSession(identity: ProcessIdentity, clock: () -> Long = System::currentTimeMillis): SavedScanSession? {
+        if (isRunning) return null
+        val s = sessions[identity.pid] ?: return null
+        if (s.processName != identity.name || s.snapshot != null) return null
+        val r = s.results ?: return null
+        if (r.count > SavedScanSession.MAX_RESULTS) return null
+        return SavedScanSession(identity, s.type, s.step, s.lastMode, ScanResults(r.type, r.addressArray(), r.valuesArray(), r.count, r.truncated), clock())
+    }
+
+    /**
+     * Restores [saved] for the process it was taken from. The caller checks [current] is the same running instance;
+     * this refuses anything else. Values are the ones stored at save time; nothing is read or written here.
+     */
+    fun restoreSession(saved: SavedScanSession, current: ProcessIdentity, options: ScanOptions = ScanOptions(), filter: RegionFilter = RegionFilter()): Boolean {
+        if (isRunning || saved.identity != current) return false
+        val s = Session(current.pid, current.name, saved.type, options, filter)
+        s.results = saved.results
+        s.step = saved.step
+        s.lastMode = saved.lastMode
+        s.backend = ScanBackendKind.CLIENT
+        sessions.remove(current.pid)?.let { releaseTurbo(it); it.dispose() }
+        sessions[current.pid] = s
+        if (activePid == current.pid) activate(current.pid)
+        return true
+    }
 
     /** Drops every session (e.g. after disconnect: absolute addresses are meaningless in a new session). */
     fun resetAll() {

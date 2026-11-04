@@ -33,6 +33,8 @@ import com.ps4smartcheat.core.protocol.Ps4DebugClient
 import com.ps4smartcheat.core.scan.FileSnapshotStorage
 import com.ps4smartcheat.core.scan.InMemorySnapshotStorage
 import com.ps4smartcheat.core.scan.ScanController
+import com.ps4smartcheat.core.scan.SavedScanSession
+import com.ps4smartcheat.core.process.ProcessIdentity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -141,6 +143,7 @@ class AppContainer(context: Context) {
         }
         appScope.launch {
             scanner.lastStats.collect { st ->
+                if (st != null) saveSession()
                 if (st != null) log.event(
                     EventLevel.INFO, EventCategory.SCAN, "scan step finished",
                     "backend" to st.backend.name, "mode" to st.mode.name, "ms" to st.durationMs, "results" to st.results,
@@ -150,9 +153,61 @@ class AppContainer(context: Context) {
         }
     }
 
+    // ------------------------------------------------------------ saved scan session (resume after app restart)
+
+    private val sessionFile = File(context.filesDir, "scan-session.bin")
+    private val _resumable = MutableStateFlow<SavedScanSession?>(null)
+    /** A saved session for exactly the selected running process instance, offered for resuming. */
+    val resumable: StateFlow<SavedScanSession?> = _resumable.asStateFlow()
+
+    private fun identityOf(p: SelectedProcess) = ProcessIdentity(p.pid, p.name, p.titleId, p.info?.path?.ifBlank { null })
+
+    /** Saves the selected process's session after a completed step (small sessions only; snapshots are skipped). */
+    private fun saveSession() {
+        val sel = _selected.value?.takeIf { !it.exited } ?: return
+        val saved = scanner.exportSession(identityOf(sel)) ?: return
+        appScope.launch(Dispatchers.IO) {
+            try {
+                val tmp = File(sessionFile.parentFile, sessionFile.name + ".tmp")
+                tmp.outputStream().use { SavedScanSession.write(it, saved) }
+                if (!tmp.renameTo(sessionFile)) { sessionFile.delete(); tmp.renameTo(sessionFile) }
+            } catch (e: java.io.IOException) {
+                log.warn("Could not save the scan session: ${e.message}", EventCategory.SCAN)
+            }
+        }
+    }
+
+    private fun checkResumable(p: SelectedProcess?) {
+        _resumable.value = null
+        if (p == null || p.exited || scanner.hasSession(p.pid) || !sessionFile.exists()) return
+        appScope.launch(Dispatchers.IO) {
+            val saved = try { sessionFile.inputStream().use { SavedScanSession.read(it) } } catch (e: java.io.IOException) {
+                log.warn("Saved scan session is unreadable and was discarded: ${e.message}", EventCategory.SCAN)
+                sessionFile.delete(); null
+            }
+            if (saved != null && saved.identity == identityOf(p) && _selected.value?.pid == p.pid) _resumable.value = saved
+        }
+    }
+
+    /** Restores the offered session (no console access). */
+    fun resumeSession(): Boolean {
+        val saved = _resumable.value ?: return false
+        val sel = _selected.value ?: return false
+        val ok = scanner.restoreSession(saved, identityOf(sel), settings.value.scanOptions(), settings.value.regionFilter())
+        _resumable.value = null
+        if (ok) log.notify("Resumed scan ${saved.step}: ${saved.results.count} result(s). Values are from when it was saved.", EventCategory.SCAN)
+        return ok
+    }
+
+    fun discardSavedSession() {
+        _resumable.value = null
+        appScope.launch(Dispatchers.IO) { sessionFile.delete() }
+    }
+
     fun select(process: SelectedProcess?) {
         _selected.value = process
         scanner.activate(process?.pid)
+        checkResumable(process)
         watcher.watch(process?.takeIf { !it.exited }?.let { ProcessDetails(it.entry, it.info, it.kind, "").identity })
         process?.let { log.event(EventLevel.INFO, EventCategory.PROCESS, "process selected", "pid" to it.pid, "name" to it.name, "title" to it.titleId, "kind" to it.kind.name) }
     }
