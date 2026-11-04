@@ -37,6 +37,8 @@ data class AppSettings(
     val monitorIntervalMs: Int = 1000,
     /** Skip regions larger than this many MiB during scans (0 = no limit). */
     val maxRegionMiB: Int = 0,
+    /** Select the running game automatically after connecting / when it restarts. */
+    val autoSelectGame: Boolean = true,
 ) {
     fun connectOptions() = ConnectOptions(
         host = host, port = port, connectTimeoutMs = connectTimeoutMs, readTimeoutMs = readTimeoutMs,
@@ -98,6 +100,7 @@ class SettingsStore(context: Context) {
             probeServerScan = prefs.getBoolean("probeServerScan", d.probeServerScan),
             monitorIntervalMs = prefs.getInt("monitorIntervalMs", d.monitorIntervalMs),
             maxRegionMiB = prefs.getInt("maxRegionMiB", d.maxRegionMiB),
+            autoSelectGame = prefs.getBoolean("autoSelectGame", d.autoSelectGame),
         )
     }
 
@@ -122,6 +125,7 @@ class SettingsStore(context: Context) {
             .putBoolean("probeServerScan", s.probeServerScan)
             .putInt("monitorIntervalMs", s.monitorIntervalMs)
             .putInt("maxRegionMiB", s.maxRegionMiB)
+            .putBoolean("autoSelectGame", s.autoSelectGame)
             .apply()
     }
 }

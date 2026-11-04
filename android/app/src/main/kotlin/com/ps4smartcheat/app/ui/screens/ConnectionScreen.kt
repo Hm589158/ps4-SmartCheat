@@ -84,7 +84,7 @@ fun ConnectionScreen(onConnected: () -> Unit) {
     val port by vm.port.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val connected = state is ConnectionState.Connected
-    val connecting = state is ConnectionState.Connecting
+    val connecting = state is ConnectionState.Connecting || state is ConnectionState.Reconnecting
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -117,6 +117,10 @@ fun ConnectionScreen(onConnected: () -> Unit) {
             when (val s = state) {
                 ConnectionState.Disconnected -> Text("Not connected")
                 is ConnectionState.Connecting -> Text("Connecting to ${s.host}:${s.port}…")
+                is ConnectionState.Reconnecting -> Text(
+                    "Connection dropped (${s.reason}). Reconnecting ${s.attempt}/${s.maxAttempts}… Writes are never repeated automatically.",
+                    color = MaterialTheme.colorScheme.tertiary,
+                )
                 is ConnectionState.Failed -> Text("Connection failed: ${s.message}", color = MaterialTheme.colorScheme.error)
                 is ConnectionState.Connected -> {
                     KeyValue("Console", "${s.info.host}:${s.info.port}", mono = true)

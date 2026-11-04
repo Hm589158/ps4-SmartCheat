@@ -113,8 +113,9 @@ private fun AppRoot() {
                     Column {
                         Text(titleFor(route), maxLines = 1)
                         val sub = when (val c = connection) {
-                            is ConnectionState.Connected -> "● ${c.info.host}" + (selected?.let { " · ${it.name} (${it.pid})" } ?: "")
+                            is ConnectionState.Connected -> "● ${c.info.host}" + (selected?.let { " · ${it.name} (${it.pid})" + if (it.exited) " — exited" else "" } ?: "")
                             is ConnectionState.Connecting -> "Connecting…"
+                            is ConnectionState.Reconnecting -> "Reconnecting ${c.attempt}/${c.maxAttempts}…"
                             is ConnectionState.Failed -> "Connection lost"
                             ConnectionState.Disconnected -> "Not connected"
                         }

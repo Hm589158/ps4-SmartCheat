@@ -235,6 +235,8 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
             val sel = selected
             if (sel == null) {
                 WarningBanner("No process selected. Pick the game on the Processes screen.")
+            } else if (sel.exited) {
+                WarningBanner("${sel.exitedReason}. Scanning is disabled until the game runs again.")
             } else {
                 Text("Process: ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
             }
@@ -260,7 +262,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                 }
                 ErrorText(error)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = vm::firstScan, enabled = connected && selected != null && !running, modifier = Modifier.testTag("firstScan")) { Text(if (hasSession) "New scan" else "First scan") }
+                    Button(onClick = vm::firstScan, enabled = connected && selected != null && selected?.exited != true && !running, modifier = Modifier.testTag("firstScan")) { Text(if (hasSession) "New scan" else "First scan") }
                     Button(onClick = vm::nextScan, enabled = connected && hasSession && !running, modifier = Modifier.testTag("nextScan")) { Text("Next scan") }
                     if (running) OutlinedButton(onClick = vm::cancel) { Text("Cancel") }
                     else if (hasSession) TextButton(onClick = vm::reset) { Text("Reset") }

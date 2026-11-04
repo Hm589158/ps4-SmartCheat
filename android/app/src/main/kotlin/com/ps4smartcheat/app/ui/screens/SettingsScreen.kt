@@ -24,6 +24,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.launch
 import com.ps4smartcheat.app.BuildConfig
 import com.ps4smartcheat.app.data.AppContainer
 import com.ps4smartcheat.app.data.AppSettings
@@ -38,6 +40,20 @@ import com.ps4smartcheat.core.scan.BackendPreference
 class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     val settings = c.settings.settings
     val log = c.log.lines
+
+    fun exportLog(resolver: android.content.ContentResolver, uri: android.net.Uri) {
+        val text = c.log.exportJsonLines()
+        viewModelScope.launch {
+            try {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) }
+                }
+                c.log.notify("Diagnostics log exported")
+            } catch (e: Exception) {
+                c.log.error("Log export failed: ${e.message}")
+            }
+        }
+    }
     fun update(t: (AppSettings) -> AppSettings) = c.settings.update(t)
     fun clearLog() = c.log.clear()
     fun setFreezeInterval(ms: Long) { c.freezer.intervalMs = ms }
@@ -66,6 +82,10 @@ fun SettingsScreen() {
     val vm = appViewModel { SettingsViewModel(it) }
     val s by vm.settings.collectAsStateWithLifecycle()
     val log by vm.log.collectAsStateWithLifecycle()
+    val resolver = androidx.compose.ui.platform.LocalContext.current.contentResolver
+    val logLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/x-ndjson"),
+    ) { uri -> if (uri != null) vm.exportLog(resolver, uri) }
     var confirmEditing by remember { mutableStateOf(false) }
     var confirmNonWritable by remember { mutableStateOf(false) }
     var confirmSystem by remember { mutableStateOf(false) }
@@ -118,6 +138,12 @@ fun SettingsScreen() {
             NumberField("Skip regions larger than MiB (0 = no limit)", s.maxRegionMiB, 0..65_536) { v -> vm.update { it.copy(maxRegionMiB = v) } }
             NumberField("Live refresh interval ms", s.monitorIntervalMs, 250..10_000) { v -> vm.update { it.copy(monitorIntervalMs = v) } }
         }
+        SectionCard("Game detection") {
+            LabeledSwitch(
+                "Auto-select the running game", s.autoSelectGame, { v -> vm.update { it.copy(autoSelectGame = v) } },
+                "After connecting, and when the same game restarts, select it automatically (by title ID and path, not only the process name). Read-only.",
+            )
+        }
         SectionCard("Connection") {
             NumberField("Connect timeout ms", s.connectTimeoutMs, 500..60_000) { v -> vm.update { it.copy(connectTimeoutMs = v) } }
             NumberField("Read timeout ms", s.readTimeoutMs, 1_000..120_000) { v -> vm.update { it.copy(readTimeoutMs = v) } }
@@ -132,8 +158,11 @@ fun SettingsScreen() {
             Selector("Theme", ThemeMode.entries, s.theme, { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } }, { t -> vm.update { it.copy(theme = t) } })
         }
         SectionCard("Diagnostics log") {
-            Text("Kept in memory only; never uploaded.", style = MaterialTheme.typography.bodySmall)
-            Row { OutlinedButton(onClick = vm::clearLog) { Text("Clear") } }
+            Text("Structured events (connection, protocol, process, scan…). Kept in memory only; never uploaded. Export to share when reporting a problem.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = vm::clearLog) { Text("Clear") }
+                OutlinedButton(onClick = { logLauncher.launch("smartcheat-log.jsonl") }) { Text("Export (JSON Lines)") }
+            }
             if (log.isEmpty()) Text("Empty")
             log.takeLast(100).reversed().forEach { Text(it.format(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
         }

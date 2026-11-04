@@ -122,6 +122,9 @@ class AppJourneyTest {
         step("pick process")
         tab("Processes")
         waitTag("process-eboot.bin")
+        waitText("MOCK00001") // title ID shown, game auto-detected
+        tag("processSearch").performTextInput("eboot")
+        waitTag("process-eboot.bin")
         shot("03_processes")
         tag("process-eboot.bin").performClick()
         waitText("Selected: eboot.bin")
@@ -226,6 +229,50 @@ class AppJourneyTest {
         tab("Settings")
         waitTag("editingSwitch")
         shot("14_settings")
+    }
+
+    private fun connect() {
+        tag("host").performTextInput("127.0.0.1")
+        tag("port").performTextClearance()
+        tag("port").performTextInput(server.port.toString())
+        tag("connect").performClick()
+        waitText("ps4debug-NG (primary)")
+    }
+
+    @Test fun runningGameIsAutoSelectedAndExitIsDetected() {
+        connect()
+        // Auto-selection by title ID right after connecting.
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        tab("Scanner")
+        waitTag("scanValue")
+        tag("scanValue").performTextInput("5000")
+        tag("firstScan").performClick()
+        waitText("Scan 1: ")
+        // The game closes: the session must end and scanning must be blocked.
+        server.killProcess(DemoGame.PID)
+        waitText("exited", timeoutMs = 20_000)
+        waitText("Scanning is disabled until the game runs again")
+        shot("30_game_exited")
+        // It starts again under a new pid: picked up automatically, old results not reused.
+        server.addProcess(MockPs4DebugServer.Process(123, "eboot.bin", titleId = "MOCK00001", path = "/app0/eboot.bin").also {
+            it.region("eboot.bin", DemoGame.DATA_START, 0x10000, MockPs4DebugServer.PROT_R or MockPs4DebugServer.PROT_W)
+        })
+        waitText("eboot.bin (123)", timeoutMs = 20_000)
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Scan 1: ", substring = true).fetchSemanticsNodes().isEmpty() }
+        shot("31_game_restarted")
+    }
+
+    @Test fun droppedConnectionIsRecoveredAutomatically() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        server.dropAllClients()
+        tab("Scanner")
+        waitTag("scanValue")
+        tag("scanValue").performTextInput("5000")
+        tag("firstScan").performClick()
+        waitText("Scan 1: ")
+        waitText("1 result")
+        shot("32_after_reconnect")
     }
 
     @Test fun connectionErrorIsShownAndRecoverable() {

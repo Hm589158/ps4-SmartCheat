@@ -1,7 +1,17 @@
 package com.ps4smartcheat.app.data
 
 import android.content.Context
+import com.ps4smartcheat.core.backend.ConnectionMonitor
 import com.ps4smartcheat.core.backend.ConnectionState
+import com.ps4smartcheat.core.logging.EventCategory
+import com.ps4smartcheat.core.logging.EventLevel
+import com.ps4smartcheat.core.process.GameDetector
+import com.ps4smartcheat.core.process.ProcessDetails
+import com.ps4smartcheat.core.process.ProcessEvent
+import com.ps4smartcheat.core.process.ProcessKind
+import com.ps4smartcheat.core.process.ProcessWatcher
+import com.ps4smartcheat.core.process.listProcessDetails
+import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.DebugBackend
 import com.ps4smartcheat.core.cheat.CheatRepository
 import com.ps4smartcheat.core.edit.MemoryEditor
@@ -27,7 +37,11 @@ data class SelectedProcess(
     val entry: ProcessEntry,
     val info: ProcessInfo?,
     val regions: List<MemoryRegion>,
+    val kind: ProcessKind = ProcessKind.OTHER,
+    /** Set when the process is gone; its scan session and journal were discarded. */
+    val exitedReason: String? = null,
 ) {
+    val exited: Boolean get() = exitedReason != null
     val pid: Int get() = entry.pid
     val name: String get() = entry.name
     val titleId: String? get() = info?.titleId?.ifBlank { null }
@@ -38,7 +52,8 @@ class AppContainer(context: Context) {
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val log = AppLog()
     val settings = SettingsStore(context)
-    val backend: DebugBackend = Ps4DebugClient()
+    private val client = Ps4DebugClient(events = log)
+    val backend: DebugBackend = client
 
     private val cacheDir: File = context.cacheDir
     val scanner = ScanController(
@@ -56,6 +71,9 @@ class AppContainer(context: Context) {
     private val _selected = MutableStateFlow<SelectedProcess?>(null)
     val selectedProcess: StateFlow<SelectedProcess?> = _selected.asStateFlow()
 
+    val monitor = ConnectionMonitor(backend, appScope)
+    val watcher = ProcessWatcher(backend, appScope, events = log)
+
     init {
         // Remove stale snapshot files from a previous run.
         cacheDir.listFiles { f -> f.name.startsWith("snapshot-") }?.forEach { it.delete() }
@@ -68,12 +86,26 @@ class AppContainer(context: Context) {
             backend.state.collect { st ->
                 if (st != last) {
                     when (st) {
-                        is ConnectionState.Connected -> log.info("Connected to ${st.info.host}:${st.info.port} (ps4debug ${st.info.debuggerVersion})")
-                        is ConnectionState.Failed -> {
-                            log.error("Connection lost: ${st.message}")
-                            freezer.stopAll("connection lost")
+                        is ConnectionState.Connected -> {
+                            monitor.start()
+                            // First connect (not a reconnect): pick the running game automatically.
+                            if (last !is ConnectionState.Reconnecting && settings.value.autoSelectGame && _selected.value == null) {
+                                appScope.launch { autoSelectGame() }
+                            }
                         }
-                        ConnectionState.Disconnected -> freezer.stopAll("disconnected")
+                        is ConnectionState.Failed -> {
+                            log.error("Connection lost: ${st.message}", category = EventCategory.CONNECTION)
+                            freezer.stopAll("connection lost")
+                            monitor.stop()
+                        }
+                        ConnectionState.Disconnected -> {
+                            freezer.stopAll("disconnected")
+                            monitor.stop()
+                        }
+                        is ConnectionState.Reconnecting -> {
+                            // Never keep re-applying writes across a reconnect.
+                            freezer.stopAll("connection interrupted")
+                        }
                         is ConnectionState.Connecting -> {}
                     }
                     last = st
@@ -82,9 +114,68 @@ class AppContainer(context: Context) {
         }
     }
 
+    init {
+        appScope.launch {
+            watcher.processEvents.collect { ev ->
+                when (ev) {
+                    is ProcessEvent.Exited -> onProcessExited(ev.identity.pid, ev.identity.name)
+                    is ProcessEvent.Restarted -> onProcessRestarted(ev.identity.pid, ev.replacement)
+                }
+            }
+        }
+        appScope.launch {
+            scanner.lastStats.collect { st ->
+                if (st != null) log.event(
+                    EventLevel.INFO, EventCategory.SCAN, "scan step finished",
+                    "backend" to st.backend.name, "mode" to st.mode.name, "ms" to st.durationMs, "results" to st.results,
+                    "serverTotal" to st.serverTotal, "netBytes" to st.traffic.total, "fallbacks" to st.fallbacks.joinToString(" | "),
+                )
+            }
+        }
+    }
+
     fun select(process: SelectedProcess?) {
         _selected.value = process
         scanner.activate(process?.pid)
+        watcher.watch(process?.takeIf { !it.exited }?.let { ProcessDetails(it.entry, it.info, it.kind, "").identity })
+        process?.let { log.event(EventLevel.INFO, EventCategory.PROCESS, "process selected", "pid" to it.pid, "name" to it.name, "title" to it.titleId, "kind" to it.kind.name) }
+    }
+
+    /** Loads info + memory map and selects [details]. */
+    suspend fun selectDetails(details: ProcessDetails) {
+        val regions = backend.getMemoryRegions(details.pid)
+        select(SelectedProcess(details.entry, details.info, regions, details.kind))
+    }
+
+    /** Selects the running game when exactly one is detected. Read-only: nothing is written. */
+    suspend fun autoSelectGame(): ProcessDetails? = try {
+        GameDetector.pickGame(backend.listProcessDetails())?.also {
+            selectDetails(it)
+            log.notify("Detected game ${it.titleId ?: it.name} (pid ${it.pid}) — selected", EventCategory.PROCESS)
+        }
+    } catch (e: BackendException) {
+        log.warn("Game detection failed: ${e.message}", EventCategory.PROCESS)
+        null
+    }
+
+    private fun onProcessExited(pid: Int, name: String) {
+        scanner.invalidate(pid, "$name (pid $pid) exited")
+        freezer.frozen.value.filter { it.pid == pid }.forEach { freezer.unfreeze(it.id) }
+        editor.forgetProcess(pid)
+        _selected.value = _selected.value?.takeIf { it.pid == pid }?.copy(exitedReason = "$name (pid $pid) exited") ?: _selected.value
+        log.notify("$name (pid $pid) exited — its scan session was closed", EventCategory.PROCESS)
+    }
+
+    private fun onProcessRestarted(oldPid: Int, replacement: ProcessDetails) {
+        if (!settings.value.autoSelectGame) return
+        appScope.launch {
+            try {
+                selectDetails(replacement)
+                log.notify("${replacement.titleId ?: replacement.name} restarted as pid ${replacement.pid} (was $oldPid) — selected; start a new scan", EventCategory.PROCESS)
+            } catch (e: BackendException) {
+                log.warn("Could not select restarted process: ${e.message}", EventCategory.PROCESS)
+            }
+        }
     }
 
     fun updateRegions(regions: List<MemoryRegion>) {

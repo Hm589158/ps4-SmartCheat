@@ -2,6 +2,19 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 0.7.0 (unreleased)
+- First hardware report (owner): FW 11.00 + GoldHEN + ps4debug-NG v1.3.3 — connect, auth, process list, Turbo Scan,
+  refines and a write to a real game worked. Recorded in docs/COMPATIBILITY.md.
+- Automatic reconnection after dropped/server-closed connections (exponential backoff, "Reconnecting" state).
+  Reads are repeated once on the new session; writes and server scans are never repeated automatically.
+- Keep-alive detects silently dropped links while idle.
+- Game detection by title ID, executable path and name (eboot.bin, default.elf, …); NPXS system apps and Sce*
+  daemons are classified as system. The running game is auto-selected after connecting (setting).
+- Process search/filter (name, pid, title ID, path); classification shown per process.
+- Game lifecycle: exit is detected (scan session closed, freeze stopped, stored originals discarded, scanning
+  blocked); a restart of the same game under a new pid is picked up automatically with a fresh session.
+- Structured diagnostics log (category + fields), exportable as JSON Lines from Settings.
+
 ## 0.6.0
 - End-to-end UI journey test (Robolectric + Roborazzi) drives the real app against the mock ps4debug-NG
   server and records screenshots of every step; CI publishes them to the `ci-screenshots` branch.
