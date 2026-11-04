@@ -97,6 +97,11 @@ class AppJourneyTest {
 
     private fun tab(label: String) = compose.onAllNodesWithText(label)[0].performClick()
 
+    /** Snackbars sit above the bottom of the content; wait until the auto-select notice is gone before tapping there. */
+    private fun waitNoSnackbar(timeoutMs: Long = 20_000) {
+        compose.waitUntil(timeoutMs) { compose.onAllNodesWithText("Detected game", substring = true).fetchSemanticsNodes().isEmpty() }
+    }
+
     private fun openSettings() = compose.onNodeWithContentDescription("Settings").performClick()
 
     private fun waitWatchValue(label: String, value: String, timeoutMs: Long = 20_000) {
@@ -379,7 +384,8 @@ class AppJourneyTest {
         val chain = "[eboot.bin+0x100200]+0x48"
         waitTag("chain-$chain", timeoutMs = 30_000)
         shot("36_pointer_scan")
-        tag("addChain-$chain").performClick()
+        waitNoSnackbar()
+        tag("addChain-$chain").performScrollTo().performClick()
         waitText("Added pointer")
         // The game moves the object: the pointer entry follows it, the absolute entry does not.
         val moved = DemoGame.HEAP_START + 0x2000

@@ -124,8 +124,8 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
                 OutlinedTextField(target, { target = it.trim() }, label = { Text("Target address (hex)") }, singleLine = true, enabled = !st.running, modifier = Modifier.fillMaxWidth().testTag("pointerTarget"))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Selector("Value type", ValueType.entries, type, { it.label }, { type = it }, Modifier.weight(1f), enabled = !st.running)
-                    Selector("Max depth", depthOptions, depth, { "$it" }, { depth = it }, Modifier.weight(0.8f), enabled = !st.running)
-                    Selector("Max offset", offsetOptions, maxOffset, { "0x" + Integer.toHexString(it).uppercase() }, { maxOffset = it }, Modifier.weight(1f), enabled = !st.running)
+                    Selector("Depth", depthOptions, depth, { "$it" }, { depth = it }, Modifier.weight(0.7f), enabled = !st.running)
+                    Selector("Max offset", offsetOptions, maxOffset, { "0x" + Integer.toHexString(it).uppercase() }, { maxOffset = it }, Modifier.weight(1.3f), enabled = !st.running)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { vm.start(target, type, depth, maxOffset) }, enabled = connected && alive && !st.running, modifier = Modifier.testTag("pointerStart")) { Text("Find pointers") }
