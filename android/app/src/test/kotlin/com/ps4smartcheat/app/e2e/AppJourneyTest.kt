@@ -2,6 +2,8 @@ package com.ps4smartcheat.app.e2e
 
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -95,6 +97,14 @@ class AppJourneyTest {
 
     private fun tab(label: String) = compose.onAllNodesWithText(label)[0].performClick()
 
+    private fun openSettings() = compose.onNodeWithContentDescription("Settings").performClick()
+
+    private fun waitWatchValue(label: String, value: String, timeoutMs: Long = 20_000) {
+        compose.waitUntil(timeoutMs) {
+            compose.onAllNodes(hasTestTag("watchValue-$label") and hasText(value), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+    }
+
     private fun waitMock(timeoutMs: Long = 10_000, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeoutMs
         while (!cond()) {
@@ -153,6 +163,11 @@ class AppJourneyTest {
         waitText("eboot.bin+0x120") // region shown on the result row
         shot("06_refined")
 
+        // 4b. Keep the address in the game's address list.
+        step("add to address list")
+        tag("add-$coins").performClick()
+        waitText("to the address list")
+
         // 5. Editor is read-only by default.
         step("editor read-only")
         tag("result-$coins").performClick()
@@ -162,7 +177,7 @@ class AppJourneyTest {
 
         // 6. Enable editing in Settings (with confirmation).
         step("enable editing")
-        tab("Settings")
+        openSettings()
         waitTag("editingSwitch")
         tag("editingSwitch").performClick()
         waitTag("confirm")
@@ -224,9 +239,15 @@ class AppJourneyTest {
         waitText("Validate first")
         shot("13_cheat_library")
 
+        // 11b. The address list shows the saved address with its live value.
+        step("address list")
+        tab("Addresses")
+        waitWatchValue(COINS_LABEL, "4200")
+        shot("13b_address_list")
+
         // 12. Settings overview.
         step("settings")
-        tab("Settings")
+        openSettings()
         waitTag("editingSwitch")
         shot("14_settings")
     }
@@ -265,6 +286,36 @@ class AppJourneyTest {
         shot("31_game_restarted")
     }
 
+    @Test fun addressListFollowsGameRestart() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        tab("Scanner")
+        waitTag("scanValue")
+        tag("scanValue").performTextInput("5000")
+        tag("firstScan").performClick()
+        waitText("Scan 1: ")
+        val coins = Address.format(DemoGame.COINS_ADDRESS)
+        compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("add-$coins"))
+        tag("add-$coins").performClick()
+        waitText("to the address list")
+        tab("Addresses")
+        waitWatchValue(COINS_LABEL, "5000")
+        // Adding again does not duplicate the entry.
+        tab("Scanner")
+        compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("add-$coins"))
+        tag("add-$coins").performClick()
+        waitText("Already in the address list")
+        // The game is closed and started again (new pid): the saved entry resolves in the new process.
+        val restarted = server.restartProcess(DemoGame.PID, 123)
+        server.pokeInt32(restarted.pid, DemoGame.COINS_ADDRESS, 777)
+        waitText("eboot.bin (123)", timeoutMs = 20_000)
+        tab("Addresses")
+        waitWatchValue(COINS_LABEL, "777")
+        waitText("module-relative")
+        assertEquals(1, compose.onAllNodesWithTag("watch-$COINS_LABEL", useUnmergedTree = true).fetchSemanticsNodes().size)
+        shot("33_address_list_after_restart")
+    }
+
     @Test fun droppedConnectionIsRecoveredAutomatically() {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
@@ -301,5 +352,7 @@ class AppJourneyTest {
 
     companion object {
         const val OUT = "build/outputs/roborazzi"
+        /** Default name of the coins address: offset from the lowest eboot.bin mapping (text at 0x400000). */
+        const val COINS_LABEL = "eboot.bin+0x100120"
     }
 }

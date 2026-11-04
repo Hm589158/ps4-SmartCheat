@@ -2,6 +2,15 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 0.8.0
+- Address list per game (new "Addresses" tab): addresses are saved by title ID with a name and type and show
+  live values (nearby entries are read in one request; unmapped entries are never read). Entries inside a module
+  image are stored module-relative (e.g. `eboot.bin+0x100120`) and follow the game across restarts; absolute heap
+  addresses are marked "from an earlier session — verify" outside the session they were added in, and cannot be
+  frozen until checked in the editor. Add from a scan result (+), from the editor (+ List) or by address.
+  Duplicates are not added. Nothing in the list is written to the console unless the user edits or freezes it.
+- Settings moved to the top bar to make room for the Addresses tab.
+
 ## 0.7.0
 - CI: Robolectric's Android framework jar is resolved by Gradle and used offline (a Maven Central HTTP 429 at
   test time had failed the release gate).

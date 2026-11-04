@@ -183,6 +183,11 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    fun addToList() {
+        val addr = parsedAddress() ?: return
+        viewModelScope.launch { _message.value = c.addToAddressList(addr, _type.value) }
+    }
+
     fun profilesForSelected(): List<CheatProfile> {
         val sel = c.selectedProcess.value ?: return emptyList()
         return c.cheats.profilesForGame(sel.titleId, null, sel.name)
@@ -256,6 +261,7 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = vm::read, enabled = selected != null) { Text("Read") }
                 OutlinedButton(onClick = { addr?.let(onViewMemory) }, enabled = selected != null && addr != null, modifier = Modifier.testTag("viewMemory")) { Text("View memory") }
+                OutlinedButton(onClick = vm::addToList, enabled = selected != null && addr != null, modifier = Modifier.testTag("addAddress")) { Text("+ List") }
             }
             location?.let { KeyValue("Region", it, mono = true) }
             KeyValue("Current", current?.let { ValueCodec.format(type, it) + "  [" + Hex.encode(it, " ") + "]" } ?: "—", mono = true)

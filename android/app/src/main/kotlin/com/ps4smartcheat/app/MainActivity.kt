@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Star
@@ -43,6 +44,7 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ps4smartcheat.app.ui.SmartCheatTheme
 import com.ps4smartcheat.app.ui.appContainer
+import com.ps4smartcheat.app.ui.screens.AddressesScreen
 import com.ps4smartcheat.app.ui.screens.CheatsScreen
 import com.ps4smartcheat.app.ui.screens.ConnectionScreen
 import com.ps4smartcheat.app.ui.screens.EditorScreen
@@ -72,8 +74,8 @@ private val tabs = listOf(
     Tab(Routes.CONNECTION, "Connect", Icons.Filled.Home),
     Tab(Routes.PROCESSES, "Processes", Icons.AutoMirrored.Filled.List),
     Tab(Routes.SCANNER, "Scanner", Icons.Filled.Search),
+    Tab(Routes.ADDRESSES, "Addresses", Icons.Filled.Place),
     Tab(Routes.CHEATS, "Cheats", Icons.Filled.Star),
-    Tab(Routes.SETTINGS, "Settings", Icons.Filled.Settings),
 )
 
 object Routes {
@@ -82,6 +84,7 @@ object Routes {
     const val SCANNER = "scanner"
     const val EDITOR = "editor"
     const val CHEATS = "cheats"
+    const val ADDRESSES = "addresses"
     const val SETTINGS = "settings"
     const val HEX = "hex"
 
@@ -131,6 +134,9 @@ private fun AppRoot() {
                     if (route != Routes.EDITOR && route != Routes.HEX) {
                         IconButton(onClick = { nav.navigate(Routes.editor(null, null)) }) { Icon(Icons.Filled.Edit, contentDescription = "Memory editor") }
                     }
+                    if (route != Routes.SETTINGS) {
+                        IconButton(onClick = { nav.navigateTab(Routes.SETTINGS) }) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
+                    }
                 },
             )
         },
@@ -170,6 +176,9 @@ private fun AppRoot() {
                 val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
                 HexViewerScreen(address, onOpenEditor = { a -> nav.navigate(Routes.editor(a, null)) })
             }
+            composable(Routes.ADDRESSES) {
+                AddressesScreen(onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) }, onViewMemory = { a -> nav.navigate(Routes.hex(a)) })
+            }
             composable(Routes.CHEATS) { CheatsScreen() }
             composable(Routes.SETTINGS) { SettingsScreen() }
         }
@@ -183,6 +192,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.EDITOR -> "Memory editor"
     Routes.HEX -> "Memory viewer"
     Routes.CHEATS -> "Saved cheats"
+    Routes.ADDRESSES -> "Address list"
     Routes.SETTINGS -> "Settings"
     else -> "PS4 SmartCheat"
 }

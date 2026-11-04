@@ -1,5 +1,6 @@
 package com.ps4smartcheat.core.cheat
 
+import com.ps4smartcheat.core.util.AtomicFiles
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -123,13 +124,5 @@ class CheatRepository(
         _profiles.value = next
     }
 
-    private fun persist(profiles: List<CheatProfile>) {
-        file.parentFile?.mkdirs()
-        val tmp = File(file.parentFile, file.name + ".tmp")
-        tmp.writeText(CheatJson.encodeProfiles(profiles))
-        if (!tmp.renameTo(file)) {
-            file.delete()
-            if (!tmp.renameTo(file)) throw java.io.IOException("Could not replace ${file.name}")
-        }
-    }
+    private fun persist(profiles: List<CheatProfile>) = AtomicFiles.writeText(file, CheatJson.encodeProfiles(profiles))
 }

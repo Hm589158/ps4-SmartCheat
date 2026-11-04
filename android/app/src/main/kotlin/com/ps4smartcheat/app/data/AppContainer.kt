@@ -14,6 +14,11 @@ import com.ps4smartcheat.core.process.listProcessDetails
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.DebugBackend
 import com.ps4smartcheat.core.cheat.CheatRepository
+import com.ps4smartcheat.core.cheat.ModuleResolver
+import com.ps4smartcheat.core.scan.ValueType
+import com.ps4smartcheat.core.util.Address
+import com.ps4smartcheat.core.watch.WatchEntry
+import com.ps4smartcheat.core.watch.WatchRepository
 import com.ps4smartcheat.core.edit.MemoryEditor
 import com.ps4smartcheat.core.live.FreezeManager
 import com.ps4smartcheat.core.model.MemoryRegion
@@ -67,6 +72,8 @@ class AppContainer(context: Context) {
     val editor = MemoryEditor(backend, { settings.value.editPolicy() })
     val freezer = FreezeManager(backend, appScope, { settings.value.editPolicy() })
     val cheats = CheatRepository(File(context.filesDir, "cheats.json"))
+    /** Per-game saved address lists. Only read automatically; never written to the console by themselves. */
+    val addresses = WatchRepository(File(context.filesDir, "addresses.json"))
 
     private val _selected = MutableStateFlow<SelectedProcess?>(null)
     val selectedProcess: StateFlow<SelectedProcess?> = _selected.asStateFlow()
@@ -80,6 +87,10 @@ class AppContainer(context: Context) {
         appScope.launch {
             cheats.load()
             cheats.loadError?.let { log.error(it) }
+        }
+        appScope.launch {
+            addresses.load()
+            addresses.loadError?.let { log.error(it) }
         }
         appScope.launch {
             var last: ConnectionState = ConnectionState.Disconnected
@@ -176,6 +187,23 @@ class AppContainer(context: Context) {
                 log.warn("Could not select restarted process: ${e.message}", EventCategory.PROCESS)
             }
         }
+    }
+
+    /**
+     * Adds [address] of the selected process to its game's address list (module-relative when it lies in a
+     * module image, so it survives restarts). Returns a user-facing message.
+     */
+    suspend fun addToAddressList(address: Long, type: ValueType, label: String? = null): String {
+        val sel = _selected.value ?: return "Select a process first"
+        if (sel.exited) return "${sel.name} is no longer running"
+        val module = ModuleResolver.refFor(address, sel.regions)
+        val name = label?.trim()?.ifEmpty { null }
+            ?: module?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" }
+            ?: Address.format(address)
+        val res = addresses.add(sel.titleId, sel.name, WatchEntry("", name, type, address, module, sel.pid))
+        log.event(EventLevel.INFO, EventCategory.CHEAT, "address list add", "address" to Address.format(address), "type" to type.name, "duplicate" to res.alreadyPresent)
+        return if (res.alreadyPresent) "Already in the address list as \"${res.entry.label}\""
+        else "Added \"${res.entry.label}\" to the address list" + if (module == null) " (absolute address: valid for this session)" else ""
     }
 
     fun updateRegions(regions: List<MemoryRegion>) {

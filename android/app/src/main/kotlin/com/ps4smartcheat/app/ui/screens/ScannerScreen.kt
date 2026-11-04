@@ -15,7 +15,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Button
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -166,6 +170,10 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
         c.selectedProcess.value?.let { c.scanner.reset(it.pid) }
         _rows.value = emptyList()
         _page.value = 0
+    }
+
+    fun addToList(row: ResultRow) {
+        viewModelScope.launch { c.log.notify(c.addToAddressList(row.address, row.type)) }
     }
 
     /** Region description for a result address (e.g. "eboot.bin+0x120 [rw-]"). */
@@ -332,7 +340,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                     if (rowsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 items(rows, key = { it.index }) { row ->
-                    ResultRowView(row, vm.describe(row.address)) { onEdit(row.address, row.type) }
+                    ResultRowView(row, vm.describe(row.address), onAdd = { vm.addToList(row) }) { onEdit(row.address, row.type) }
                     HorizontalDivider()
                 }
             }
@@ -341,7 +349,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
 }
 
 @Composable
-private fun ResultRowView(row: ResultRow, region: String, onClick: () -> Unit) {
+private fun ResultRowView(row: ResultRow, region: String, onAdd: () -> Unit, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().testTag("result-" + Address.format(row.address)).clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1.3f)) {
             Text(Address.format(row.address), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
@@ -351,6 +359,9 @@ private fun ResultRowView(row: ResultRow, region: String, onClick: () -> Unit) {
             val cur = row.current?.let { ValueCodec.format(row.type, it) } ?: "?"
             Text(cur, fontFamily = FontFamily.Monospace, color = if (row.changed) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface)
             Text("prev ${ValueCodec.format(row.type, row.previous)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        IconButton(onClick = onAdd, modifier = Modifier.testTag("add-" + Address.format(row.address))) {
+            Icon(Icons.Filled.Add, contentDescription = "Add to address list")
         }
     }
 }
