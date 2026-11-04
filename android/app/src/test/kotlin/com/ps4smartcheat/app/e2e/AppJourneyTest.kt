@@ -120,13 +120,12 @@ class AppJourneyTest {
         }
     }
 
-    private fun waitMock(timeoutMs: Long = 10_000, cond: () -> Boolean) {
-        val end = System.currentTimeMillis() + timeoutMs
-        while (!cond()) {
-            if (System.currentTimeMillis() > end) throw AssertionError("mock condition not reached")
-            compose.mainClock.advanceTimeBy(50)
-            Thread.sleep(20)
-        }
+    /**
+     * Waits for a condition on the mock console. compose.waitUntil idles the main looper between checks, so
+     * coroutines resuming on Main (each read/write step of an edit) keep running while we wait.
+     */
+    private fun waitMock(timeoutMs: Long = 20_000, cond: () -> Boolean) {
+        compose.waitUntil(timeoutMs) { cond() }
     }
 
     @Test fun fullUserJourney() {
