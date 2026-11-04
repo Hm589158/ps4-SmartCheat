@@ -206,6 +206,19 @@ class ServerScanTest {
         assertEquals(ScanBackendKind.TURBO, r.controller.lastStats.value!!.backend)
     }
 
+    @Test fun turboFetchIsBoundedButServerKeepsAll() = runBlocking {
+        val r = rig()
+        r.server.poke(pid, 0x1_0010_0000L, ByteArray(8192))
+        r.controller.firstScan(pid, "eboot.bin", ValueType.INT32, ScanMode.EXACT, "0", options = ScanOptions(turboFetchMax = 100))
+        r.await()
+        val res = r.controller.results()!!
+        assertEquals(100, res.count)
+        assertTrue(res.serverTotal!! >= 2048)
+        val st = r.controller.lastStats.value!!
+        // Fetch traffic is bounded: 100 records × (8 + 2×4) bytes plus framing, not 2048 records.
+        assertTrue(st.traffic.bytesIn.toString(), st.traffic.bytesIn < 100 * 16 + 512)
+    }
+
     @Test fun lostTurboSessionFallsBackWithLocalResults() = runBlocking {
         val r = rig()
         r.poke32(0x1_0000_0120L, 5000)

@@ -25,6 +25,11 @@ data class ScanOptions(
     val backend: BackendPreference = BackendPreference.AUTO,
     /** Ask ps4debug-NG Turbo to use page-table aliasing reads (fastest; opt-in). */
     val turboAliasing: Boolean = false,
+    /**
+     * Maximum Turbo survivors copied to the phone after each step. The full set stays on the PS4 and later
+     * Turbo refines use all of it; this only bounds transfer (8 + 2×size bytes per record) and phone memory.
+     */
+    val turboFetchMax: Int = 100_000,
 ) {
     fun effectiveAlignment(type: ValueType): Int = if (alignment <= 0) type.size else alignment
 

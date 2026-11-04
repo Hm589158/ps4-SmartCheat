@@ -303,7 +303,7 @@ class ServerScanner(private val t: ServerScanTransport) {
     /** Pulls up to maxResults survivors with Turbo GET in pages. */
     private suspend fun turboFetch(type: ValueType, count: Long, options: ScanOptions): ScanResults {
         val vl = type.size
-        val want = minOf(count, options.maxResults.toLong()).toInt()
+        val want = minOf(count, options.maxResults.toLong(), options.turboFetchMax.coerceAtLeast(1).toLong()).toInt()
         val builder = ResultsBuilder(type, options.maxResults)
         var start = 0
         while (start < want) {

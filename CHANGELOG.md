@@ -9,6 +9,8 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 - Export scan results as CSV (address, type, value, bytes, region).
 - Setting to skip memory regions larger than N MiB during scans.
 - Editor: "View memory" opens the viewer at the current address; viewer lines open the editor.
+- Turbo: at most 100,000 survivors are copied to the phone per step (was up to 1,000,000); the full set stays on
+  the PS4 for the next Turbo refine. For Int32 this bounds the fetch to ~1.6 MB instead of ~16 MB.
 
 ## 0.5.0-test.1 (pre-release, debug-signed)
 - ps4debug-NG as primary backend with automatic CMD_PROC_AUTH (keystream verified against upstream C code).

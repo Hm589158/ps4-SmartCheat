@@ -20,7 +20,7 @@ Adaptive behaviour:
 * **Refine batching:** Android refines split read spans at the break-even gap = measured RTT × bandwidth
   (measured once per connection with four tiny reads).
 * **Bounded memory:** result cap (default 1,000,000, `8 + size` bytes each), 1 MiB read chunks, 64 MiB server slices,
-  Turbo results fetched in 65,536-record pages; when the local list is capped the PS4 still holds the full Turbo set.
+  Turbo results fetched in 65,536-record pages, at most 100,000 per step (`turboFetchMax`); when the local list is capped the PS4 still holds the full Turbo set.
 
 ## Measured (automated benchmark, mock server)
 
