@@ -88,7 +88,10 @@ class ScanController(
     private var activePid: Int? = null
     private var job: Job? = null
 
-    val isRunning: Boolean get() = job?.isActive == true
+    private val running = java.util.concurrent.atomic.AtomicBoolean(false)
+
+    /** True from the moment a step is started until just before its final status is published. */
+    val isRunning: Boolean get() = running.get()
 
     /** Switches the active process; existing sessions for other processes are kept. */
     fun activate(pid: Int?) {
@@ -208,26 +211,34 @@ class ScanController(
     }
 
     private fun launchStep(block: suspend () -> String): Job {
-        if (isRunning) throw IllegalStateException("A scan is already running")
+        if (!running.compareAndSet(false, true)) throw IllegalStateException("A scan is already running")
         _status.value = ScanStatus.Running(ScanProgress(0, 0, 0, "Starting"))
+        val started = java.util.concurrent.atomic.AtomicBoolean(false)
         val j = scope.launch {
+            started.set(true)
+            var final: ScanStatus = ScanStatus.Cancelled
             try {
-                _status.value = ScanStatus.Completed(block())
+                final = ScanStatus.Completed(block())
             } catch (e: CancellationException) {
-                _status.value = ScanStatus.Cancelled
+                final = ScanStatus.Cancelled
                 throw e
-            } catch (e: ScanTooLargeException) {
-                _status.value = ScanStatus.Failed(e.message ?: "Scan too large")
             } catch (e: Exception) {
-                _status.value = ScanStatus.Failed(e.message ?: e.javaClass.simpleName)
+                final = ScanStatus.Failed(e.message ?: e.javaClass.simpleName)
+            } finally {
+                running.set(false)
+                _status.value = final
             }
+        }
+        // Covers cancellation before the coroutine body started (finally would not run then).
+        j.invokeOnCompletion {
+            if (!started.get() && running.compareAndSet(true, false)) _status.value = ScanStatus.Cancelled
         }
         job = j
         return j
     }
 
     private fun report(p: ScanProgress) {
-        _status.value = ScanStatus.Running(p)
+        if (running.get()) _status.value = ScanStatus.Running(p)
     }
 
     private fun summary(s: Session): String {
