@@ -1,6 +1,8 @@
 package com.ps4smartcheat.app.e2e
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -102,6 +104,14 @@ class AppJourneyTest {
         compose.waitUntil(timeoutMs) { compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isEmpty() }
     }
 
+    /**
+     * Clicks through the semantics OnClick action (the handler a tap runs) after scrolling the node into view.
+     * Used for buttons right after text input, where Robolectric sometimes drops the injected touch.
+     */
+    private fun press(t: String) {
+        tag(t).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+    }
+
     private fun openSettings() = compose.onNodeWithContentDescription("Settings").performClick()
 
     private fun waitWatchValue(label: String, value: String, timeoutMs: Long = 20_000) {
@@ -195,7 +205,7 @@ class AppJourneyTest {
         }
         waitTag("newValue")
         tag("newValue").performTextInput("99999")
-        tag("write").performScrollTo().performClick()
+        press("write")
         waitTag("confirm")
         shot("09_write_confirmation")
         tag("confirm").performClick()
@@ -205,19 +215,19 @@ class AppJourneyTest {
 
         // 8. Restore the original value.
         step("restore")
-        tag("restore").performScrollTo().performClick()
+        press("restore")
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
         assertEquals(4200, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
 
         // 8b. Undo the restore (back to 99999), then redo it (4200 again) — each confirmed.
         step("undo/redo")
-        tag("undo").performScrollTo().performClick()
+        press("undo")
         waitTag("confirm")
         waitText("Will write:")
         shot("10c_undo_confirmation")
         tag("confirm").performClick()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 99999 }
-        tag("redo").performScrollTo().performClick()
+        press("redo")
         waitTag("confirm")
         tag("confirm").performClick()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
@@ -234,7 +244,7 @@ class AppJourneyTest {
         waitTag("cheatName")
         tag("cheatName").performScrollTo().performTextInput("Infinite coins")
         shot("11_save_cheat_form")
-        tag("saveConfirm").performScrollTo().performClick()
+        press("saveConfirm")
         waitText("Saved \"Infinite coins\"")
 
         // 9b. Keep the address in the game's address list (editor shows the result inline, no snackbar).
@@ -252,7 +262,7 @@ class AppJourneyTest {
         // 10b. Patch raw bytes in the viewer (confirmed + verified), then put 4200 back the same way.
         step("hex patch")
         tag("patchBytes").performTextInput("2A 00 00 00")
-        tag("patchWrite").performClick()
+        press("patchWrite")
         waitTag("confirm")
         shot("12b_patch_confirmation")
         tag("confirm").performClick()
@@ -260,7 +270,7 @@ class AppJourneyTest {
         waitText("written and verified")
         tag("patchBytes").performTextClearance()
         tag("patchBytes").performTextInput("68 10 00 00")
-        tag("patchWrite").performClick()
+        press("patchWrite")
         waitTag("confirm")
         tag("confirm").performClick()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
@@ -357,7 +367,7 @@ class AppJourneyTest {
         tag("saveAsCheat-$COINS_LABEL").performScrollTo().performClick()
         waitTag("cheatValue")
         tag("cheatValue").performTextInput("99999")
-        tag("saveConfirm").performScrollTo().performClick()
+        press("saveConfirm")
         waitText("eboot.bin relative")
         tab("Cheats")
         waitText(COINS_LABEL)
