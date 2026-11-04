@@ -11,6 +11,9 @@ for offline games and homebrew you control. It talks to the standard **ps4debug*
 ## Features
 * Connect to ps4debug (default port 744), see debugger version and firmware (when the payload reports it)
 * List processes, inspect title ID and the memory map of the selected game
+* Three scan backends chosen automatically: **Turbo Scan** and **server-side scan** on the PS4 (ps4debug-NG),
+  falling back to an optimized **chunked scan on Android** — with live elapsed time, MiB/s, network bytes and the
+  backend used ([measurements](docs/PERFORMANCE.md))
 * Scan Int8/16/32/64, Float, Double: exact, unknown initial, increased, decreased, changed, unchanged,
   increased/decreased by; progressive refinement, cancellation, paginated results with live values
 * Memory editor: read-only by default, confirmation for every write, fresh read-back verification, restore of
@@ -54,4 +57,4 @@ then `base64 -w0 release.jks` into the secret.
 
 ## Docs
 [Architecture](docs/ARCHITECTURE.md) · [Protocol](docs/PROTOCOL.md) · [Testing](docs/TESTING.md) ·
-[Compatibility](docs/COMPATIBILITY.md) · [Roadmap](docs/ROADMAP.md)
+[Performance](docs/PERFORMANCE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Roadmap](docs/ROADMAP.md)

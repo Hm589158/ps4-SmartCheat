@@ -35,6 +35,19 @@ jobs:
       - name: Core + mock server tests (JVM)
         run: ./gradlew --no-daemon :core:test :mockserver:build
 
+      - name: Scan backend benchmark (mock server)
+        run: |
+          ./gradlew --no-daemon :core:benchmark
+          cat core/build/reports/benchmark/scan-benchmark.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload benchmark report
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-benchmark-${{ github.sha }}
+          path: android/core/build/reports/benchmark/scan-benchmark.md
+          retention-days: 14
+          if-no-files-found: error
+
       - name: App unit tests, lint and debug APK
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 

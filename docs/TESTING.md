@@ -19,6 +19,12 @@ The mock is an independent implementation of the server side over real TCP, with
   unmapped candidates, unknown-initial-value, snapshot limit, repeated scans, per-process sessions, pagination.
 * `MemoryEditorTest` – write + fresh read-back + restore, read-only mode, system-process guard, non-writable
   guard, unmapped/straddling addresses, invalid input, silently ignored writes, rejected writes, drop during write.
+* `ServerScanTest` – NG detection, classic/auth-failure fallback, keystream, currency scenario on Turbo with zero
+  `CMD_PROC_READ`, **tier equivalence** (Turbo = server = Android results for Int8–Int64 × changed/unchanged/increased),
+  resident-buffer overflow fallback, float/unaligned routing, capped local list with full PS4-side set, lost-session
+  fallback after reconnect, Turbo cancel via side channel, cost-based server refine, traffic reduction.
+* `AdaptiveRefineTest` – break-even gap maths and RTT/bandwidth measurement on a throttled mock link.
+* `ScanBenchmark` (`./gradlew :core:benchmark`, not part of `test`) – see docs/PERFORMANCE.md.
 * `FreezeManagerTest` – freeze/unfreeze, stop on process exit, disconnect, editing disabled.
 
 Run: `cd android && ./gradlew :core:test` (works without an Android SDK).
@@ -44,5 +50,8 @@ game or homebrew you own.
 6. Restore. Expect the original value back.
 7. Save as cheat; restart the game; Cheats → Validate. Expect module-relative cheats to be re-resolved, heap
    cheats flagged as possibly stale.
-8. Pull the network cable/Wi-Fi during a scan. Expect "Connection lost", previous results kept.
-9. Record results in `docs/COMPATIBILITY.md` (firmware, GoldHEN version, ps4debug version, game, outcome).
+8. With ps4debug-NG: check the Connection screen lists "Turbo (PS4) → Server-side (PS4) → Android"; run an Int32
+   exact scan and confirm the result line shows "Turbo Scan (PS4)", elapsed time and network bytes; repeat with
+   Settings → Scan backend = Android only and compare times. Record both in docs/PERFORMANCE.md.
+9. Pull the network cable/Wi-Fi during a scan. Expect "Connection lost", previous results kept.
+10. Record results in `docs/COMPATIBILITY.md` (firmware, GoldHEN version, ps4debug version, game, outcome).

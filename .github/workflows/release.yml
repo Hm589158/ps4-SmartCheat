@@ -5,6 +5,8 @@ name: Release
 #      SMARTCHEAT_KEYSTORE_BASE64, SMARTCHEAT_KEYSTORE_PASSWORD, SMARTCHEAT_KEY_ALIAS, SMARTCHEAT_KEY_PASSWORD
 #  - Otherwise a clearly labelled, debug-signed TEST build published as a pre-release.
 # An existing release with the same tag is never overwritten.
+# Triggers: a pushed v* tag, a manual run, or a successful CI run on the default branch
+# (published as v<versionName>-build.<CI run number>).
 
 on:
   push:
@@ -12,8 +14,12 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create, e.g. v0.4.0-test.1"
+        description: "Release tag to create, e.g. v0.5.0-test.1"
         required: true
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -24,10 +30,12 @@ concurrency:
 
 jobs:
   release:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       GH_TOKEN: ${{ github.token }}
       HAS_SIGNING: ${{ secrets.SMARTCHEAT_KEYSTORE_BASE64 != '' }}
     defaults:
@@ -35,6 +43,14 @@ jobs:
         working-directory: android
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_SHA }}
+
+      - name: Derive tag for CI-triggered builds
+        if: github.event_name == 'workflow_run'
+        run: |
+          VN=$(sed -n 's/.*versionName = ciVersionName ?: "\(.*\)".*/\1/p' app/build.gradle.kts)
+          echo "TAG=v${VN}-build.${{ github.event.workflow_run.run_number }}" >> "$GITHUB_ENV"
 
       - name: Validate tag and refuse duplicates
         run: |
@@ -95,5 +111,5 @@ jobs:
             FLAGS="--prerelease"
           fi
           gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
             --title "PS4 SmartCheat $VERSION_NAME${KIND:+ ($KIND)}" --notes "$NOTES" $FLAGS
