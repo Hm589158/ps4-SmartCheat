@@ -2,7 +2,7 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
-## 1.0.0 (in progress)
+## 1.0.0
 - Connection diagnostics (Settings → Connection diagnostics): debugger, firmware, auth and Turbo engines, traffic,
   idle time, automatic reconnects, measured link, a 5-request latency test (CMD_VERSION only — no game memory is
   read) and the recent warnings/errors.

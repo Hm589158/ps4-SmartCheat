@@ -36,6 +36,16 @@ The mock is an independent implementation of the server side over real TCP, with
   game, every reported chain resolves to the target, chain survives a restart with a relocated heap while a decoy
   is filtered out, broken chains never read unmapped memory, map/scan/result limits. `PointerWatchTest` – pointer
   entries in the address list follow a moving object and turn "broken" on a null pointer without failing reads.
+* `EditHistoryTest` – undo/redo of verified writes, redo cleared by a new write, peek shows game-changed memory,
+  read-only blocks undo, raw byte patches follow policy (code region, system process, size, region end, read-only)
+  and can be undone, history dropped on process exit.
+* `SavedSessionTest` – session saved and resumed in a new controller refines exactly like the original; other
+  instances (pid/title) refused; snapshot sessions not saved; truncated/garbage files rejected.
+* `GoldHenImportTest` – mods parsed, unsupported ones (section, button, bad bytes) flagged; exporter output read back
+  identically; check reports off/on/mismatch/unmapped from mock memory; enabling goes through the editor.
+* `LinkDiagnosticsTest` – ping statistics and latency measured on a delayed mock link.
+* `WatchImportExportTest` – address list export/import merges by game without duplicates; invalid files change nothing.
+* `SpilledPointerIndexTest` – pointer map spilled to sorted run files yields the same chains; files are deleted.
 * `PatternSearchTest` – hex/wildcard/text parsing, matches across chunk borders, none across regions, alignment,
   hit cap; results equal to brute force over mock memory.
 
@@ -49,7 +59,9 @@ cheat → memory viewer → cheat library → settings. It asserts on-screen tex
 screenshot per step (`app/build/outputs/roborazzi/`). CI publishes the screenshots and JUnit XML to the
 `ci-screenshots` branch (see its README.md). Further tests: refused connection is reported and recoverable;
 public addresses are blocked; address list survives a game restart (module-relative) without duplicates; byte
-pattern search; "Value between" scan; pointer scan from an address-list entry finds the static chain, and the
+pattern search; "Value between" scan; undo/redo and memory-viewer byte patches inside the journey; address entry
+saved as a cheat; connection diagnostics latency test and guide; tablet layout (1280 dp landscape) with a navigation
+rail; pointer scan from an address-list entry finds the static chain, and the
 added pointer entry follows the object when the mock game moves it. This shows the app works end to end with a ps4debug-NG-compatible server; it is
 not a PS4 test.
 

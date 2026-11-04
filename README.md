@@ -4,10 +4,12 @@ An Android memory scanner and cheat tool for your own jailbroken PlayStation 4 (
 for offline games and homebrew you control. ps4debug-NG is the primary backend (automatic CMD_PROC_AUTH unlocks
 server-side and Turbo scanning); classic ps4debug works in compatibility mode with Android-side scanning.
 
-> **Status:** the protocol client, scanner, editor and cheat library are implemented and tested against a
-> mock ps4debug server. **Real-console operation has not been verified yet** — see
-> [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Online/multiplayer cheating, anti-cheat evasion, DRM bypass
-> and kernel editing are out of scope.
+> **Status:** the owner reported the core flow working on a real PS4 (FW 11.00, GoldHEN, ps4debug-NG 1.3.3:
+> connect, authentication, process list, Turbo Scan, refines, a write in a game — see
+> [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)). Features added since 0.8 (address list, pointer scan, pattern
+> search, byte patches, undo/redo, session resume, GoldHEN import, diagnostics) are tested end to end against the
+> mock ps4debug-NG server only. Online/multiplayer cheating, anti-cheat evasion, DRM bypass and kernel editing are
+> out of scope.
 
 ## Features
 * Connect to ps4debug-NG (default port 744; classic ps4debug also works), see branding, firmware and the scan backends unlocked by authentication
@@ -24,10 +26,14 @@ server-side and Turbo scanning); classic ps4debug works in compatibility mode wi
 * Pointer scan for values whose address changes every run: pointer map built on the phone, backward search to
   static game data, filter after a restart, pointer-chain entries in the address list
 * Memory editor: read-only by default, confirmation for every write, fresh read-back verification, restore of
-  original bytes, client-side freeze while connected
-* Memory viewer (hex + ASCII, live refresh with changed-byte highlighting), live result values, CSV export of results
+  original bytes, confirmed undo/redo of the session's writes, client-side freeze while connected
+* Scan sessions are saved after each step and can be resumed after an app restart (same game instance only)
+* Memory viewer (hex + ASCII, live refresh with changed-byte highlighting, confirmed byte patches), live result
+  values, CSV export of results
 * Cheat library: per-game profiles (title ID + version + process), module-relative addresses when possible,
-  validation before re-applying, JSON import/export, GoldHEN cheat-file export (verified fields only)
+  validation before re-applying, JSON import/export, GoldHEN cheat-file export (verified fields only) and import
+  (mods are enabled only when memory matches the file's "off" bytes)
+* Connection diagnostics (latency test, traffic, reconnects, recent errors), in-app guide, tablet layout
 
 ## Install the APK
 1. Open the repository's **Releases** page and download the newest `PS4-SmartCheat-*.apk`.
@@ -59,6 +65,7 @@ JDK 17+. Gradle 8.14.3 (wrapper), AGP 8.11.1, Kotlin 2.2.21, Compose BOM 2025.08
 `SMARTCHEAT_KEYSTORE_BASE64`, `SMARTCHEAT_KEYSTORE_PASSWORD`, `SMARTCHEAT_KEY_ALIAS`, `SMARTCHEAT_KEY_PASSWORD`
 it publishes a signed release APK; without them it publishes a debug-signed **TEST** pre-release.
 It refuses to overwrite an existing release. No signing material is stored in the repository.
+How to create the key and the secrets: [docs/RELEASE_SIGNING.md](docs/RELEASE_SIGNING.md).
 
 Create a keystore once: `keytool -genkeypair -v -keystore release.jks -alias smartcheat -keyalg RSA -keysize 4096 -validity 10000`,
 then `base64 -w0 release.jks` into the secret.

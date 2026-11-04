@@ -22,8 +22,8 @@ android {
         applicationId = "com.ps4smartcheat.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = ciVersionCode ?: 9
-        versionName = ciVersionName ?: "0.9.0"
+        versionCode = ciVersionCode ?: 10
+        versionName = ciVersionName ?: "1.0.0"
     }
 
     signingConfigs {
