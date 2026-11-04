@@ -1,0 +1,15 @@
+# Gradle / build
+.gradle/
+build/
+**/build/
+local.properties
+*.iml
+.idea/
+.kotlin/
+captures/
+.externalNativeBuild/
+.cxx/
+# Signing material must never be committed
+*.jks
+*.keystore
+keystore.properties
