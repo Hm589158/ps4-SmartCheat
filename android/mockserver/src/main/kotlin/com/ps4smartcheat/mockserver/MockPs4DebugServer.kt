@@ -163,6 +163,15 @@ class MockPs4DebugServer(
         processes.removeIf { it.pid == pid }
     }
 
+    /** Simulates the game being closed and started again: same program and memory layout, new pid. */
+    fun restartProcess(oldPid: Int, newPid: Int): Process {
+        val old = requireNotNull(process(oldPid)) { "no process $oldPid" }
+        val p = Process(newPid, old.name, old.titleId, old.contentId, old.path)
+        for (r in old.regions) p.region(r.name, r.start, r.data.size, r.prot, r.offset).also { System.arraycopy(r.data, 0, it.data, 0, r.data.size) }
+        killProcess(oldPid)
+        return addProcess(p)
+    }
+
     // ---- direct memory helpers for tests (simulate the game changing values) ----
 
     fun poke(pid: Int, address: Long, bytes: ByteArray) = synchronized(lock) {

@@ -222,7 +222,7 @@ class ScannerTest {
         assertEquals(null, controller.results())
     }
 
-    @Test fun disconnectDuringScanFailsSafely() = runBlocking {
+    @Test fun disconnectDuringScanRecoversAndCompletes() = runBlocking {
         controller.firstScan(pid, "eboot.bin", ValueType.INT32, ScanMode.EXACT, "5000")
         awaitDone()
         val before = addresses()
@@ -231,8 +231,27 @@ class ScannerTest {
         delay(150)
         server.dropAllClients()
         val st = awaitDone()
-        assertTrue(st.toString(), st is ScanStatus.Failed)
+        // The interrupted read is repeated on a fresh session (reads are idempotent) and the scan completes.
+        assertTrue(st.toString(), st is ScanStatus.Completed)
         assertEquals(before, addresses())
+        assertTrue(client.reconnectCount.get() >= 1)
+    }
+
+    @Test fun disconnectDuringScanFailsSafelyWithoutAutoReconnect() = runBlocking {
+        val c2 = Ps4DebugClient(maxReadChunk = 256 * 1024)
+        c2.connect(ConnectOptions("127.0.0.1", server.port, readTimeoutMs = 5000, autoReconnect = false))
+        val ctl = ScanController(c2, scope)
+        ctl.firstScan(pid, "eboot.bin", ValueType.INT32, ScanMode.EXACT, "5000")
+        withTimeout(30_000) { ctl.status.first { it !is ScanStatus.Running } }
+        val before = ctl.results()!!.let { r -> (0 until r.count).map { r.address(it) } }
+        server.faults.readDelayMs = 100
+        ctl.firstScan(pid, "eboot.bin", ValueType.INT32, ScanMode.EXACT, "5000", options = ScanOptions(chunkSize = 64 * 1024))
+        delay(150)
+        server.dropAllClients()
+        val st = withTimeout(30_000) { ctl.status.first { it !is ScanStatus.Running } }
+        assertTrue(st.toString(), st is ScanStatus.Failed)
+        assertEquals(before, ctl.results()!!.let { r -> (0 until r.count).map { r.address(it) } })
+        c2.disconnect()
     }
 
     @Test fun processTerminationBetweenScans() = runBlocking {

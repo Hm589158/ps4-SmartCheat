@@ -10,6 +10,8 @@ sealed interface ConnectionState {
     data object Disconnected : ConnectionState
     data class Connecting(val host: String, val port: Int) : ConnectionState
     data class Connected(val info: ConsoleInfo) : ConnectionState
+    /** The link dropped; the client is re-establishing it automatically. */
+    data class Reconnecting(val host: String, val port: Int, val attempt: Int, val maxAttempts: Int, val reason: String) : ConnectionState
     /** The connection ended unexpectedly. */
     data class Failed(val message: String) : ConnectionState
 }
@@ -28,6 +30,11 @@ data class ConnectOptions(
     val probeServerScan: Boolean = true,
     /** Read timeout while the PS4 scans (the server may be silent for a long time). */
     val serverScanTimeoutMs: Int = 600_000,
+    /** Re-establish a dropped connection automatically (writes are never repeated). */
+    val autoReconnect: Boolean = true,
+    val reconnectAttempts: Int = 3,
+    /** First retry delay; doubles per attempt. */
+    val reconnectBackoffMs: Long = 500,
 ) {
     companion object {
         /** ps4debug command server port (server.h, PS4DBG_PORT). */
@@ -66,6 +73,12 @@ interface DebugBackend {
 
     /** Total bytes received/sent on the debug connection(s) since creation. */
     fun traffic(): Traffic = Traffic(0, 0)
+
+    /** Cheap liveness check (keep-alive); throws if the console cannot be reached. */
+    suspend fun ping() {}
+
+    /** Milliseconds since the last completed request (for idle detection). */
+    fun idleMillis(): Long = 0
 }
 
 data class Traffic(val bytesIn: Long, val bytesOut: Long) {
@@ -77,6 +90,12 @@ data class Traffic(val bytesIn: Long, val bytesOut: Long) {
 open class BackendException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 class NotConnectedException : BackendException("Not connected to a PS4")
+
+/**
+ * The connection dropped during a non-repeatable operation (e.g. a write) and was re-established.
+ * The operation was NOT repeated automatically; the caller decides what to do.
+ */
+class ConnectionInterruptedException(message: String, cause: Throwable? = null) : BackendException(message, cause)
 
 class ProtocolException(message: String, cause: Throwable? = null) : BackendException(message, cause)
 

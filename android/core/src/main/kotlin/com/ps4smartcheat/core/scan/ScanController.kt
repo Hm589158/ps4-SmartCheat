@@ -350,6 +350,23 @@ class ScanController(
         _status.value = ScanStatus.Idle
     }
 
+    /**
+     * Ends the session of a process that exited or was replaced: its absolute addresses are meaningless now.
+     * If it is the active session the status explains why.
+     */
+    fun invalidate(pid: Int, reason: String) {
+        val s = sessions.remove(pid) ?: return
+        if (activePid == pid && isRunning) cancel()
+        releaseTurbo(s)
+        s.dispose()
+        if (activePid == pid) {
+            _session.value = null
+            _status.value = ScanStatus.Failed("Scan session ended: $reason")
+        }
+    }
+
+    fun hasSession(pid: Int): Boolean = sessions.containsKey(pid)
+
     /** Drops every session (e.g. after disconnect: absolute addresses are meaningless in a new session). */
     fun resetAll() {
         cancel()

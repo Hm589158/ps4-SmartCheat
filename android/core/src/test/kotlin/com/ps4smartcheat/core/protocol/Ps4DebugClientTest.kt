@@ -8,6 +8,7 @@ import com.ps4smartcheat.core.backend.NotConnectedException
 import com.ps4smartcheat.core.backend.WriteStatus
 import com.ps4smartcheat.mockserver.DemoGame
 import com.ps4smartcheat.mockserver.MockPs4DebugServer
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
@@ -18,6 +19,10 @@ import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
 import java.net.ServerSocket
+
+private fun kotlinx.coroutines.CoroutineScope.launchCollect(
+    client: Ps4DebugClient, into: MutableList<ConnectionState>,
+) = launch { client.state.collect { into += it } }
 
 class Ps4DebugClientTest {
     private lateinit var server: MockPs4DebugServer
@@ -133,7 +138,7 @@ class Ps4DebugClientTest {
     }
 
     @Test fun readTimeoutMarksConnectionFailed() = runBlocking {
-        client.connect(opts(readTimeout = 400))
+        client.connect(opts(readTimeout = 400).copy(reconnectBackoffMs = 50))
         server.faults.stallOnCommand = MockPs4DebugServer.CMD_PROC_LIST
         try {
             client.getProcesses()
@@ -228,12 +233,71 @@ class Ps4DebugClientTest {
         assertEquals(3, client.getProcesses().size)
     }
 
-    @Test fun serverDropIsDetected() = runBlocking {
+    @Test fun serverDropIsRecoveredTransparentlyForReads() = runBlocking {
         client.connect(opts())
+        server.dropAllClients()
+        Thread.sleep(100)
+        assertEquals(3, client.getProcesses().size) // read repeated once on the new session
+        assertTrue(client.state.value is ConnectionState.Connected)
+        assertEquals(1, client.reconnectCount.get())
+    }
+
+    @Test fun serverDropIsFatalWhenAutoReconnectIsOff() = runBlocking {
+        client.connect(opts().copy(autoReconnect = false))
         server.dropAllClients()
         Thread.sleep(100)
         try { client.getProcesses(); fail() } catch (e: BackendException) { }
         assertTrue(client.state.value is ConnectionState.Failed)
+    }
+
+    @Test fun writeIsNeverRepeatedAfterReconnect() = runBlocking {
+        client.connect(opts())
+        server.faults.dropOnCommand = MockPs4DebugServer.CMD_PROC_WRITE
+        try {
+            client.writeMemory(DemoGame.PID, DemoGame.COINS_ADDRESS, byteArrayOf(1, 0, 0, 0)); fail()
+        } catch (e: com.ps4smartcheat.core.backend.ConnectionInterruptedException) {
+            assertTrue(e.message!!, e.message!!.contains("not repeated"))
+        }
+        assertEquals(5000, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+        assertEquals(0, server.writeRequests.get()) // never executed, never replayed
+        assertTrue(client.state.value is ConnectionState.Connected)
+        server.faults.dropOnCommand = null
+        assertEquals(WriteStatus.Accepted, client.writeMemory(DemoGame.PID, DemoGame.COINS_ADDRESS, byteArrayOf(1, 0, 0, 0)))
+        assertEquals(1, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+    }
+
+    @Test fun serverGoneFailsAfterReconnectAttempts() = runBlocking {
+        client.connect(opts().copy(reconnectAttempts = 2, reconnectBackoffMs = 50))
+        val seen = java.util.concurrent.CopyOnWriteArrayList<ConnectionState>()
+        val watcher = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Default).launchCollect(client, seen)
+        server.close()
+        try { client.getProcesses(); fail() } catch (e: BackendException) { }
+        Thread.sleep(100)
+        watcher.cancel()
+        assertTrue(client.state.value is ConnectionState.Failed)
+        assertTrue(seen.toString(), seen.any { it is ConnectionState.Reconnecting && it.attempt == 2 })
+    }
+
+    @Test fun pingDetectsAndRepairsDeadLink() = runBlocking {
+        client.connect(opts())
+        server.dropAllClients()
+        Thread.sleep(100)
+        client.ping()
+        assertEquals(1, client.reconnectCount.get())
+        assertTrue(client.idleMillis() < 1000)
+    }
+
+    @Test fun eventsAreStructured() = runBlocking {
+        val events = java.util.concurrent.CopyOnWriteArrayList<com.ps4smartcheat.core.logging.Event>()
+        client.events = com.ps4smartcheat.core.logging.EventSink { events += it }
+        client.connect(opts())
+        server.dropAllClients()
+        Thread.sleep(100)
+        client.getProcesses()
+        val msgs = events.map { it.message }
+        assertTrue(msgs.toString(), msgs.containsAll(listOf("connected", "connection lost", "reconnected")))
+        val line = events.first { it.message == "connected" }.toJsonLine()
+        assertTrue(line, line.startsWith("{\"t\":") && line.contains("\"cat\":\"CONNECTION\"") && line.contains("\"port\":\"${server.port}\""))
     }
 
     @Test fun parsersHandleExactLayouts() {

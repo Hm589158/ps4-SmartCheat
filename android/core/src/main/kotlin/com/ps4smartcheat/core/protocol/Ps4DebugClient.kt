@@ -2,6 +2,11 @@ package com.ps4smartcheat.core.protocol
 
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.CommandFailedException
+import com.ps4smartcheat.core.backend.ConnectionInterruptedException
+import com.ps4smartcheat.core.logging.EventCategory
+import com.ps4smartcheat.core.logging.EventLevel
+import com.ps4smartcheat.core.logging.EventSink
+import com.ps4smartcheat.core.logging.log
 import com.ps4smartcheat.core.backend.ConnectOptions
 import com.ps4smartcheat.core.backend.ConnectionState
 import com.ps4smartcheat.core.backend.DebugBackend
@@ -55,6 +60,8 @@ class Ps4DebugClient(
     private val socketFactory: () -> Socket = { Socket() },
     /** Maximum bytes requested per CMD_PROC_READ round-trip. */
     val maxReadChunk: Int = 1 shl 20,
+    /** Structured diagnostics (connection lifecycle, failures, reconnects). */
+    @Volatile var events: EventSink = EventSink.NONE,
 ) : DebugBackend, ServerScanTransport {
 
     override val name: String get() = if (capabilities.isNg) "ps4debug-NG" else "ps4debug"
@@ -72,6 +79,13 @@ class Ps4DebugClient(
     /** Set when the server closed the session after an error status; the next request reconnects. */
     private var reconnectPending = false
     @Volatile private var userDisconnecting = false
+
+    @Volatile private var lastActivity = System.currentTimeMillis()
+
+    /** Number of successful automatic reconnects since creation. */
+    val reconnectCount = java.util.concurrent.atomic.AtomicInteger()
+
+    override fun idleMillis(): Long = System.currentTimeMillis() - lastActivity
 
     private val bytesIn = AtomicLong()
     private val bytesOut = AtomicLong()
@@ -95,10 +109,18 @@ class Ps4DebugClient(
                 consoleInfo = info
                 reconnectPending = false
                 _state.value = ConnectionState.Connected(info)
+                events.log(
+                    EventLevel.INFO, EventCategory.CONNECTION, "connected",
+                    "host" to info.host, "port" to info.port, "version" to info.debuggerVersion,
+                    "brand" to info.capabilities.brand, "ng" to info.capabilities.isNg,
+                    "scanAuth" to info.capabilities.scanAuthorized, "turbo" to info.capabilities.turboResident,
+                    "fw" to info.firmwareText,
+                )
                 info
             } catch (e: Exception) {
                 closeSocketQuietly()
                 val be = translate(e, "connect")
+                events.log(EventLevel.ERROR, EventCategory.CONNECTION, "connect failed", "host" to options.host, "port" to options.port, "error" to be.message)
                 _state.value = ConnectionState.Failed(be.message ?: "Connection failed")
                 throw be
             }
@@ -174,7 +196,7 @@ class Ps4DebugClient(
         return out
     }
 
-    override suspend fun writeMemory(pid: Int, address: Long, data: ByteArray): WriteStatus = request("memory write") {
+    override suspend fun writeMemory(pid: Int, address: Long, data: ByteArray): WriteStatus = request("memory write", idempotent = false) {
         val body = LE.buffer(P.CMD_PROC_WRITE_PACKET_SIZE).putInt(pid).putLong(address).putInt(data.size).array()
         send(header(P.CMD_PROC_WRITE, body.size), body)
         val ack = readStatus()
@@ -194,7 +216,7 @@ class Ps4DebugClient(
      * Runs a multi-step exchange (server-side scans) with exclusive access to the connection.
      * Same error handling as normal requests; [readTimeoutMs] temporarily replaces the socket timeout.
      */
-    override suspend fun <T> exclusive(what: String, readTimeoutMs: Int?, block: (Wire) -> T): T = request(what) {
+    override suspend fun <T> exclusive(what: String, readTimeoutMs: Int?, block: (Wire) -> T): T = request(what, idempotent = false) {
         val s = socket ?: throw NotConnectedException()
         val saved = s.soTimeout
         if (readTimeoutMs != null) s.soTimeout = readTimeoutMs
@@ -248,7 +270,15 @@ class Ps4DebugClient(
 
     // ---------------------------------------------------------------------------------------------
 
-    private suspend fun <T> request(what: String, block: () -> T): T = mutex.withLock {
+    /**
+     * Runs one exchange under the connection mutex.
+     *
+     * Connection loss (EOF, reset, timeout, desynchronised stream) triggers automatic reconnection when
+     * enabled. An [idempotent] request (reads, lists, maps, info) is then repeated once; a non-idempotent one
+     * (writes, server scans) is never repeated and fails with [ConnectionInterruptedException] while the
+     * connection itself is restored.
+     */
+    private suspend fun <T> request(what: String, idempotent: Boolean = true, block: () -> T): T = mutex.withLock {
         withContext(ioDispatcher) {
             val opts = options ?: throw NotConnectedException()
             if (reconnectPending || socket == null) {
@@ -257,27 +287,84 @@ class Ps4DebugClient(
                     openSession(opts, probe = false)
                     reconnectPending = false
                 } catch (e: Exception) {
-                    failConnection(translate(e, "reconnect"))
+                    if (!(opts.autoReconnect && reconnect(opts, "session reopen failed: ${e.message}"))) {
+                        failConnection(translate(e, "reconnect"))
+                    }
                 }
             }
             try {
-                block()
+                block().also { lastActivity = System.currentTimeMillis() }
             } catch (e: InSyncAbort) {
                 throw e
             } catch (e: CommandFailedException) {
                 // The server closes the session after most failure statuses.
                 reconnectPending = true
                 closeSocketQuietly()
+                events.log(EventLevel.WARN, EventCategory.PROTOCOL, "command rejected", "op" to what, "status" to P.statusName(e.status))
                 throw e
             } catch (e: Exception) {
                 if (userDisconnecting) throw NotConnectedException()
-                failConnection(translate(e, what))
+                val be = translate(e, what)
+                events.log(EventLevel.WARN, EventCategory.CONNECTION, "connection lost", "op" to what, "error" to be.message)
+                if (!opts.autoReconnect || !reconnect(opts, be.message ?: "connection lost")) failConnection(be)
+                if (!idempotent) {
+                    throw ConnectionInterruptedException(
+                        "The connection dropped during $what and was re-established. The operation was not repeated automatically.", e,
+                    )
+                }
+                try {
+                    block().also { lastActivity = System.currentTimeMillis() }
+                } catch (e2: InSyncAbort) {
+                    throw e2
+                } catch (e2: CommandFailedException) {
+                    reconnectPending = true
+                    closeSocketQuietly()
+                    throw e2
+                } catch (e2: Exception) {
+                    // Failed again right after reconnecting: give up instead of looping.
+                    failConnection(translate(e2, what))
+                }
             }
+        }
+    }
+
+    /** Blocking reconnect with exponential backoff; updates [state]. @return true when a new session is open. */
+    private fun reconnect(opts: ConnectOptions, reason: String): Boolean {
+        closeSocketQuietly()
+        val max = opts.reconnectAttempts.coerceIn(1, 10)
+        for (attempt in 1..max) {
+            if (userDisconnecting) return false
+            _state.value = ConnectionState.Reconnecting(opts.host, opts.port, attempt, max, reason)
+            Thread.sleep(opts.reconnectBackoffMs.coerceIn(0, 10_000) shl (attempt - 1))
+            if (userDisconnecting) return false
+            try {
+                openSession(opts, probe = false)
+                reconnectPending = false
+                reconnectCount.incrementAndGet()
+                consoleInfo?.let { _state.value = ConnectionState.Connected(it) }
+                events.log(EventLevel.INFO, EventCategory.CONNECTION, "reconnected", "attempt" to attempt, "reason" to reason)
+                return true
+            } catch (e: Exception) {
+                closeSocketQuietly()
+                events.log(EventLevel.WARN, EventCategory.CONNECTION, "reconnect attempt failed", "attempt" to attempt, "error" to e.message)
+            }
+        }
+        return false
+    }
+
+    /** Keep-alive: CMD_VERSION is answered by every ps4debug variant without side effects. */
+    override suspend fun ping() {
+        request("keep-alive") {
+            send(header(P.CMD_VERSION, 0))
+            val len = readU32()
+            if (len < 0 || len > 256) throw ProtocolException("Invalid CMD_VERSION length $len")
+            readExactly(len.toInt())
         }
     }
 
     private fun failConnection(e: BackendException): Nothing {
         closeSocketQuietly()
+        events.log(EventLevel.ERROR, EventCategory.CONNECTION, "connection failed", "error" to e.message)
         options = null
         _state.value = ConnectionState.Failed(e.message ?: "Connection lost")
         throw e

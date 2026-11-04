@@ -51,7 +51,7 @@ object DemoGame {
 
     fun install(server: MockPs4DebugServer, seed: Int = 1234): MockPs4DebugServer.Process {
         server.addProcess(MockPs4DebugServer.Process(1, "SceSysCore.elf"))
-        server.addProcess(MockPs4DebugServer.Process(40, "SceShellUI"))
+        server.addProcess(MockPs4DebugServer.Process(40, "SceShellUI", titleId = "NPXS20001", path = "/system/vsh/app/NPXS20001/eboot.bin"))
         val p = server.addProcess(
             MockPs4DebugServer.Process(PID, "eboot.bin", titleId = "MOCK00001", contentId = "MOCK-CONTENT", path = "/app0/eboot.bin"),
         )
