@@ -32,6 +32,10 @@ The mock is an independent implementation of the server side over real TCP, with
   values from the mock in one request, entry follows a mock game restart.
 * `RangeModesTest` – bigger/smaller/between for signed ints and floats (NaN never matches), fallback from server
   tiers, results equal to brute force.
+* `PointerScanTest` – parallel sort, chain notation/JSON, chain found from static data to a heap value in a mock
+  game, every reported chain resolves to the target, chain survives a restart with a relocated heap while a decoy
+  is filtered out, broken chains never read unmapped memory, map/scan/result limits. `PointerWatchTest` – pointer
+  entries in the address list follow a moving object and turn "broken" on a null pointer without failing reads.
 * `PatternSearchTest` – hex/wildcard/text parsing, matches across chunk borders, none across regions, alignment,
   hit cap; results equal to brute force over mock memory.
 
@@ -45,7 +49,8 @@ cheat → memory viewer → cheat library → settings. It asserts on-screen tex
 screenshot per step (`app/build/outputs/roborazzi/`). CI publishes the screenshots and JUnit XML to the
 `ci-screenshots` branch (see its README.md). Further tests: refused connection is reported and recoverable;
 public addresses are blocked; address list survives a game restart (module-relative) without duplicates; byte
-pattern search; "Value between" scan. This shows the app works end to end with a ps4debug-NG-compatible server; it is
+pattern search; "Value between" scan; pointer scan from an address-list entry finds the static chain, and the
+added pointer entry follows the object when the mock game moves it. This shows the app works end to end with a ps4debug-NG-compatible server; it is
 not a PS4 test.
 
 ## Android

@@ -22,6 +22,7 @@ plain JVM (locally and in CI). `app` is a thin MVVM layer over `core`.
 | `live` | `FreezeManager` (client-side periodic writes while connected) |
 | `tools` | `MemoryViewer`/`HexDump` (mapped-only display reads, change diff), `ScanResultsCsv`, `BytePattern`/`PatternSearch` (AOB and text search) |
 | `watch` | Per-game address list: `WatchRepository` (atomic JSON keyed by title ID), `WatchResolver` (module-relative / same session / earlier session / unmapped), `WatchReader` (batched reads within one region) |
+| `pointer` | `PointerScanner` (pointer map as two sorted primitive arrays, bounded backward search to static module data, restart filter), `PointerResolver` (follows a chain reading mapped memory only), `PointerChain` |
 | `process` | `GameDetector`, `ProcessWatcher` (exit/restart detection) |
 
 ## Key decisions

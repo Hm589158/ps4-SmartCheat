@@ -21,6 +21,8 @@ server-side and Turbo scanning); classic ps4debug works in compatibility mode wi
 * Byte pattern (AOB, `??`/nibble wildcards) and text (ASCII/UTF-8, UTF-16LE) search
 * Address list per game: named addresses with live values, module-relative entries that follow the game across
   restarts, freeze and edit from the list
+* Pointer scan for values whose address changes every run: pointer map built on the phone, backward search to
+  static game data, filter after a restart, pointer-chain entries in the address list
 * Memory editor: read-only by default, confirmation for every write, fresh read-back verification, restore of
   original bytes, client-side freeze while connected
 * Memory viewer (hex + ASCII, live refresh with changed-byte highlighting), live result values, CSV export of results
