@@ -72,6 +72,8 @@ class PointerScanViewModel(private val c: AppContainer) : ViewModel() {
 
     fun cancel() = c.pointerScan.cancel()
 
+    fun estimateBytes(): Long? = c.pointerScan.estimateBytes()
+
     fun add(chain: PointerChain) {
         val sel = c.selectedProcess.value ?: return
         val type = state.value.type
@@ -127,6 +129,13 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
                     Selector("Depth", depthOptions, depth, { "$it" }, { depth = it }, Modifier.weight(0.7f), enabled = !st.running)
                     Selector("Max offset", offsetOptions, maxOffset, { "0x" + Integer.toHexString(it).uppercase() }, { maxOffset = it }, Modifier.weight(1.3f), enabled = !st.running)
                 }
+                vm.estimateBytes()?.let { b ->
+                    Text(
+                        "Reads about ${b / (1024 * 1024)} MiB from the PS4 to build the map. Lower \"Max region size\" in Settings to skip huge regions.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("pointerEstimate"),
+                    )
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = { vm.start(target, type, depth, maxOffset) }, enabled = connected && alive && !st.running, modifier = Modifier.testTag("pointerStart")) { Text("Find pointers") }
                     if (st.running) OutlinedButton(onClick = vm::cancel) { Text("Cancel") }
@@ -152,7 +161,7 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
             }
             item {
                 Text(
-                    "${st.chains.size} chain(s)" + (st.target?.let { " to ${Address.format(it)}" } ?: "") + if (st.pointerCount > 0) " · ${st.pointerCount} pointers in map" else "",
+                    "${st.chains.size} chain(s)" + (st.target?.let { " to ${Address.format(it)}" } ?: "") + if (st.pointerCount > 0L) " · ${st.pointerCount} pointers in map" else "",
                     style = MaterialTheme.typography.titleSmall, modifier = Modifier.testTag("pointerSummary"),
                 )
                 st.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }

@@ -238,7 +238,7 @@ class AppContainer(context: Context) {
     fun gameKey(sel: SelectedProcess): String = WatchKeys.gameKey(sel.titleId, sel.name)
 
     /** Pointer scans run here (application scope) so they survive leaving the screen. */
-    val pointerScan by lazy { PointerScanService(this) }
+    val pointerScan by lazy { PointerScanService(this, File(cacheDir, "pointer-map")) }
 
     /** Adds a pointer-chain entry for the selected game. [resolved] is the address the chain leads to now. */
     suspend fun addPointerToAddressList(chain: PointerChain, type: ValueType, resolved: Long): String {

@@ -63,6 +63,16 @@ object PointerResolver {
     }
 }
 
+/** "Who points into [low, high]" over all pointers found while building the map. */
+interface PointerIndex : java.io.Closeable {
+    val pointerCount: Long
+    /** True when [PointerScanOptions.maxPointers] was reached and later pointers were dropped. */
+    val truncated: Boolean
+    val bytesScanned: Long
+    fun forEachPointingInto(low: Long, high: Long, block: (location: Long, value: Long) -> Unit)
+    override fun close() {}
+}
+
 /**
  * Every aligned 64-bit value found in [regions] that points into readable mapped memory, sorted by value so
  * "who points near X" is a binary search. Two parallel arrays keep this at 16 bytes per pointer.
@@ -72,12 +82,13 @@ class PointerMap internal constructor(
     private val locations: LongArray,
     private val values: LongArray,
     val count: Int,
-    /** True when [PointerScanOptions.maxPointers] was reached and later pointers were dropped. */
-    val truncated: Boolean,
-    val bytesScanned: Long,
-) {
+    override val truncated: Boolean,
+    override val bytesScanned: Long,
+) : PointerIndex {
+    override val pointerCount: Long get() = count.toLong()
+
     /** Calls [block] for every pointer whose value lies in `[low, high]` (unsigned). */
-    inline fun forEachPointingInto(low: Long, high: Long, block: (location: Long, value: Long) -> Unit) {
+    override fun forEachPointingInto(low: Long, high: Long, block: (location: Long, value: Long) -> Unit) {
         var i = lowerBound(low)
         while (i < count && java.lang.Long.compareUnsigned(valueAt(i), high) <= 0) {
             block(locationAt(i), valueAt(i))
@@ -154,6 +165,64 @@ internal object ParallelSort {
     }
 }
 
+/**
+ * Pointer map kept in sorted runs on disk (memory-mapped, outside the Java heap), so big games do not need the whole
+ * map in phone RAM. Each run file holds `[value, location]` little-endian pairs sorted by value.
+ */
+class SpilledPointerIndex internal constructor(
+    private val files: List<java.io.File>,
+    private val counts: List<Int>,
+    override val truncated: Boolean,
+    override val bytesScanned: Long,
+) : PointerIndex {
+    private val runs: List<java.nio.LongBuffer> = files.map { f ->
+        java.io.RandomAccessFile(f, "r").use { raf ->
+            raf.channel.map(java.nio.channels.FileChannel.MapMode.READ_ONLY, 0, raf.length())
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN).asLongBuffer()
+        }
+    }
+    override val pointerCount: Long = counts.sumOf { it.toLong() }
+    val runCount: Int get() = files.size
+
+    override fun forEachPointingInto(low: Long, high: Long, block: (location: Long, value: Long) -> Unit) {
+        for ((r, buf) in runs.withIndex()) {
+            val n = counts[r]
+            var lo = 0
+            var hi = n
+            while (lo < hi) {
+                val mid = (lo + hi) ushr 1
+                if (java.lang.Long.compareUnsigned(buf.get(2 * mid), low) < 0) lo = mid + 1 else hi = mid
+            }
+            var i = lo
+            while (i < n) {
+                val v = buf.get(2 * i)
+                if (java.lang.Long.compareUnsigned(v, high) > 0) break
+                block(buf.get(2 * i + 1), v)
+                i++
+            }
+        }
+    }
+
+    override fun close() { files.forEach { it.delete() } }
+
+    internal companion object {
+        /** Sorts the first [n] pairs by value and writes them as one run file. */
+        fun writeRun(dir: java.io.File, index: Int, locs: LongArray, vals: LongArray, n: Int): java.io.File {
+            ParallelSort.sortByValue(vals, locs, n)
+            val f = java.io.File.createTempFile("pointers-$index-", ".run", dir)
+            java.io.FileOutputStream(f).channel.use { ch ->
+                val bb = java.nio.ByteBuffer.allocate(1 shl 16).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                for (i in 0 until n) {
+                    if (bb.remaining() < 16) { bb.flip(); while (bb.hasRemaining()) ch.write(bb); bb.clear() }
+                    bb.putLong(vals[i]).putLong(locs[i])
+                }
+                bb.flip(); while (bb.hasRemaining()) ch.write(bb)
+            }
+            return f
+        }
+    }
+}
+
 data class PointerScanOptions(
     /** Maximum number of dereferences in a chain. */
     val maxDepth: Int = 4,
@@ -161,8 +230,10 @@ data class PointerScanOptions(
     val maxOffset: Int = 0x1000,
     /** Pointer chains returned at most. */
     val maxResults: Int = 2_000,
-    /** Pointers kept in the map (16 bytes each on the phone). */
+    /** Pointers kept in the map (16 bytes each, in RAM or in run files when spilling). */
     val maxPointers: Int = 4_000_000,
+    /** When spilling to disk: pointers per sorted run (RAM used while building ≈ 16 bytes × this). */
+    val runSize: Int = 2_000_000,
     /** Bytes of memory read to build the map. */
     val maxScanBytes: Long = 512L * 1024 * 1024,
     /** Addresses explored per level, bounding the search's fan-out. */
@@ -172,14 +243,14 @@ data class PointerScanOptions(
     init {
         require(maxDepth in 1..8) { "maxDepth must be 1..8" }
         require(maxOffset in 0..0x100000 && maxOffset % 4 == 0) { "maxOffset must be 0..0x100000 and a multiple of 4" }
-        require(maxResults > 0 && maxPointers > 0 && maxNodesPerLevel > 0) { "limits must be positive" }
+        require(maxResults > 0 && maxPointers > 0 && maxNodesPerLevel > 0 && runSize > 0) { "limits must be positive" }
     }
 }
 
 data class PointerScanResult(
     val target: Long,
     val chains: List<PointerChain>,
-    val pointerCount: Int,
+    val pointerCount: Long,
     val mapTruncated: Boolean,
     val resultsTruncated: Boolean,
     val bytesScanned: Long,
@@ -193,15 +264,24 @@ object PointerScanner {
     /** Static bases: data regions belonging to a module image (eboot.bin, *.sprx, …). */
     fun isStatic(region: MemoryRegion): Boolean = ModuleResolver.isModuleName(region.name) && !region.isExecutable
 
-    /** Reads [regions] and collects aligned qwords that point into any readable region of [allRegions]. */
+    /** Bytes [buildMap] reads for this memory map (non-executable readable regions, optionally size-capped). */
+    fun estimateBytes(regions: List<MemoryRegion>, maxRegionBytes: Long = 0): Long =
+        mapRegions(regions).filter { maxRegionBytes <= 0 || it.size <= maxRegionBytes }.sumOf { it.size }
+
+    /**
+     * Reads [regions] and collects aligned qwords that point into any readable region of [allRegions].
+     * With [spillDir], pointers are written to sorted run files of [PointerScanOptions.runSize] so RAM stays bounded;
+     * the caller must [PointerIndex.close] the result to delete them.
+     */
     suspend fun buildMap(
         backend: DebugBackend,
         pid: Int,
         regions: List<MemoryRegion>,
         allRegions: List<MemoryRegion>,
         options: PointerScanOptions = PointerScanOptions(),
+        spillDir: java.io.File? = null,
         progress: ProgressListener = {},
-    ): PointerMap {
+    ): PointerIndex {
         val total = regions.sumOf { it.size }
         if (total > options.maxScanBytes) {
             throw ScanTooLargeException(
@@ -223,12 +303,17 @@ object PointerScanner {
             val i = lo - 1
             return i >= 0 && java.lang.Long.compareUnsigned(v, tEnds[i]) < 0
         }
-        var locs = LongArray(1024)
-        var vals = LongArray(1024)
+        val bufferCap = if (spillDir != null) minOf(options.runSize, options.maxPointers) else options.maxPointers
+        var locs = LongArray(minOf(1024, bufferCap))
+        var vals = LongArray(minOf(1024, bufferCap))
         var n = 0
+        var total2 = 0L
+        val runFiles = ArrayList<java.io.File>()
+        val runCounts = ArrayList<Int>()
         var truncated = false
         var done = 0L
         progress(ScanProgress(0, total, 0, "Pointer map"))
+        try {
         outer@ for (r in regions) {
             var pos = (r.start + 7) and 7L.inv()
             while (pos + 8 <= r.end) {
@@ -240,23 +325,40 @@ object PointerScanner {
                 while (off + 8 <= len) {
                     val v = LE.i64(buf, off)
                     if (v != 0L && (v and 3L) == 0L && mapped(v)) {
-                        if (n >= options.maxPointers) { truncated = true; break@outer }
+                        if (total2 >= options.maxPointers) { truncated = true; break@outer }
+                        if (n == bufferCap && spillDir != null) {
+                            runFiles += SpilledPointerIndex.writeRun(spillDir, runFiles.size, locs, vals, n)
+                            runCounts += n
+                            n = 0
+                        }
                         if (n == locs.size) {
-                            val grow = minOf(locs.size.toLong() * 2, options.maxPointers.toLong()).toInt().coerceAtLeast(n + 1)
+                            val grow = minOf(locs.size.toLong() * 2, bufferCap.toLong()).toInt().coerceAtLeast(n + 1)
                             locs = locs.copyOf(grow); vals = vals.copyOf(grow)
                         }
                         locs[n] = pos + off
                         vals[n] = v
                         n++
+                        total2++
                     }
                     off += 8
                 }
                 pos += len
                 done += len
-                progress(ScanProgress(done, total, n.toLong(), "Pointer map"))
+                progress(ScanProgress(done, total, total2, "Pointer map"))
             }
         }
-        return PointerMap.build(locs, vals, n, truncated, done)
+        } catch (t: Throwable) {
+            runFiles.forEach { it.delete() } // cancelled or failed mid-scan: no stray run files
+            throw t
+        }
+        if (runFiles.isEmpty()) return PointerMap.build(locs, vals, n, truncated, done)
+        try {
+            if (n > 0) { runFiles += SpilledPointerIndex.writeRun(spillDir!!, runFiles.size, locs, vals, n); runCounts += n }
+            return SpilledPointerIndex(runFiles, runCounts, truncated, done)
+        } catch (t: Throwable) {
+            runFiles.forEach { it.delete() }
+            throw t
+        }
     }
 
     /**
@@ -264,7 +366,7 @@ object PointerScanner {
      * level 2 pointers to those pointers, and so on. A pointer stored in a static module region ends a chain.
      */
     suspend fun findChains(
-        map: PointerMap,
+        map: PointerIndex,
         target: Long,
         regions: List<MemoryRegion>,
         options: PointerScanOptions = PointerScanOptions(),
@@ -311,7 +413,7 @@ object PointerScanner {
         }
         // Shortest, then smallest offsets first: those are the most likely to be stable.
         val ordered = chains.distinct().sortedWith(compareBy<PointerChain>({ it.depth }, { it.offsets.sumOf { o -> o } }))
-        return PointerScanResult(target, ordered, map.count, map.truncated, resultsTruncated, map.bytesScanned)
+        return PointerScanResult(target, ordered, map.pointerCount, map.truncated, resultsTruncated, map.bytesScanned)
     }
 
     /**

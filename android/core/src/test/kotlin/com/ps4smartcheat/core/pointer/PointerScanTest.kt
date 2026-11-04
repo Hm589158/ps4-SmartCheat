@@ -114,7 +114,7 @@ class PointerScanTest {
         val regions = client.getMemoryRegions(13)
         val tiny = PointerScanner.buildMap(client, 13, PointerScanner.mapRegions(regions), regions, PointerScanOptions(maxPointers = 1))
         assertTrue(tiny.truncated)
-        assertEquals(1, tiny.count)
+        assertEquals(1L, tiny.pointerCount)
         try {
             PointerScanner.buildMap(client, 13, PointerScanner.mapRegions(regions), regions, PointerScanOptions(maxScanBytes = 1024))
             throw AssertionError("expected limit")
@@ -169,5 +169,45 @@ class PointerWatchTest {
         assertEquals(com.ps4smartcheat.core.watch.WatchStatus.POINTER_BROKEN, r3.status)
         assertEquals(null, v3)
         assertTrue(client.state.value is ConnectionState.Connected)
+    }
+}
+
+class SpilledPointerIndexTest {
+    @get:org.junit.Rule val tmp = org.junit.rules.TemporaryFolder()
+    private val server = MockPs4DebugServer()
+    private val client = Ps4DebugClient()
+
+    @After fun tearDown() {
+        runBlocking { client.disconnect() }
+        server.close()
+    }
+
+    @Test fun spilledRunsGiveTheSameChainsAsTheInMemoryMapAndAreDeleted() = runBlocking {
+        // Many heap pointers (an array of object pointers) force several runs with a tiny run size.
+        val p = server.addProcess(MockPs4DebugServer.Process(30, "eboot.bin", titleId = "CUSA00001"))
+        p.region("eboot.bin", 0x40_0000, 0x1000, PROT_R or PROT_X)
+        val data = p.region("eboot.bin", 0x50_0000, 0x1000, PROT_R or PROT_W)
+        val heapBase = 0x20_0000_0000L
+        val heap = p.region("anon:heap", heapBase, 0x20000, PROT_R or PROT_W)
+        val hb = ByteBuffer.wrap(heap.data).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until 1000) hb.putLong(0x8000 + i * 8, heapBase + 0x100 * (i % 64)) // noise pointers
+        ByteBuffer.wrap(data.data).order(ByteOrder.LITTLE_ENDIAN).putLong(0x200, heapBase + 0x1000)
+        hb.putLong(0x1000 + 0x10, heapBase + 0x3000)
+        val target = heapBase + 0x3000 + 0x48
+        client.connect(ConnectOptions("127.0.0.1", server.port, readTimeoutMs = 3000))
+        val regions = client.getMemoryRegions(30)
+        val opts = PointerScanOptions(maxDepth = 3, maxOffset = 0x100, runSize = 100)
+        val mem = PointerScanner.buildMap(client, 30, PointerScanner.mapRegions(regions), regions, opts)
+        val spilled = PointerScanner.buildMap(client, 30, PointerScanner.mapRegions(regions), regions, opts, spillDir = tmp.root)
+        assertTrue(spilled is SpilledPointerIndex)
+        assertTrue((spilled as SpilledPointerIndex).runCount > 5)
+        assertEquals(mem.pointerCount, spilled.pointerCount)
+        val a = PointerScanner.findChains(mem, target, regions, opts).chains.toSet()
+        val b = PointerScanner.findChains(spilled, target, regions, opts).chains.toSet()
+        assertEquals(a, b)
+        assertTrue(PointerChain(ModuleRef("eboot.bin", 0x100200), listOf(0x10, 0x48)) in b)
+        assertEquals(PointerScanner.estimateBytes(regions), spilled.bytesScanned)
+        spilled.close()
+        assertTrue(tmp.root.listFiles()!!.none { it.name.endsWith(".run") })
     }
 }

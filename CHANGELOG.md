@@ -6,6 +6,10 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 - Address list → cheat library: "Save as cheat…" on an entry stores it with a value (module-relative when inside a
   module image, ready for GoldHEN export). Pointer-chain entries cannot become cheats (GoldHEN files hold fixed
   offsets only). Editor and address list share one save path.
+- Pointer scan for big games: the pointer map is written to sorted run files in the app cache (memory-mapped,
+  outside the Java heap) — up to 32 M pointers with ≈32 MiB of RAM while building, and up to 2 GiB of memory read.
+  Run files are deleted after each scan, on failure/cancel, and at start-up. The screen shows how much memory the map
+  will read before starting. Spilled and in-memory maps give identical chains (tested).
 - Address list export/import (JSON, current game or all): imports merge by game, skip entries already present and
   reject foreign or newer files without changing anything.
 
