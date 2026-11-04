@@ -119,9 +119,20 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                 is ConnectionState.Failed -> Text("Connection failed: ${s.message}", color = MaterialTheme.colorScheme.error)
                 is ConnectionState.Connected -> {
                     KeyValue("Console", "${s.info.host}:${s.info.port}", mono = true)
+                    val caps = s.info.capabilities
                     KeyValue("Backend", "ps4debug (standard protocol)")
                     KeyValue("Debugger ver.", s.info.debuggerVersion.ifBlank { "unknown" })
+                    KeyValue("Branding", caps.brand ?: "not reported")
                     KeyValue("Firmware", s.info.firmwareText ?: "unknown (not reported by payload)")
+                    KeyValue(
+                        "Scan backends",
+                        buildList {
+                            if (caps.turboResident) add("Turbo (PS4)")
+                            if (caps.serverScan) add("Server-side (PS4)")
+                            add("Android")
+                        }.joinToString(" → "),
+                    )
+                    if (caps.isNg && !caps.scanAuthorized) Text("ps4debug-NG detected but the scan handshake failed; scans run on Android.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }
             }
         }

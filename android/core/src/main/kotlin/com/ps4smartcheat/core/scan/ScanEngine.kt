@@ -10,14 +10,25 @@ data class ScanOptions(
     val chunkSize: Int = 1 shl 20,
     /** Maximum span read at once when refining existing results. */
     val refineSpan: Int = 64 * 1024,
+    /**
+     * Start a new read when the gap to the next candidate exceeds this many bytes. 0 = adaptive: the
+     * controller measures round-trip time and bandwidth and uses their product (break-even gap).
+     */
+    val refineGap: Int = 0,
     /** Hard cap on stored results (bounds memory: count * (8 + type size)). */
     val maxResults: Int = 1_000_000,
     /** Address alignment for candidates; 0 = natural alignment of the type. */
     val alignment: Int = 0,
     /** Maximum snapshot size for unknown-initial-value scans. */
     val maxSnapshotBytes: Long = 512L * 1024 * 1024,
+    /** Which scan backend to prefer; unsupported choices fall back automatically. */
+    val backend: BackendPreference = BackendPreference.AUTO,
+    /** Ask ps4debug-NG Turbo to use page-table aliasing reads (fastest; opt-in). */
+    val turboAliasing: Boolean = false,
 ) {
     fun effectiveAlignment(type: ValueType): Int = if (alignment <= 0) type.size else alignment
+
+    val effectiveRefineGap: Int get() = if (refineGap <= 0) ScanEngine.DEFAULT_REFINE_GAP else refineGap
 
     init {
         require(chunkSize in 16..(16 shl 20)) { "chunkSize out of range" }
@@ -59,8 +70,23 @@ data class RegionFilter(
     }
 }
 
-data class ScanProgress(val bytesDone: Long, val bytesTotal: Long, val matches: Long, val stage: String) {
+data class ScanProgress(
+    /** Bytes (full scans) or candidates (refines) processed. */
+    val bytesDone: Long,
+    val bytesTotal: Long,
+    val matches: Long,
+    val stage: String,
+    /** True while the PS4 is working and cannot report progress (Turbo). */
+    val indeterminate: Boolean = false,
+    val elapsedMs: Long = 0,
+    val backend: ScanBackendKind? = null,
+    /** Network bytes in+out since the step started. */
+    val networkBytes: Long = 0,
+) {
     val fraction: Float get() = if (bytesTotal <= 0) 0f else (bytesDone.toDouble() / bytesTotal).toFloat().coerceIn(0f, 1f)
+
+    /** Throughput in MiB/s for byte-based stages, null for candidate-based refines. */
+    val mibPerSecond: Double? get() = if (elapsedMs <= 0 || stage.startsWith("Refin")) null else bytesDone / 1048576.0 / (elapsedMs / 1000.0)
 }
 
 typealias ProgressListener = (ScanProgress) -> Unit
@@ -260,12 +286,14 @@ object ScanEngine {
                 i++ // memory no longer mapped -> candidate is gone
                 continue
             }
-            // Extend the batch while the next candidate fits in the span and the same region.
+            // Extend the batch while the next candidate fits in the span, the same region, and the gap to it
+            // is cheaper to read than a separate round trip.
             var j = i + 1
             val spanLimit = first + options.refineSpan
             while (j < previous.count) {
                 val a = addrs[j]
                 if (a + size > spanLimit || a + size > region.end || a < first) break
+                if (a - (addrs[j - 1] + size) > options.effectiveRefineGap) break
                 j++
             }
             val spanEnd = addrs[j - 1] + size
@@ -278,6 +306,63 @@ object ScanEngine {
             progress(ScanProgress(i.toLong(), total, builder.count.toLong(), "Refining"))
         }
         return builder.build()
+    }
+
+    /**
+     * Cost-model constant: one request/response round trip is charged as this many bytes. Over Wi-Fi the
+     * latency of a round trip, not its payload, dominates small reads. This is a modelling assumption
+     * (≈2 ms RTT at ≈4 MiB/s), not a measured PS4 figure.
+     */
+    const val ROUND_TRIP_COST_BYTES = 8192L
+
+    /** Gap (bytes) above which two refine candidates are read with separate requests. */
+    const val DEFAULT_REFINE_GAP = 8192
+
+    /** Estimated cost (bytes + round trips) of the Android refine for [previous], same batching as [nextScan]. */
+    fun estimateRefineCost(previous: ScanResults, refineSpan: Int, refineGap: Int = DEFAULT_REFINE_GAP): Long {
+        val size = previous.type.size
+        val a = previous.addressArray()
+        var bytes = 0L
+        var spans = 0L
+        var i = 0
+        while (i < previous.count) {
+            val first = a[i]
+            var j = i + 1
+            while (j < previous.count && a[j] + size <= first + refineSpan && a[j] >= first &&
+                a[j] - (a[j - 1] + size) <= refineGap
+            ) j++
+            bytes += a[j - 1] + size - first
+            spans++
+            i = j
+        }
+        return bytes + spans * (32 + ROUND_TRIP_COST_BYTES)
+    }
+
+    /** Measured link characteristics used to tune refine batching. */
+    data class LinkEstimate(val rttMs: Double, val bytesPerSecond: Double) {
+        /** Gap at which reading the bytes in between costs as much as one extra round trip. */
+        val breakEvenGap: Int get() = (bytesPerSecond * rttMs / 1000.0).toLong().coerceIn(1024L, 1L shl 20).toInt()
+    }
+
+    /**
+     * Two tiny timed reads inside a known-readable [region]: 8 bytes (≈ one round trip) and 64 KiB
+     * (round trip + transfer). Costs four requests; returns null if the timing is unusable.
+     */
+    suspend fun measureLink(backend: DebugBackend, pid: Int, region: MemoryRegion): LinkEstimate? {
+        val big = minOf(64 * 1024L, region.size).toInt()
+        if (big < 4096) return null
+        fun now() = System.nanoTime()
+        var small = Long.MAX_VALUE
+        repeat(2) {
+            val t = now(); backend.readMemory(pid, region.start, 8); small = minOf(small, now() - t)
+        }
+        var large = Long.MAX_VALUE
+        repeat(2) {
+            val t = now(); backend.readMemory(pid, region.start, big); large = minOf(large, now() - t)
+        }
+        val transferNs = (large - small).coerceAtLeast(1)
+        val bps = big * 1e9 / transferNs
+        return LinkEstimate(small / 1e6, bps)
     }
 
     private fun findRegion(regions: List<MemoryRegion>, starts: LongArray, address: Long, size: Int): MemoryRegion? {

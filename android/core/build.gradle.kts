@@ -28,3 +28,20 @@ tasks.test {
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
 }
+
+// Benchmarks are slow and machine-dependent: excluded from `test`, run with `./gradlew :core:benchmark`.
+tasks.named<Test>("test") {
+    exclude("**/ScanBenchmark*")
+}
+
+tasks.register<Test>("benchmark") {
+    description = "Compares Turbo / server-side / Android scan backends on an identical mock dataset."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    filter { includeTestsMatching("*ScanBenchmark*") }
+    systemProperty("benchmark.out", layout.buildDirectory.dir("reports/benchmark").get().asFile.absolutePath)
+    maxHeapSize = "1g"
+    outputs.upToDateWhen { false }
+    testLogging { showStandardStreams = true }
+}

@@ -33,6 +33,7 @@ import com.ps4smartcheat.app.ui.components.ConfirmDialog
 import com.ps4smartcheat.app.ui.components.LabeledSwitch
 import com.ps4smartcheat.app.ui.components.SectionCard
 import com.ps4smartcheat.app.ui.components.Selector
+import com.ps4smartcheat.core.scan.BackendPreference
 
 class SettingsViewModel(private val c: AppContainer) : ViewModel() {
     val settings = c.settings.settings
@@ -89,6 +90,22 @@ fun SettingsScreen() {
             )
             var freeze by remember { mutableStateOf(vm.freezeInterval.toInt()) }
             NumberField("Freeze interval ms", freeze, 50..10_000) { freeze = it; vm.setFreezeInterval(it.toLong()) }
+        }
+        SectionCard("Scan backend") {
+            Selector("Backend", BackendPreference.entries, s.scanBackend, { it.label }, { b -> vm.update { it.copy(scanBackend = b) } })
+            Text(
+                "Automatic tries Turbo Scan (ps4debug-NG ≥ 1.3) → server-side scan (ps4debug-NG) → Android chunked scan, " +
+                    "falling back when a backend is missing or cannot run a request. Float and unaligned scans always run on Android.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            LabeledSwitch(
+                "Detect ps4debug-NG server-side scanning", s.probeServerScan, { v -> vm.update { it.copy(probeServerScan = v) } },
+                "Sends CMD_BRANDING on connect, then the NG scan handshake only if the payload identifies as ps4debug-NG.",
+            )
+            LabeledSwitch(
+                "Turbo page-table aliasing reads", s.turboAliasing, { v -> vm.update { it.copy(turboAliasing = v) } },
+                "ps4debug-NG option that maps target pages into the payload for faster reads. Off by default (more invasive); not verified on hardware.",
+            )
         }
         SectionCard("Scanning") {
             LabeledSwitch("Include read-only regions", s.includeReadOnlyRegions, { v -> vm.update { it.copy(includeReadOnlyRegions = v) } })

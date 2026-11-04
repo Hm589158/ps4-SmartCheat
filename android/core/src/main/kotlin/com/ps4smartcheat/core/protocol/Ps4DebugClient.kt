@@ -7,11 +7,13 @@ import com.ps4smartcheat.core.backend.ConnectionState
 import com.ps4smartcheat.core.backend.DebugBackend
 import com.ps4smartcheat.core.backend.NotConnectedException
 import com.ps4smartcheat.core.backend.ProtocolException
+import com.ps4smartcheat.core.backend.Traffic
 import com.ps4smartcheat.core.backend.WriteStatus
 import com.ps4smartcheat.core.model.ConsoleInfo
 import com.ps4smartcheat.core.model.MemoryRegion
 import com.ps4smartcheat.core.model.ProcessEntry
 import com.ps4smartcheat.core.model.ProcessInfo
+import com.ps4smartcheat.core.model.ServerCapabilities
 import com.ps4smartcheat.core.protocol.Ps4DebugProtocol as P
 import com.ps4smartcheat.core.util.LE
 import com.ps4smartcheat.core.util.cString
@@ -24,6 +26,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.EOFException
+import java.io.FilterInputStream
+import java.io.FilterOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
@@ -32,6 +36,7 @@ import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Client for the standard ps4debug TCP protocol (port 744), compatible with GoldHEN's ps4debug
@@ -48,7 +53,7 @@ class Ps4DebugClient(
     private val socketFactory: () -> Socket = { Socket() },
     /** Maximum bytes requested per CMD_PROC_READ round-trip. */
     val maxReadChunk: Int = 1 shl 20,
-) : DebugBackend {
+) : DebugBackend, ServerScanTransport {
 
     override val name: String = "ps4debug"
 
@@ -66,13 +71,24 @@ class Ps4DebugClient(
     private var reconnectPending = false
     @Volatile private var userDisconnecting = false
 
+    private val bytesIn = AtomicLong()
+    private val bytesOut = AtomicLong()
+    private val epoch = AtomicLong()
+
+    /** Incremented whenever a new TCP session is opened; server-side scan sessions die with the old one. */
+    override val connectionEpoch: Long get() = epoch.get()
+
+    override val capabilities: ServerCapabilities get() = consoleInfo?.capabilities ?: ServerCapabilities.NONE
+
+    override fun traffic(): Traffic = Traffic(bytesIn.get(), bytesOut.get())
+
     override suspend fun connect(options: ConnectOptions): ConsoleInfo = mutex.withLock {
         withContext(ioDispatcher) {
             closeSocketQuietly()
             userDisconnecting = false
             _state.value = ConnectionState.Connecting(options.host, options.port)
             try {
-                val info = openSession(options, probeFirmware = options.queryFirmware)
+                val info = openSession(options, probe = true)
                 this@Ps4DebugClient.options = options
                 consoleInfo = info
                 reconnectPending = false
@@ -172,6 +188,62 @@ class Ps4DebugClient(
         }
     }
 
+    /**
+     * Runs a multi-step exchange (server-side scans) with exclusive access to the connection.
+     * Same error handling as normal requests; [readTimeoutMs] temporarily replaces the socket timeout.
+     */
+    override suspend fun <T> exclusive(what: String, readTimeoutMs: Int?, block: (Wire) -> T): T = request(what) {
+        val s = socket ?: throw NotConnectedException()
+        val saved = s.soTimeout
+        if (readTimeoutMs != null) s.soTimeout = readTimeoutMs
+        try {
+            block(wire)
+        } finally {
+            runCatching { if (!s.isClosed) s.soTimeout = saved }
+        }
+    }
+
+    override val serverScanTimeoutMs: Int get() = options?.serverScanTimeoutMs ?: 600_000
+
+    /**
+     * Sends one command on a separate, short-lived connection (e.g. Turbo CANCEL while the main
+     * connection is busy). ps4debug-NG's scan authorisation is server-global, so no handshake is needed.
+     * @return the status word, or null if the side channel failed.
+     */
+    override fun sendSideChannel(cmd: Int, body: ByteArray): Long? {
+        val opts = options ?: return null
+        return try {
+            Socket().use { s ->
+                s.tcpNoDelay = true
+                s.soTimeout = 3000
+                s.connect(InetSocketAddress(InetAddress.getByName(opts.host.trim()), opts.port), opts.connectTimeoutMs)
+                val out = s.getOutputStream()
+                out.write(header(cmd, body.size)); out.write(body); out.flush()
+                bytesOut.addAndGet((P.CMD_PACKET_SIZE + body.size).toLong())
+                val st = ByteArray(4)
+                var n = 0
+                while (n < 4) { val r = s.getInputStream().read(st, n, 4 - n); if (r < 0) return null; n += r }
+                bytesIn.addAndGet(4)
+                runCatching { out.write(header(P.CMD_CONSOLE_END, 0)); out.flush() }
+                LE.u32(st)
+            }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
+    private val wire = object : Wire {
+        override fun send(vararg parts: ByteArray) = this@Ps4DebugClient.send(*parts)
+        override fun readFully(dst: ByteArray, off: Int, len: Int) = this@Ps4DebugClient.readFully(dst, off, len)
+        override fun readExactly(len: Int): ByteArray = this@Ps4DebugClient.readExactly(len)
+        override fun readU32(): Long = this@Ps4DebugClient.readU32()
+        override fun readU64(): Long = LE.i64(readExactly(8))
+        override fun header(cmd: Int, dataLen: Int): ByteArray = this@Ps4DebugClient.header(cmd, dataLen)
+        override fun expectSuccess(cmd: Int, status: Long) = this@Ps4DebugClient.expectSuccess(cmd, status)
+        /** Marks the session as unusable so the next request reconnects (e.g. after an aborted stream). */
+        override fun invalidate() { reconnectPending = true; closeSocketQuietly() }
+    }
+
     // ---------------------------------------------------------------------------------------------
 
     private suspend fun <T> request(what: String, block: () -> T): T = mutex.withLock {
@@ -180,7 +252,7 @@ class Ps4DebugClient(
             if (reconnectPending || socket == null) {
                 if (userDisconnecting) throw NotConnectedException()
                 try {
-                    openSession(opts, probeFirmware = false)
+                    openSession(opts, probe = false)
                     reconnectPending = false
                 } catch (e: Exception) {
                     failConnection(translate(e, "reconnect"))
@@ -188,6 +260,8 @@ class Ps4DebugClient(
             }
             try {
                 block()
+            } catch (e: InSyncAbort) {
+                throw e
             } catch (e: CommandFailedException) {
                 // The server closes the session after most failure statuses.
                 reconnectPending = true
@@ -207,7 +281,7 @@ class Ps4DebugClient(
         throw e
     }
 
-    private fun openSession(options: ConnectOptions, probeFirmware: Boolean): ConsoleInfo {
+    private fun openSession(options: ConnectOptions, probe: Boolean): ConsoleInfo {
         NetworkPolicy.validateHostSyntax(options.host)?.let { throw BackendException(it) }
         NetworkPolicy.validatePort(options.port)?.let { throw BackendException(it) }
         val addr = InetAddress.getByName(options.host.trim())
@@ -217,52 +291,110 @@ class Ps4DebugClient(
                     "only private/link-local addresses are allowed (see Settings).",
             )
         }
+        val version = openRaw(options, addr)
+        if (!probe) {
+            val prev = consoleInfo
+            // The NG scan authorisation is global on the server, but a payload restart clears it: re-auth cheaply.
+            if (prev != null && prev.capabilities.scanAuthorized) {
+                if (!runCatching { authenticate(options) }.getOrDefault(false)) {
+                    closeSocketQuietly()
+                    openRaw(options, addr)
+                    consoleInfo = prev.copy(capabilities = prev.capabilities.copy(scanAuthorized = false))
+                }
+            }
+            return consoleInfo ?: ConsoleInfo(options.host.trim(), options.port, version, null)
+        }
+
+        var firmware: Int? = null
+        if (options.queryFirmware) {
+            firmware = probeOptional(options, addr) { readU16() }?.let { fw ->
+                if (fw == P.FW_UNKNOWN || fw == 0) null else fw.takeIf { it / 100 in 1..99 }
+            }
+        }
+        var caps = ServerCapabilities.NONE
+        if (options.probeServerScan) {
+            val branding = probeOptional(options, addr, NgProtocol.CMD_BRANDING) {
+                val len = readU32()
+                if (len < 0 || len > 1024) throw ProtocolException("Invalid branding length $len")
+                readExactly(len.toInt())
+            }
+            if (branding != null) {
+                val nul = branding.indexOf(0)
+                val brand = String(branding, 0, if (nul >= 0) nul else branding.size, Charsets.US_ASCII).trim()
+                val level = if (nul >= 0) String(branding, nul + 1, branding.size - nul - 1, Charsets.US_ASCII).trim() else null
+                caps = ServerCapabilities(brand = brand.ifEmpty { null }, capabilityLevel = level?.ifEmpty { null })
+            }
+            // Server-side scanning is only attempted on an identified ps4debug-NG build: other payloads use
+            // overlapping opcodes (0xBDAACCxx) with unknown semantics.
+            if (caps.isNg) {
+                val authed = try { authenticate(options) } catch (e: IOException) { false }
+                if (!authed) { closeSocketQuietly(); openRaw(options, addr) }
+                caps = caps.copy(scanAuthorized = authed)
+                if (authed) {
+                    val turbo = probeOptional(options, addr, NgProtocol.TURBO_CAPS) {
+                        val st = readU32()
+                        if (st != P.CMD_SUCCESS) throw ProtocolException("CAPS status")
+                        val b = readExactly(16)
+                        LE.i32(b, 4)
+                    }
+                    caps = caps.copy(turboEngines = turbo)
+                }
+            }
+        }
+        return ConsoleInfo(options.host.trim(), options.port, version, firmware, caps)
+    }
+
+    /** Opens the TCP session and performs CMD_VERSION. */
+    private fun openRaw(options: ConnectOptions, addr: InetAddress): String {
         val s = socketFactory()
         s.tcpNoDelay = true
         s.soTimeout = options.readTimeoutMs
         s.connect(InetSocketAddress(addr, options.port), options.connectTimeoutMs)
         socket = s
-        input = s.getInputStream().buffered(64 * 1024)
-        output = s.getOutputStream()
+        input = CountingInput(s.getInputStream(), bytesIn).buffered(64 * 1024)
+        output = CountingOutput(s.getOutputStream(), bytesOut)
+        epoch.incrementAndGet()
 
         // CMD_VERSION: no status word; u32 length + ASCII string.
         send(header(P.CMD_VERSION, 0))
         val len = readU32()
         if (len < 0 || len > 256) throw ProtocolException("Invalid CMD_VERSION length $len — is this a ps4debug server?")
-        val version = String(readExactly(len.toInt()), Charsets.US_ASCII).trimEnd('\u0000')
-
-        var firmware: Int? = consoleInfo?.firmware
-        if (probeFirmware) {
-            firmware = probeFirmware(options)
-        }
-        return ConsoleInfo(options.host.trim(), options.port, version, firmware)
+        return String(readExactly(len.toInt()), Charsets.US_ASCII).trimEnd('\u0000')
     }
 
     /**
-     * CMD_FW_VERSION is an extension. A server that does not implement it sends nothing, so the probe
-     * uses a short timeout; on timeout the session is reopened so a late reply cannot desynchronise
-     * the stream.
+     * Sends an optional extension command. A server that lacks it may stay silent (timeout) or close the
+     * connection; in both cases the session is reopened so a late reply can never desynchronise the stream.
      */
-    private fun probeFirmware(options: ConnectOptions): Int? {
+    private fun <T> probeOptional(options: ConnectOptions, addr: InetAddress, cmd: Int = P.CMD_FW_VERSION, read: () -> T): T? {
         val s = socket ?: return null
-        send(header(P.CMD_FW_VERSION, 0))
-        s.soTimeout = options.firmwareProbeTimeoutMs
-        val fw = try {
-            readU16()
-        } catch (e: SocketTimeoutException) {
-            null
+        return try {
+            send(header(cmd, 0))
+            s.soTimeout = options.firmwareProbeTimeoutMs
+            read().also { s.soTimeout = options.readTimeoutMs }
+        } catch (e: IOException) {
+            closeSocketQuietly(); openRaw(options, addr); null
+        } catch (e: ProtocolException) {
+            closeSocketQuietly(); openRaw(options, addr); null
+        }
+    }
+
+    /** ps4debug-NG CMD_PROC_AUTH handshake requesting the scan bit. */
+    private fun authenticate(options: ConnectOptions): Boolean {
+        val s = socket ?: return false
+        val body = LE.buffer(8).putInt(NgProtocol.AUTH_MAGIC).putInt(NgProtocol.AUTH_FLAG_SCAN).array()
+        send(header(NgProtocol.CMD_PROC_AUTH, body.size), body)
+        s.soTimeout = options.firmwareProbeTimeoutMs.coerceAtLeast(1000)
+        try {
+            if (readStatus() != P.CMD_SUCCESS) return false
+            val chlen = readU16()
+            if (chlen <= 0 || chlen > 1024) return false
+            val challenge = readExactly(chlen)
+            send(NgProtocol.authResponse(challenge))
+            return readStatus() == P.CMD_SUCCESS
         } finally {
             runCatching { s.soTimeout = options.readTimeoutMs }
         }
-        if (fw == null) {
-            closeSocketQuietly()
-            openSession(options, probeFirmware = false)
-            return null
-        }
-        if (fw == P.FW_UNKNOWN || fw == 0) return null
-        val major = fw / 100
-        val minor = fw % 100
-        return if (major in 1..99 && minor in 0..99) fw else null
     }
 
     private fun header(cmd: Int, dataLen: Int): ByteArray =
@@ -316,6 +448,16 @@ class Ps4DebugClient(
         is EOFException -> BackendException("The PS4 closed the connection during $what.", e)
         is IOException -> BackendException("Network error during $what: ${e.message}", e)
         else -> BackendException("Unexpected error during $what: ${e.message}", e)
+    }
+
+    private class CountingInput(inp: InputStream, private val counter: AtomicLong) : FilterInputStream(inp) {
+        override fun read(): Int = super.read().also { if (it >= 0) counter.incrementAndGet() }
+        override fun read(b: ByteArray, off: Int, len: Int): Int = super.read(b, off, len).also { if (it > 0) counter.addAndGet(it.toLong()) }
+    }
+
+    private class CountingOutput(out: OutputStream, private val counter: AtomicLong) : FilterOutputStream(out) {
+        override fun write(b: Int) { out.write(b); counter.incrementAndGet() }
+        override fun write(b: ByteArray, off: Int, len: Int) { out.write(b, off, len); counter.addAndGet(len.toLong()) }
     }
 
     companion object {

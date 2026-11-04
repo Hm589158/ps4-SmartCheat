@@ -54,6 +54,28 @@ data class MemoryRegion(
     }
 }
 
+/** Extensions detected on the connected debugger. All fields are probed, never assumed. */
+data class ServerCapabilities(
+    /** CMD_BRANDING text up to the first NUL (e.g. "ps4debug-NG by OSR v1.3.3"); null if unsupported. */
+    val brand: String? = null,
+    /** Text after the NUL in the NG branding reply (e.g. "1.1"). */
+    val capabilityLevel: String? = null,
+    /** CMD_PROC_AUTH handshake succeeded (unlocks ps4debug-NG scan commands). */
+    val scanAuthorized: Boolean = false,
+    /** TSE_* engine bitmask from Turbo Scan CAPS; null when CAPS is unavailable. */
+    val turboEngines: Int? = null,
+) {
+    val isNg: Boolean get() = brand?.startsWith("ps4debug-NG") == true
+    val serverScan: Boolean get() = isNg && scanAuthorized
+    val turboResident: Boolean get() = serverScan && turboEngines != null && (turboEngines and 0x4) != 0
+    val turboRescanAliasing: Boolean get() = turboResident && (turboEngines!! and 0x200) != 0
+    val turboAliasing: Boolean get() = turboResident && (turboEngines!! and 0x2) != 0
+
+    companion object {
+        val NONE = ServerCapabilities()
+    }
+}
+
 data class ConsoleInfo(
     val host: String,
     val port: Int,
@@ -61,6 +83,7 @@ data class ConsoleInfo(
     val debuggerVersion: String,
     /** Firmware as major*100+minor (e.g. 1100) from the CMD_FW_VERSION extension; null when unknown. */
     val firmware: Int?,
+    val capabilities: ServerCapabilities = ServerCapabilities.NONE,
 ) {
     val firmwareText: String?
         get() = firmware?.let { "%d.%02d".format(it / 100, it % 100) }

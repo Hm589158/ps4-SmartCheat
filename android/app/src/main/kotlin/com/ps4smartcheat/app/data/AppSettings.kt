@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import com.ps4smartcheat.core.backend.ConnectOptions
 import com.ps4smartcheat.core.edit.EditPolicy
+import com.ps4smartcheat.core.scan.BackendPreference
 import com.ps4smartcheat.core.scan.RegionFilter
 import com.ps4smartcheat.core.scan.ScanOptions
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -29,10 +30,13 @@ data class AppSettings(
     val unalignedScan: Boolean = false,
     val pageSize: Int = 50,
     val theme: ThemeMode = ThemeMode.DARK,
+    val scanBackend: BackendPreference = BackendPreference.AUTO,
+    val turboAliasing: Boolean = false,
+    val probeServerScan: Boolean = true,
 ) {
     fun connectOptions() = ConnectOptions(
         host = host, port = port, connectTimeoutMs = connectTimeoutMs, readTimeoutMs = readTimeoutMs,
-        queryFirmware = queryFirmware, allowNonLocalHosts = allowNonLocalHosts,
+        queryFirmware = queryFirmware, allowNonLocalHosts = allowNonLocalHosts, probeServerScan = probeServerScan,
     )
 
     fun editPolicy() = EditPolicy(editingEnabled, allowNonWritableRegions, allowSystemProcesses)
@@ -43,6 +47,8 @@ data class AppSettings(
         chunkSize = chunkKb.coerceIn(4, 4096) * 1024,
         maxResults = maxResults.coerceIn(1_000, 5_000_000),
         alignment = if (unalignedScan) 1 else 0,
+        backend = scanBackend,
+        turboAliasing = turboAliasing,
     )
 }
 
@@ -79,6 +85,9 @@ class SettingsStore(context: Context) {
             unalignedScan = prefs.getBoolean("unalignedScan", d.unalignedScan),
             pageSize = prefs.getInt("pageSize", d.pageSize),
             theme = runCatching { ThemeMode.valueOf(prefs.getString("theme", d.theme.name)!!) }.getOrDefault(d.theme),
+            scanBackend = runCatching { BackendPreference.valueOf(prefs.getString("scanBackend", d.scanBackend.name)!!) }.getOrDefault(d.scanBackend),
+            turboAliasing = prefs.getBoolean("turboAliasing", d.turboAliasing),
+            probeServerScan = prefs.getBoolean("probeServerScan", d.probeServerScan),
         )
     }
 
@@ -98,6 +107,9 @@ class SettingsStore(context: Context) {
             .putBoolean("unalignedScan", s.unalignedScan)
             .putInt("pageSize", s.pageSize)
             .putString("theme", s.theme.name)
+            .putString("scanBackend", s.scanBackend.name)
+            .putBoolean("turboAliasing", s.turboAliasing)
+            .putBoolean("probeServerScan", s.probeServerScan)
             .apply()
     }
 }

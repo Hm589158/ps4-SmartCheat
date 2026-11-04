@@ -11,6 +11,8 @@ class ScanResults internal constructor(
     val count: Int,
     /** True if more matches existed than [ScanOptions.maxResults]; only the first ones were kept. */
     val truncated: Boolean,
+    /** Survivor count held on the PS4 (Turbo server-resident session); may exceed [count]. */
+    val serverTotal: Long? = null,
 ) {
     fun address(i: Int): Long {
         checkIndex(i); return addresses[i]
@@ -75,6 +77,8 @@ internal class ResultsBuilder(private val type: ValueType, private val limit: In
         values = values.copyOf(newCap * type.size)
     }
 
-    fun build(): ScanResults =
-        ScanResults(type, addresses.copyOf(count), values.copyOf(count * type.size), count, truncated)
+    fun build(serverTotal: Long? = null): ScanResults = ScanResults(
+        type, addresses.copyOf(count), values.copyOf(count * type.size), count,
+        truncated || (serverTotal != null && serverTotal > count), serverTotal,
+    )
 }

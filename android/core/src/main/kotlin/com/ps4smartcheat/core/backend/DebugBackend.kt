@@ -24,6 +24,10 @@ data class ConnectOptions(
     val firmwareProbeTimeoutMs: Int = 1_500,
     /** Allow hosts outside private/link-local ranges. Off by default: ps4debug is unauthenticated. */
     val allowNonLocalHosts: Boolean = false,
+    /** Probe CMD_BRANDING / ps4debug-NG auth / Turbo CAPS to enable server-side scanning. */
+    val probeServerScan: Boolean = true,
+    /** Read timeout while the PS4 scans (the server may be silent for a long time). */
+    val serverScanTimeoutMs: Int = 600_000,
 ) {
     companion object {
         /** ps4debug command server port (server.h, PS4DBG_PORT). */
@@ -59,6 +63,14 @@ interface DebugBackend {
     suspend fun readMemory(pid: Int, address: Long, length: Int): ByteArray
 
     suspend fun writeMemory(pid: Int, address: Long, data: ByteArray): WriteStatus
+
+    /** Total bytes received/sent on the debug connection(s) since creation. */
+    fun traffic(): Traffic = Traffic(0, 0)
+}
+
+data class Traffic(val bytesIn: Long, val bytesOut: Long) {
+    operator fun minus(o: Traffic) = Traffic(bytesIn - o.bytesIn, bytesOut - o.bytesOut)
+    val total: Long get() = bytesIn + bytesOut
 }
 
 /** Thrown for connection/protocol problems. The connection is closed when this is thrown. */
