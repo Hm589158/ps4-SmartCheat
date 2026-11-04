@@ -77,6 +77,7 @@ fun SettingsScreen() {
                 "Enable memory editing", s.editingEnabled,
                 { on -> if (on) confirmEditing = true else vm.update { it.copy(editingEnabled = false, allowSystemProcesses = false) } },
                 "Off = read-only. Resets to off every time the app starts.",
+                tag = "editingSwitch",
             )
             LabeledSwitch(
                 "Allow writes to non-writable regions", s.allowNonWritableRegions,

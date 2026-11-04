@@ -23,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -255,7 +256,7 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
             Selector("Value type", ValueType.entries, type, { it.label }, vm::setType)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = vm::read, enabled = selected != null) { Text("Read") }
-                OutlinedButton(onClick = { addr?.let(onViewMemory) }, enabled = selected != null && addr != null) { Text("View memory") }
+                OutlinedButton(onClick = { addr?.let(onViewMemory) }, enabled = selected != null && addr != null, modifier = Modifier.testTag("viewMemory")) { Text("View memory") }
             }
             location?.let { KeyValue("Region", it, mono = true) }
             KeyValue("Current", current?.let { ValueCodec.format(type, it) + "  [" + Hex.encode(it, " ") + "]" } ?: "—", mono = true)
@@ -263,13 +264,13 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
         }
         SectionCard("Modify") {
             OutlinedTextField(
-                value = replacement, onValueChange = vm::setReplacement, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                value = replacement, onValueChange = vm::setReplacement, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("newValue"),
                 label = { Text("New value") },
                 keyboardOptions = KeyboardOptions(keyboardType = if (type.isFloat) KeyboardType.Decimal else KeyboardType.Text),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(onClick = vm::prepareWrite, enabled = selected != null && settings.editingEnabled) { Text("Write") }
-                OutlinedButton(onClick = vm::restore, enabled = original != null && settings.editingEnabled) { Text("Restore") }
+                Button(onClick = vm::prepareWrite, enabled = selected != null && settings.editingEnabled, modifier = Modifier.testTag("write")) { Text("Write") }
+                OutlinedButton(onClick = vm::restore, enabled = original != null && settings.editingEnabled, modifier = Modifier.testTag("restore")) { Text("Restore") }
                 OutlinedButton(onClick = vm::toggleFreeze, enabled = selected != null && settings.editingEnabled) { Text(if (isFrozen) "Unfreeze" else "Freeze") }
             }
             Text(
@@ -281,7 +282,7 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
             ErrorText(error)
         }
         SectionCard("Cheat library") {
-            OutlinedButton(onClick = { showSave = true }, enabled = selected != null && addr != null) { Text("Save as cheat") }
+            OutlinedButton(onClick = { showSave = true }, enabled = selected != null && addr != null, modifier = Modifier.testTag("saveCheat")) { Text("Save as cheat") }
         }
     }
 
@@ -325,7 +326,7 @@ private fun SaveCheatDialog(
         title = { Text("Save cheat") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Cheat name") }, singleLine = true)
+                OutlinedTextField(name, { name = it }, label = { Text("Cheat name") }, singleLine = true, modifier = Modifier.testTag("cheatName"))
                 val options: List<CheatProfile?> = profiles + listOf(null)
                 Selector("Profile", options, target, { it?.name ?: "New profile…" }, { target = it })
                 if (target == null) {
@@ -335,7 +336,7 @@ private fun SaveCheatDialog(
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(name, target?.id, newName, version) }) { Text("Save") } },
+        confirmButton = { TextButton(onClick = { onSave(name, target?.id, newName, version) }, modifier = Modifier.testTag("saveConfirm")) { Text("Save") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
 }

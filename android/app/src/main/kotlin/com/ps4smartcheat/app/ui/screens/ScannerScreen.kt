@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -225,7 +226,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
         }
     }
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("scannerList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             val sel = selected
             if (sel == null) {
@@ -250,13 +251,13 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                         value = value, onValueChange = vm::setValue, singleLine = true, enabled = !running,
                         label = { Text(if (type.isFloat) "Value (decimals control rounding)" else "Value (decimal or 0x hex)") },
                         keyboardOptions = KeyboardOptions(keyboardType = if (type.isFloat) KeyboardType.Decimal else KeyboardType.Text),
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth().testTag("scanValue"),
                     )
                 }
                 ErrorText(error)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = vm::firstScan, enabled = connected && selected != null && !running) { Text(if (hasSession) "New scan" else "First scan") }
-                    Button(onClick = vm::nextScan, enabled = connected && hasSession && !running) { Text("Next scan") }
+                    Button(onClick = vm::firstScan, enabled = connected && selected != null && !running, modifier = Modifier.testTag("firstScan")) { Text(if (hasSession) "New scan" else "First scan") }
+                    Button(onClick = vm::nextScan, enabled = connected && hasSession && !running, modifier = Modifier.testTag("nextScan")) { Text("Next scan") }
                     if (running) OutlinedButton(onClick = vm::cancel) { Text("Cancel") }
                     else if (hasSession) TextButton(onClick = vm::reset) { Text("Reset") }
                 }
@@ -334,7 +335,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
 
 @Composable
 private fun ResultRowView(row: ResultRow, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().testTag("result-" + Address.format(row.address)).clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(Address.format(row.address), fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1.3f), style = MaterialTheme.typography.bodyMedium)
         Column(Modifier.weight(1f)) {
             val cur = row.current?.let { ValueCodec.format(row.type, it) } ?: "?"

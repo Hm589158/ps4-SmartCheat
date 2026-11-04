@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
@@ -92,12 +93,12 @@ fun ConnectionScreen(onConnected: () -> Unit) {
         SectionCard("PS4 address") {
             OutlinedTextField(
                 value = host, onValueChange = vm::setHost, label = { Text("IP address (e.g. 192.168.1.50)") },
-                singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth(),
+                singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth().testTag("host"),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )
             OutlinedTextField(
                 value = port, onValueChange = vm::setPort, label = { Text("Port (ps4debug-NG default 744)") },
-                singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth(),
+                singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth().testTag("port"),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
             ErrorText(error)
@@ -106,7 +107,7 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                     OutlinedButton(onClick = vm::disconnect) { Text("Disconnect") }
                     Button(onClick = onConnected) { Text("Processes") }
                 } else {
-                    Button(onClick = vm::connect, enabled = !connecting) { Text(if (state is ConnectionState.Failed) "Reconnect" else "Connect") }
+                    Button(onClick = vm::connect, enabled = !connecting, modifier = Modifier.testTag("connect")) { Text(if (state is ConnectionState.Failed) "Reconnect" else "Connect") }
                     if (connecting) CircularProgressIndicator(Modifier.padding(start = 8.dp))
                 }
             }

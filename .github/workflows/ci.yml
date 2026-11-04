@@ -51,6 +51,15 @@ jobs:
       - name: App unit tests, lint and debug APK
         run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
 
+      - name: Upload UI journey screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-screenshots-${{ github.sha }}
+          path: android/app/build/outputs/roborazzi/*.png
+          retention-days: 14
+          if-no-files-found: warn
+
       - name: Upload test APK (debug-signed, short retention)
         uses: actions/upload-artifact@v4
         with:
