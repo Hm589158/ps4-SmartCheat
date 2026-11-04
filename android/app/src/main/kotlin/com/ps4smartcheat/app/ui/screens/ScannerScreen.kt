@@ -79,6 +79,9 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     val nextMode = _nextMode.asStateFlow()
     private val _value = MutableStateFlow("")
     val value = _value.asStateFlow()
+    private val _value2 = MutableStateFlow("")
+    /** Upper bound for "Value between". */
+    val value2 = _value2.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
     private val _page = MutableStateFlow(0)
@@ -138,14 +141,15 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     fun setFirstMode(m: ScanMode) { _firstMode.value = m; _error.value = null }
     fun setNextMode(m: ScanMode) { _nextMode.value = m; _error.value = null }
     fun setValue(v: String) { _value.value = v; _error.value = null }
+    fun setValue2(v: String) { _value2.value = v; _error.value = null }
 
     fun firstScan() {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         val s = c.settings.value
         try {
-            c.scanner.firstScan(sel.pid, sel.name, _type.value, _firstMode.value, _value.value, s.regionFilter(), s.scanOptions())
+            c.scanner.firstScan(sel.pid, sel.name, _type.value, _firstMode.value, _value.value, s.regionFilter(), s.scanOptions(), valueText2 = _value2.value)
             _rows.value = emptyList()
-            c.log.info("First scan ${_type.value.label} ${_firstMode.value.label} '${_value.value}' in ${sel.name}")
+            c.log.info("First scan ${_type.value.label} ${_firstMode.value.label} '${_value.value}'" + (if (_firstMode.value.needsSecondValue) "..'${_value2.value}'" else "") + " in ${sel.name}")
         } catch (e: IllegalArgumentException) {
             _error.value = e.message
         } catch (e: IllegalStateException) {
@@ -155,7 +159,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
 
     fun nextScan() {
         try {
-            c.scanner.nextScan(_nextMode.value, _value.value)
+            c.scanner.nextScan(_nextMode.value, _value.value, _value2.value)
             c.log.info("Next scan ${_nextMode.value.label} '${_value.value}'")
         } catch (e: IllegalArgumentException) {
             _error.value = e.message
@@ -203,7 +207,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
+fun ScannerScreen(onEdit: (Long, ValueType) -> Unit, onPatternSearch: () -> Unit = {}) {
     val vm = appViewModel { ScannerViewModel(it) }
     val connection by vm.connection.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -213,6 +217,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
     val firstMode by vm.firstMode.collectAsStateWithLifecycle()
     val nextMode by vm.nextMode.collectAsStateWithLifecycle()
     val value by vm.value.collectAsStateWithLifecycle()
+    val value2 by vm.value2.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val page by vm.page.collectAsStateWithLifecycle()
     val rows by vm.rows.collectAsStateWithLifecycle()
@@ -261,12 +266,35 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                     }
                 }
                 if (needsValue) {
-                    OutlinedTextField(
-                        value = value, onValueChange = vm::setValue, singleLine = true, enabled = !running,
-                        label = { Text(if (type.isFloat) "Value (decimals control rounding)" else "Value (decimal or 0x hex)") },
-                        keyboardOptions = KeyboardOptions(keyboardType = if (type.isFloat) KeyboardType.Decimal else KeyboardType.Text),
-                        modifier = Modifier.fillMaxWidth().testTag("scanValue"),
-                    )
+                    val kb = KeyboardOptions(keyboardType = if (type.isFloat) KeyboardType.Decimal else KeyboardType.Text)
+                    if (mode.needsSecondValue) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = value, onValueChange = vm::setValue, singleLine = true, enabled = !running,
+                                label = { Text("From") }, keyboardOptions = kb, modifier = Modifier.weight(1f).testTag("scanValue"),
+                            )
+                            OutlinedTextField(
+                                value = value2, onValueChange = vm::setValue2, singleLine = true, enabled = !running,
+                                label = { Text("To") }, keyboardOptions = kb, modifier = Modifier.weight(1f).testTag("scanValue2"),
+                            )
+                        }
+                        Text("Inclusive range. Range scans are compared on Android.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else {
+                        OutlinedTextField(
+                            value = value, onValueChange = vm::setValue, singleLine = true, enabled = !running,
+                            label = {
+                                Text(
+                                    when {
+                                        mode == ScanMode.EXACT && type.isFloat -> "Value (decimals control rounding)"
+                                        type.isFloat -> "Value"
+                                        else -> "Value (decimal or 0x hex)"
+                                    },
+                                )
+                            },
+                            keyboardOptions = kb,
+                            modifier = Modifier.fillMaxWidth().testTag("scanValue"),
+                        )
+                    }
                 }
                 ErrorText(error)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -275,6 +303,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                     if (running) OutlinedButton(onClick = vm::cancel) { Text("Cancel") }
                     else if (hasSession) TextButton(onClick = vm::reset) { Text("Reset") }
                 }
+                TextButton(onClick = onPatternSearch, enabled = !running, modifier = Modifier.testTag("openPatternSearch")) { Text("Byte pattern / text search…") }
                 when (val st = status) {
                     is ScanStatus.Running -> {
                         val p = st.progress

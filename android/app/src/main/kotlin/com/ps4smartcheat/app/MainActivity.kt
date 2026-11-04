@@ -49,6 +49,7 @@ import com.ps4smartcheat.app.ui.screens.CheatsScreen
 import com.ps4smartcheat.app.ui.screens.ConnectionScreen
 import com.ps4smartcheat.app.ui.screens.EditorScreen
 import com.ps4smartcheat.app.ui.screens.HexViewerScreen
+import com.ps4smartcheat.app.ui.screens.PatternSearchScreen
 import com.ps4smartcheat.app.ui.screens.ProcessesScreen
 import com.ps4smartcheat.app.ui.screens.ScannerScreen
 import com.ps4smartcheat.app.ui.screens.SettingsScreen
@@ -87,6 +88,7 @@ object Routes {
     const val ADDRESSES = "addresses"
     const val SETTINGS = "settings"
     const val HEX = "hex"
+    const val PATTERN = "pattern"
 
     fun hex(address: Long?): String = HEX + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "")
 
@@ -126,7 +128,7 @@ private fun AppRoot() {
                     }
                 },
                 navigationIcon = {
-                    if (route == Routes.EDITOR || route == Routes.HEX) {
+                    if (route == Routes.EDITOR || route == Routes.HEX || route == Routes.PATTERN) {
                         IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                     }
                 },
@@ -157,7 +159,7 @@ private fun AppRoot() {
         NavHost(nav, startDestination = Routes.CONNECTION, modifier = Modifier.padding(padding)) {
             composable(Routes.CONNECTION) { ConnectionScreen(onConnected = { nav.navigateTab(Routes.PROCESSES) }) }
             composable(Routes.PROCESSES) { ProcessesScreen(onOpenScanner = { nav.navigateTab(Routes.SCANNER) }) }
-            composable(Routes.SCANNER) { ScannerScreen(onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) }) }
+            composable(Routes.SCANNER) { ScannerScreen(onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) }, onPatternSearch = { nav.navigate(Routes.PATTERN) }) }
             composable(
                 Routes.EDITOR + "?address={address}&type={type}",
                 arguments = listOf(
@@ -179,6 +181,7 @@ private fun AppRoot() {
             composable(Routes.ADDRESSES) {
                 AddressesScreen(onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) }, onViewMemory = { a -> nav.navigate(Routes.hex(a)) })
             }
+            composable(Routes.PATTERN) { PatternSearchScreen(onOpen = { a -> nav.navigate(Routes.hex(a)) }) }
             composable(Routes.CHEATS) { CheatsScreen() }
             composable(Routes.SETTINGS) { SettingsScreen() }
         }
@@ -191,6 +194,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.SCANNER -> "Memory scanner"
     Routes.EDITOR -> "Memory editor"
     Routes.HEX -> "Memory viewer"
+    Routes.PATTERN -> "Pattern search"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"
     Routes.SETTINGS -> "Settings"

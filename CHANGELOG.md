@@ -9,6 +9,13 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
   addresses are marked "from an earlier session — verify" outside the session they were added in, and cannot be
   frozen until checked in the editor. Add from a scan result (+), from the editor (+ List) or by address.
   Duplicates are not added. Nothing in the list is written to the console unless the user edits or freezes it.
+- New scan modes "Bigger than", "Smaller than" and "Value between" (inclusive, either bound order) for first
+  and next scans. They are compared on Android (no PS4-side compare code is used for them), so the scan falls
+  back from Turbo/server tiers automatically and says so.
+- Byte pattern (AOB) and text search (Scanner → "Byte pattern / text search…"): hex bytes with `??` and nibble
+  wildcards, or UTF-8/ASCII and UTF-16LE text with optional ASCII case folding. Read-only; runs on Android with
+  CMD_PROC_READ chunks; matches across chunk borders are found, matches never span two regions; hits open the
+  memory viewer.
 - Settings moved to the top bar to make room for the Addresses tab.
 
 ## 0.7.0

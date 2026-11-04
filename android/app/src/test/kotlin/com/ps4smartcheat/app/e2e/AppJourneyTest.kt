@@ -163,11 +163,6 @@ class AppJourneyTest {
         waitText("eboot.bin+0x120") // region shown on the result row
         shot("06_refined")
 
-        // 4b. Keep the address in the game's address list.
-        step("add to address list")
-        tag("add-$coins").performClick()
-        waitText("to the address list")
-
         // 5. Editor is read-only by default.
         step("editor read-only")
         tag("result-$coins").performClick()
@@ -223,6 +218,11 @@ class AppJourneyTest {
         shot("11_save_cheat_form")
         tag("saveConfirm").performScrollTo().performClick()
         waitText("Saved \"Infinite coins\"")
+
+        // 9b. Keep the address in the game's address list (editor shows the result inline, no snackbar).
+        step("add to address list")
+        tag("addAddress").performScrollTo().performClick()
+        waitText("to the address list")
 
         // 10. Memory viewer around the address.
         step("memory viewer")
@@ -314,6 +314,43 @@ class AppJourneyTest {
         waitText("module-relative")
         assertEquals(1, compose.onAllNodesWithTag("watch-$COINS_LABEL", useUnmergedTree = true).fetchSemanticsNodes().size)
         shot("33_address_list_after_restart")
+    }
+
+    @Test fun bytePatternSearchFindsPlantedBytes() {
+        val at = DemoGame.DATA_START + 0x400
+        server.poke(DemoGame.PID, at, byteArrayOf(0xDE.toByte(), 0xAD.toByte(), 0x77, 0xEF.toByte(), 0x13, 0x37))
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        tab("Scanner")
+        waitTag("openPatternSearch")
+        tag("openPatternSearch").performScrollTo().performClick()
+        waitTag("patternInput")
+        tag("patternInput").performTextInput("DE AD ?? EF 13 37")
+        tag("patternSearch").performClick()
+        waitTag("patternSummary")
+        waitTag("hit-" + Address.format(at))
+        waitText("DE AD 77 EF 13 37")
+        shot("34_pattern_search")
+    }
+
+    @Test fun rangeScanFindsValueBetweenBounds() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        tab("Scanner")
+        waitTag("scanValue")
+        compose.onAllNodesWithText("Exact value")[0].performClick()
+        waitText("Value between")
+        compose.onAllNodesWithText("Value between")[0].performClick()
+        waitTag("scanValue2")
+        tag("scanValue").performTextInput("4990")
+        tag("scanValue2").performTextInput("5010")
+        tag("firstScan").performClick()
+        waitText("Scan 1: ")
+        val coins = Address.format(DemoGame.COINS_ADDRESS)
+        compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("result-$coins"))
+        waitTag("result-$coins")
+        waitText("Chunked scan (Android)") // range modes are not offloaded to the PS4
+        shot("35_range_scan")
     }
 
     @Test fun droppedConnectionIsRecoveredAutomatically() {

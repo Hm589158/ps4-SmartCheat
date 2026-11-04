@@ -160,10 +160,10 @@ class ScanController(
         valueText: String?,
         filter: RegionFilter = RegionFilter(),
         options: ScanOptions = ScanOptions(),
+        valueText2: String? = null,
     ): Job {
         require(mode in ScanMode.FIRST_SCAN_MODES) { "${mode.label} cannot be used for a first scan" }
-        val parsed = if (mode.needsValue) ValueCodec.parse(type, valueText.orEmpty()) else null
-        val matcher = Matcher(type, mode, parsed)
+        val matcher = matcherFor(type, mode, valueText, valueText2)
         return launchStep(mode) {
             val regions = filter.select(backend.getMemoryRegions(pid))
             if (regions.isEmpty()) throw IllegalStateException("No memory regions match the region filter for pid $pid")
@@ -219,12 +219,17 @@ class ScanController(
         throw IllegalStateException("No scan backend could run this scan: ${fallbacks.joinToString("; ")}")
     }
 
-    fun nextScan(mode: ScanMode, valueText: String?): Job {
+    private fun matcherFor(type: ValueType, mode: ScanMode, valueText: String?, valueText2: String?): Matcher {
+        val parsed = if (mode.needsValue) ValueCodec.parse(type, valueText.orEmpty()) else null
+        val parsed2 = if (mode.needsSecondValue) ValueCodec.parse(type, valueText2.orEmpty()) else null
+        return Matcher(type, mode, parsed, parsed2)
+    }
+
+    fun nextScan(mode: ScanMode, valueText: String?, valueText2: String? = null): Job {
         require(mode in ScanMode.NEXT_SCAN_MODES) { "${mode.label} cannot be used for a next scan" }
         val pid = activePid ?: throw IllegalStateException("No process selected")
         val session = sessions[pid] ?: throw IllegalStateException("Run a first scan before a next scan")
-        val parsed = if (mode.needsValue) ValueCodec.parse(session.type, valueText.orEmpty()) else null
-        val matcher = Matcher(session.type, mode, parsed)
+        val matcher = matcherFor(session.type, mode, valueText, valueText2)
         return launchStep(mode) {
             val current = backend.getMemoryRegions(pid)
             val snap = session.snapshot
