@@ -3,6 +3,12 @@
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
 ## 0.6.0 (unreleased)
+- End-to-end UI journey test (Robolectric + Roborazzi) drives the real app against the mock ps4debug-NG
+  server and records screenshots of every step; CI publishes them to the `ci-screenshots` branch.
+- UI polish from reviewing those screenshots: region shown under each scan result, no duplicated result count,
+  memory viewer highlights the requested address and shows its value as Int8…Double, cheat profiles say
+  "version not set" instead of "v?", Apply reads "Validate first" until the profile is validated.
+- Save-as-cheat is an inline form in the editor (was a dialog that the keyboard could cover).
 - Memory viewer: 256-byte hex/ASCII window around any address, paging, live refresh with highlighting of
   bytes that changed between reads (memory diff), unmapped bytes shown as `??` and never requested.
 - Live values: optional periodic refresh of the visible scan-result page (interval in Settings).

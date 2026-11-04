@@ -147,6 +147,7 @@ class AppJourneyTest {
         waitText("after scan 2")
         compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("result-$coins"))
         waitTag("result-$coins")
+        waitText("eboot.bin+0x120") // region shown on the result row
         shot("06_refined")
 
         // 5. Editor is read-only by default.
@@ -209,12 +210,15 @@ class AppJourneyTest {
         step("memory viewer")
         tag("viewMemory").performScrollTo().performClick()
         waitText("byte(s) changed")
+        waitText("Int32 4200") // typed value at the target address (restored original)
         shot("12_memory_viewer")
 
         // 11. Cheat library shows the saved cheat.
         step("cheat library")
         tab("Cheats")
         waitText("Infinite coins")
+        waitText("version not set")
+        waitText("Validate first")
         shot("13_cheat_library")
 
         // 12. Settings overview.

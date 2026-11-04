@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.testTag
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
@@ -37,7 +38,10 @@ import com.ps4smartcheat.app.ui.components.LabeledSwitch
 import com.ps4smartcheat.app.ui.components.WarningBanner
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.ConnectionState
+import com.ps4smartcheat.core.scan.ValueCodec
+import com.ps4smartcheat.core.scan.ValueType
 import com.ps4smartcheat.core.scan.describe
+import androidx.compose.foundation.background
 import com.ps4smartcheat.core.tools.HexDump
 import com.ps4smartcheat.core.tools.HexRow
 import com.ps4smartcheat.core.tools.MemoryViewer
@@ -69,6 +73,12 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
     val live = _live.asStateFlow()
     private var window: MemoryWindow? = null
     private var start: Long? = null
+    private val _target = MutableStateFlow<Long?>(null)
+    /** The address the user asked for (highlighted). */
+    val target = _target.asStateFlow()
+    private val _targetInfo = MutableStateFlow<String?>(null)
+    /** Typed interpretation of the bytes at [target]. */
+    val targetInfo = _targetInfo.asStateFlow()
     private var initialized = false
 
     val intervalMs: Long get() = c.settings.value.monitorIntervalMs.coerceIn(250, 10_000).toLong()
@@ -88,6 +98,7 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
     fun go() {
         val a = Address.parse(_address.value) ?: run { _error.value = "Enter a hexadecimal address"; return }
         start = HexDump.alignDown(a - WINDOW / 2, ROW)
+        _target.value = a
         window = null
         refresh()
     }
@@ -96,6 +107,7 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
         val s = start ?: return
         start = s + delta.toLong() * WINDOW
         _address.value = Address.format(start!! + WINDOW / 2)
+        _target.value = start!! + WINDOW / 2
         window = null
         refresh()
     }
@@ -112,6 +124,7 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
                 _changed.value = HexDump.changedCount(rows)
                 _rows.value = rows
                 window = w
+                _targetInfo.value = _target.value?.let { describeValues(w, it) }
                 _error.value = if (w.mapped.none { it }) "No readable memory in this window" else null
             } catch (e: BackendException) {
                 _error.value = e.message
@@ -120,6 +133,17 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
                 _loading.value = false
             }
         }
+    }
+
+    /** "Int32 4200 · Int16 4200 · Float 5.9E-42" for the bytes at [address], if mapped. */
+    private fun describeValues(w: MemoryWindow, address: Long): String? {
+        val off = (address - w.start).toInt()
+        if (off < 0 || off + 8 > w.bytes.size || !w.mapped[off]) return null
+        val parts = ArrayList<String>()
+        for (t in listOf(ValueType.INT8, ValueType.INT16, ValueType.INT32, ValueType.INT64, ValueType.FLOAT32, ValueType.FLOAT64)) {
+            if ((0 until t.size).all { w.mapped[off + it] }) parts += t.label + " " + ValueCodec.format(t, w.bytes, off)
+        }
+        return Address.format(address) + ": " + parts.joinToString(" · ")
     }
 
     fun describe(address: Long): String = c.selectedProcess.value?.regions?.describe(address) ?: ""
@@ -143,6 +167,8 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
     val loading by vm.loading.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
+    val target by vm.target.collectAsStateWithLifecycle()
+    val targetInfo by vm.targetInfo.collectAsStateWithLifecycle()
     val connected = connection is ConnectionState.Connected
 
     // Live refresh only while this screen is shown, connected and enabled.
@@ -155,6 +181,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
 
     val highlight = MaterialTheme.colorScheme.tertiary
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    val targetRow = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         item {
@@ -171,6 +198,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
             }
             LabeledSwitch("Live refresh", live, vm::setLive, "Re-reads every ${vm.intervalMs} ms and highlights bytes that changed.", enabled = connected)
             if (loading && !live) LinearProgressIndicator(Modifier.fillMaxWidth())
+            targetInfo?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("targetInfo")) }
             if (rows.isNotEmpty()) Text("$changed byte(s) changed since last read · ${vm.describe(rows.first().address)}", style = MaterialTheme.typography.bodySmall, color = dim)
             ErrorText(error)
         }
@@ -189,7 +217,9 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
                 },
                 fontFamily = FontFamily.Monospace,
                 style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.fillMaxWidth().clickable(enabled = row.mapped.any { it }) { onOpenEditor(row.address) }.padding(vertical = 3.dp),
+                modifier = Modifier.fillMaxWidth()
+                    .then(if (target != null && target!! >= row.address && target!! < row.address + row.bytes.size) Modifier.background(targetRow) else Modifier)
+                    .clickable(enabled = row.mapped.any { it }) { onOpenEditor(row.address) }.padding(vertical = 3.dp),
             )
         }
     }

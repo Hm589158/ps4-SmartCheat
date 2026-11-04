@@ -49,6 +49,7 @@ import com.ps4smartcheat.core.scan.ScanStatus
 import com.ps4smartcheat.core.scan.ValueCodec
 import com.ps4smartcheat.core.scan.ValueType
 import com.ps4smartcheat.core.util.Address
+import com.ps4smartcheat.core.scan.describe
 import com.ps4smartcheat.core.tools.ScanResultsCsv
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -167,6 +168,9 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
         _page.value = 0
     }
 
+    /** Region description for a result address (e.g. "eboot.bin+0x120 [rw-]"). */
+    fun describe(address: Long): String = c.selectedProcess.value?.regions?.describe(address) ?: ""
+
     fun pageCount(): Int = c.scanner.results()?.pageCountFor?.invoke(pageSize) ?: 0
 
     fun goToPage(p: Int) {
@@ -281,7 +285,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                         )
                     }
                     is ScanStatus.Completed -> {
-                        Text(st.message, style = MaterialTheme.typography.bodySmall)
+                        if (!hasSession) Text(st.message, style = MaterialTheme.typography.bodySmall)
                         stats?.let { ss ->
                             Text(
                                 "${ss.backend.label} · ${formatMs(ss.durationMs)}" + (ss.mibPerSecond?.let { " · %.1f MiB/s".format(it) } ?: "") +
@@ -301,7 +305,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
         if (hasSession && s != null) {
             item {
                 Text(
-                    "Scan ${s.step}: ${if (s.snapshotCandidates != null) "${s.snapshotCandidates} candidates in snapshot" else "${s.resultCount} results"}" +
+                    "Scan ${s.step}: ${if (s.snapshotCandidates != null) "${s.snapshotCandidates} candidates in snapshot" else plural(s.resultCount.toLong(), "result")}" +
                         (s.serverTotal?.takeIf { it > s.resultCount }?.let { " ($it kept on PS4)" } ?: "") +
                         if (s.truncated) " (list capped)" else "",
                     style = MaterialTheme.typography.titleSmall,
@@ -325,7 +329,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                     if (rowsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 items(rows, key = { it.index }) { row ->
-                    ResultRowView(row) { onEdit(row.address, row.type) }
+                    ResultRowView(row, vm.describe(row.address)) { onEdit(row.address, row.type) }
                     HorizontalDivider()
                 }
             }
@@ -334,9 +338,12 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
 }
 
 @Composable
-private fun ResultRowView(row: ResultRow, onClick: () -> Unit) {
+private fun ResultRowView(row: ResultRow, region: String, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().testTag("result-" + Address.format(row.address)).clickable(onClick = onClick).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(Address.format(row.address), fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1.3f), style = MaterialTheme.typography.bodyMedium)
+        Column(Modifier.weight(1.3f)) {
+            Text(Address.format(row.address), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+            Text(region, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+        }
         Column(Modifier.weight(1f)) {
             val cur = row.current?.let { ValueCodec.format(row.type, it) } ?: "?"
             Text(cur, fontFamily = FontFamily.Monospace, color = if (row.changed) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.onSurface)
@@ -344,6 +351,8 @@ private fun ResultRowView(row: ResultRow, onClick: () -> Unit) {
         }
     }
 }
+
+private fun plural(n: Long, word: String): String = "$n $word" + if (n == 1L) "" else "s"
 
 private fun formatMs(ms: Long): String = if (ms < 1000) "$ms ms" else "%.1f s".format(ms / 1000.0)
 

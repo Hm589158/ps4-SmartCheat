@@ -30,6 +30,16 @@ The mock is an independent implementation of the server side over real TCP, with
 
 Run: `cd android && ./gradlew :core:test` (works without an Android SDK).
 
+## Android — end-to-end UI journey (automated, mock backend)
+`AppJourneyTest` (Robolectric, `./gradlew :app:testDebugUnitTest`, runs in CI) launches the real `MainActivity`
+and drives it like a user against `MockPs4DebugServer` (ps4debug-NG emulation) over TCP: connect → process →
+Turbo first scan → refine → read-only editor → enable editing → confirmed, verified write → restore → save
+cheat → memory viewer → cheat library → settings. It asserts on-screen text and the mock's memory, and saves a
+screenshot per step (`app/build/outputs/roborazzi/`). CI publishes the screenshots and JUnit XML to the
+`ci-screenshots` branch (see its README.md). Further tests: refused connection is reported and recoverable;
+public addresses are blocked. This shows the app works end to end with a ps4debug-NG-compatible server; it is
+not a PS4 test.
+
 ## Android
 `./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug` (needs an Android SDK; runs in CI).
 UI tests on a device/emulator are not automated yet.

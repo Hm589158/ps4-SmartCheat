@@ -244,7 +244,12 @@ fun CheatsScreen() {
                     Column(Modifier.weight(1f)) {
                         Text(p.name, style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "${p.titleId ?: "no title id"} · v${p.gameVersion ?: "?"} · ${p.processName} · ${p.cheats.size} cheat(s)",
+                            listOfNotNull(
+                                p.titleId?.takeIf { it != p.name } ?: if (p.titleId == null) "no title ID" else null,
+                                p.gameVersion?.let { "v$it" } ?: "version not set",
+                                p.processName,
+                                "${p.cheats.size} cheat" + if (p.cheats.size == 1) "" else "s",
+                            ).joinToString(" · "),
                             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
@@ -361,7 +366,7 @@ private fun CheatRow(entry: CheatEntry, check: CheatCheck?, canApply: Boolean, o
                 )
             }
         }
-        TextButton(onClick = onApply, enabled = canApply) { Text("Apply") }
+        TextButton(onClick = onApply, enabled = canApply) { Text(if (check == null) "Validate first" else "Apply") }
         IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Edit cheat") }
         IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete cheat") }
     }
