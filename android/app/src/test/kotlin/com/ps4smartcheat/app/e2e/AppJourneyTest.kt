@@ -253,12 +253,15 @@ class AppJourneyTest {
 
         // 8b. Undo the restore (back to 99999), then redo it (4200 again) — each confirmed.
         step("undo/redo")
+        // The memory changes before the app has verified the write and updated its history: wait for the UI.
+        waitText("Undo (2)")
         press("undo")
         waitTag("confirm")
         waitText("Will write:")
         shot("10c_undo_confirmation")
         confirmDialog()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 99999 }
+        waitText("Redo (1)")
         press("redo")
         waitTag("confirm")
         confirmDialog()
