@@ -120,6 +120,12 @@ class AppJourneyTest {
         tag(t).performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
     }
 
+    /** Confirms the open ConfirmDialog through its button's semantics click (dialogs are separate windows). */
+    private fun confirmDialog() {
+        waitTag("confirm")
+        tag("confirm").performSemanticsAction(SemanticsActions.OnClick)
+    }
+
     private fun openSettings() = compose.onNodeWithContentDescription("Settings").performClick()
 
     private fun waitWatchValue(label: String, value: String, timeoutMs: Long = 20_000) {
@@ -199,7 +205,7 @@ class AppJourneyTest {
         tag("editingSwitch").performClick()
         waitTag("confirm")
         shot("08_enable_editing_dialog")
-        tag("confirm").performClick()
+        confirmDialog()
 
         // 7. Back to the result, write a new value, confirm, verify on the "console".
         step("write")
@@ -215,7 +221,7 @@ class AppJourneyTest {
         press("write")
         waitTag("confirm")
         shot("09_write_confirmation")
-        tag("confirm").performClick()
+        confirmDialog()
         waitText("Write verified")
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 99999 }
         shot("10_write_verified")
@@ -232,11 +238,11 @@ class AppJourneyTest {
         waitTag("confirm")
         waitText("Will write:")
         shot("10c_undo_confirmation")
-        tag("confirm").performClick()
+        confirmDialog()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 99999 }
         press("redo")
         waitTag("confirm")
-        tag("confirm").performClick()
+        confirmDialog()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
 
         // 9. Save as a cheat.
@@ -272,14 +278,14 @@ class AppJourneyTest {
         press("patchWrite")
         waitTag("confirm")
         shot("12b_patch_confirmation")
-        tag("confirm").performClick()
+        confirmDialog()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 42 }
         waitText("written and verified")
         tag("patchBytes").performTextClearance()
         tag("patchBytes").performTextInput("68 10 00 00")
         press("patchWrite")
         waitTag("confirm")
-        tag("confirm").performClick()
+        confirmDialog()
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
 
         // 11. Cheat library shows the saved cheat.
