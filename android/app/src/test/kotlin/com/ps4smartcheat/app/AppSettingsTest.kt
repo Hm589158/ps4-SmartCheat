@@ -14,6 +14,11 @@ class AppSettingsTest {
         assertEquals(744, s.connectOptions().port)
     }
 
+    @Test fun regionSizeLimitMapsToBytes() {
+        assertEquals(0L, AppSettings().regionFilter().maxRegionBytes)
+        assertEquals(512L * 1024 * 1024, AppSettings(maxRegionMiB = 512).regionFilter().maxRegionBytes)
+    }
+
     @Test fun scanOptionsAreClamped() {
         val o = AppSettings(chunkKb = 1_000_000, maxResults = 1, unalignedScan = true).scanOptions()
         assertEquals(4096 * 1024, o.chunkSize)

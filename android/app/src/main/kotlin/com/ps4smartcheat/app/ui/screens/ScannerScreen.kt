@@ -1,5 +1,9 @@
 package com.ps4smartcheat.app.ui.screens
 
+import android.content.ContentResolver
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -33,6 +37,7 @@ import androidx.lifecycle.viewModelScope
 import com.ps4smartcheat.app.data.AppContainer
 import com.ps4smartcheat.app.ui.appViewModel
 import com.ps4smartcheat.app.ui.components.ErrorText
+import com.ps4smartcheat.app.ui.components.LabeledSwitch
 import com.ps4smartcheat.app.ui.components.SectionCard
 import com.ps4smartcheat.app.ui.components.Selector
 import com.ps4smartcheat.app.ui.components.WarningBanner
@@ -43,6 +48,12 @@ import com.ps4smartcheat.core.scan.ScanStatus
 import com.ps4smartcheat.core.scan.ValueCodec
 import com.ps4smartcheat.core.scan.ValueType
 import com.ps4smartcheat.core.util.Address
+import com.ps4smartcheat.core.tools.ScanResultsCsv
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
@@ -72,6 +83,35 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     val rowsLoading = _rowsLoading.asStateFlow()
 
     val pageSize: Int get() = c.settings.value.pageSize.coerceIn(10, 200)
+    val intervalMs: Long get() = c.settings.value.monitorIntervalMs.coerceIn(250, 10_000).toLong()
+
+    private val _live = MutableStateFlow(false)
+    /** Periodically re-reads the visible result page (value monitoring). */
+    val live = _live.asStateFlow()
+    fun setLive(v: Boolean) { _live.value = v }
+
+    /** Live refresh tick: skipped while a scan or a page load is running. */
+    fun liveTick() {
+        if (c.scanner.isRunning || _rowsLoading.value) return
+        loadPage()
+    }
+
+    fun exportCsv(resolver: ContentResolver, uri: Uri) {
+        val res = c.scanner.results() ?: run { _error.value = "Nothing to export"; return }
+        val sel = c.selectedProcess.value
+        viewModelScope.launch {
+            try {
+                val n = withContext(Dispatchers.IO) {
+                    resolver.openOutputStream(uri, "wt")!!.bufferedWriter().use { w ->
+                        ScanResultsCsv.write(w, res, sel?.regions ?: emptyList(), sel?.name)
+                    }
+                }
+                c.log.notify("Exported $n result(s) to CSV")
+            } catch (e: Exception) {
+                _error.value = "Export failed: ${e.message}"
+            }
+        }
+    }
 
     init {
         viewModelScope.launch {
@@ -165,6 +205,11 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
     val rows by vm.rows.collectAsStateWithLifecycle()
     val rowsLoading by vm.rowsLoading.collectAsStateWithLifecycle()
     val stats by vm.stats.collectAsStateWithLifecycle()
+    val live by vm.live.collectAsStateWithLifecycle()
+    val resolver = LocalContext.current.contentResolver
+    val csvLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        if (uri != null) vm.exportCsv(resolver, uri)
+    }
 
     val running = status is ScanStatus.Running
     val connected = connection is ConnectionState.Connected
@@ -173,6 +218,12 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
     val needsValue = mode.needsValue
 
     LaunchedEffect(selected?.pid) { if (hasSession) vm.loadPage() }
+    LaunchedEffect(live, connected, hasSession) {
+        while (live && connected && hasSession && isActive) {
+            delay(vm.intervalMs)
+            vm.liveTick()
+        }
+    }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -266,6 +317,10 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                         TextButton(onClick = { vm.goToPage(page + 1) }, enabled = page + 1 < vm.pageCount() && !rowsLoading) { Text("Next ›") }
                         TextButton(onClick = vm::loadPage, enabled = !rowsLoading && connected) { Text("Refresh") }
                     }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        LabeledSwitch("Live values", live, vm::setLive, "Re-read this page every ${vm.intervalMs} ms", enabled = connected)
+                    }
+                    TextButton(onClick = { csvLauncher.launch("smartcheat-results.csv") }, enabled = !running) { Text("Export results (CSV)") }
                     if (rowsLoading) LinearProgressIndicator(Modifier.fillMaxWidth())
                 }
                 items(rows, key = { it.index }) { row ->

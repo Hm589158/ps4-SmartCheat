@@ -24,6 +24,7 @@ The mock is an independent implementation of the server side over real TCP, with
   resident-buffer overflow fallback, float/unaligned routing, capped local list with full PS4-side set, lost-session
   fallback after reconnect, Turbo cancel via side channel, cost-based server refine, traffic reduction.
 * `AdaptiveRefineTest` – break-even gap maths and RTT/bandwidth measurement on a throttled mock link.
+* `ToolsTest` – hex rows with change/unmapped flags, viewer never requests unmapped memory, CSV export format/escaping.
 * `ScanBenchmark` (`./gradlew :core:benchmark`, not part of `test`) – see docs/PERFORMANCE.md.
 * `FreezeManagerTest` – freeze/unfreeze, stop on process exit, disconnect, editing disabled.
 

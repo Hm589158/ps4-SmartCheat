@@ -114,6 +114,8 @@ fun SettingsScreen() {
             NumberField("Max results", s.maxResults, 1_000..5_000_000) { v -> vm.update { it.copy(maxResults = v) } }
             NumberField("Read chunk KiB", s.chunkKb, 4..4096) { v -> vm.update { it.copy(chunkKb = v) } }
             NumberField("Results per page", s.pageSize, 10..200) { v -> vm.update { it.copy(pageSize = v) } }
+            NumberField("Skip regions larger than MiB (0 = no limit)", s.maxRegionMiB, 0..65_536) { v -> vm.update { it.copy(maxRegionMiB = v) } }
+            NumberField("Live refresh interval ms", s.monitorIntervalMs, 250..10_000) { v -> vm.update { it.copy(monitorIntervalMs = v) } }
         }
         SectionCard("Connection") {
             NumberField("Connect timeout ms", s.connectTimeoutMs, 500..60_000) { v -> vm.update { it.copy(connectTimeoutMs = v) } }

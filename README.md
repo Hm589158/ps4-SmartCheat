@@ -19,6 +19,7 @@ server-side and Turbo scanning); classic ps4debug works in compatibility mode wi
   increased/decreased by; progressive refinement, cancellation, paginated results with live values
 * Memory editor: read-only by default, confirmation for every write, fresh read-back verification, restore of
   original bytes, client-side freeze while connected
+* Memory viewer (hex + ASCII, live refresh with changed-byte highlighting), live result values, CSV export of results
 * Cheat library: per-game profiles (title ID + version + process), module-relative addresses when possible,
   validation before re-applying, JSON import/export, GoldHEN cheat-file export (verified fields only)
 
@@ -57,5 +58,5 @@ Create a keystore once: `keytool -genkeypair -v -keystore release.jks -alias sma
 then `base64 -w0 release.jks` into the secret.
 
 ## Docs
-[Architecture](docs/ARCHITECTURE.md) · [Protocol](docs/PROTOCOL.md) · [Testing](docs/TESTING.md) ·
+[Changelog](CHANGELOG.md) · [Architecture](docs/ARCHITECTURE.md) · [Protocol](docs/PROTOCOL.md) · [Testing](docs/TESTING.md) ·
 [Performance](docs/PERFORMANCE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Roadmap](docs/ROADMAP.md)

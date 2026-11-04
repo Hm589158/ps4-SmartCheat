@@ -221,7 +221,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun EditorScreen(initialAddress: Long?, initialType: ValueType?) {
+fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (Long) -> Unit = {}) {
     val vm = appViewModel { EditorViewModel(it) }
     LaunchedEffect(Unit) { vm.init(initialAddress, initialType) }
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -253,7 +253,10 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?) {
                 modifier = Modifier.fillMaxWidth(),
             )
             Selector("Value type", ValueType.entries, type, { it.label }, vm::setType)
-            OutlinedButton(onClick = vm::read, enabled = selected != null) { Text("Read") }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = vm::read, enabled = selected != null) { Text("Read") }
+                OutlinedButton(onClick = { addr?.let(onViewMemory) }, enabled = selected != null && addr != null) { Text("View memory") }
+            }
             location?.let { KeyValue("Region", it, mono = true) }
             KeyValue("Current", current?.let { ValueCodec.format(type, it) + "  [" + Hex.encode(it, " ") + "]" } ?: "—", mono = true)
             KeyValue("Original", original?.let { ValueCodec.format(it.type, it.original) + "  [" + Hex.encode(it.original, " ") + "]" } ?: "not modified by this app", mono = true)

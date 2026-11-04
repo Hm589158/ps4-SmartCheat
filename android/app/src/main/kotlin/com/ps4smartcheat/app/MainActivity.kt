@@ -46,6 +46,7 @@ import com.ps4smartcheat.app.ui.appContainer
 import com.ps4smartcheat.app.ui.screens.CheatsScreen
 import com.ps4smartcheat.app.ui.screens.ConnectionScreen
 import com.ps4smartcheat.app.ui.screens.EditorScreen
+import com.ps4smartcheat.app.ui.screens.HexViewerScreen
 import com.ps4smartcheat.app.ui.screens.ProcessesScreen
 import com.ps4smartcheat.app.ui.screens.ScannerScreen
 import com.ps4smartcheat.app.ui.screens.SettingsScreen
@@ -82,6 +83,9 @@ object Routes {
     const val EDITOR = "editor"
     const val CHEATS = "cheats"
     const val SETTINGS = "settings"
+    const val HEX = "hex"
+
+    fun hex(address: Long?): String = HEX + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "")
 
     fun editor(address: Long?, type: ValueType?): String =
         EDITOR + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "") + "&type=" + (type?.name ?: "")
@@ -118,12 +122,12 @@ private fun AppRoot() {
                     }
                 },
                 navigationIcon = {
-                    if (route == Routes.EDITOR) {
+                    if (route == Routes.EDITOR || route == Routes.HEX) {
                         IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                     }
                 },
                 actions = {
-                    if (route != Routes.EDITOR) {
+                    if (route != Routes.EDITOR && route != Routes.HEX) {
                         IconButton(onClick = { nav.navigate(Routes.editor(null, null)) }) { Icon(Icons.Filled.Edit, contentDescription = "Memory editor") }
                     }
                 },
@@ -156,7 +160,14 @@ private fun AppRoot() {
             ) { entry ->
                 val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
                 val type = entry.arguments?.getString("type")?.let { t -> ValueType.entries.firstOrNull { it.name == t } }
-                EditorScreen(address, type)
+                EditorScreen(address, type, onViewMemory = { a -> nav.navigate(Routes.hex(a)) })
+            }
+            composable(
+                Routes.HEX + "?address={address}",
+                arguments = listOf(navArgument("address") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { entry ->
+                val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
+                HexViewerScreen(address, onOpenEditor = { a -> nav.navigate(Routes.editor(a, null)) })
             }
             composable(Routes.CHEATS) { CheatsScreen() }
             composable(Routes.SETTINGS) { SettingsScreen() }
@@ -169,6 +180,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.PROCESSES -> "Running processes"
     Routes.SCANNER -> "Memory scanner"
     Routes.EDITOR -> "Memory editor"
+    Routes.HEX -> "Memory viewer"
     Routes.CHEATS -> "Saved cheats"
     Routes.SETTINGS -> "Settings"
     else -> "PS4 SmartCheat"

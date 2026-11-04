@@ -20,6 +20,7 @@ plain JVM (locally and in CI). `app` is a thin MVVM layer over `core`.
 | `edit` | `MemoryEditor` (policy checks, original journal, verified write, restore), `ProcessSafety` |
 | `cheat` | Models, `CheatJson` (format + validation), `CheatRepository` (atomic JSON file), `ProfileValidator`, `GoldHenExporter` |
 | `live` | `FreezeManager` (client-side periodic writes while connected) |
+| `tools` | `MemoryViewer`/`HexDump` (mapped-only display reads, change diff), `ScanResultsCsv` |
 
 ## Key decisions
 

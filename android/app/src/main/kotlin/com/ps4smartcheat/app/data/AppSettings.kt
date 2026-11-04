@@ -33,6 +33,10 @@ data class AppSettings(
     val scanBackend: BackendPreference = BackendPreference.AUTO,
     val turboAliasing: Boolean = false,
     val probeServerScan: Boolean = true,
+    /** Live refresh interval for result lists and the memory viewer. */
+    val monitorIntervalMs: Int = 1000,
+    /** Skip regions larger than this many MiB during scans (0 = no limit). */
+    val maxRegionMiB: Int = 0,
 ) {
     fun connectOptions() = ConnectOptions(
         host = host, port = port, connectTimeoutMs = connectTimeoutMs, readTimeoutMs = readTimeoutMs,
@@ -41,7 +45,11 @@ data class AppSettings(
 
     fun editPolicy() = EditPolicy(editingEnabled, allowNonWritableRegions, allowSystemProcesses)
 
-    fun regionFilter() = RegionFilter(includeReadOnly = includeReadOnlyRegions, includeExecutable = includeExecutableRegions)
+    fun regionFilter() = RegionFilter(
+        includeReadOnly = includeReadOnlyRegions,
+        includeExecutable = includeExecutableRegions,
+        maxRegionBytes = maxRegionMiB.coerceAtLeast(0).toLong() * 1024 * 1024,
+    )
 
     fun scanOptions() = ScanOptions(
         chunkSize = chunkKb.coerceIn(4, 4096) * 1024,
@@ -88,6 +96,8 @@ class SettingsStore(context: Context) {
             scanBackend = runCatching { BackendPreference.valueOf(prefs.getString("scanBackend", d.scanBackend.name)!!) }.getOrDefault(d.scanBackend),
             turboAliasing = prefs.getBoolean("turboAliasing", d.turboAliasing),
             probeServerScan = prefs.getBoolean("probeServerScan", d.probeServerScan),
+            monitorIntervalMs = prefs.getInt("monitorIntervalMs", d.monitorIntervalMs),
+            maxRegionMiB = prefs.getInt("maxRegionMiB", d.maxRegionMiB),
         )
     }
 
@@ -110,6 +120,8 @@ class SettingsStore(context: Context) {
             .putString("scanBackend", s.scanBackend.name)
             .putBoolean("turboAliasing", s.turboAliasing)
             .putBoolean("probeServerScan", s.probeServerScan)
+            .putInt("monitorIntervalMs", s.monitorIntervalMs)
+            .putInt("maxRegionMiB", s.maxRegionMiB)
             .apply()
     }
 }
