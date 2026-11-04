@@ -85,7 +85,11 @@ jobs:
           git init -q -b ci-screenshots
           git add -A
           git -c user.name="ci" -c user.email="ci@users.noreply.github.com" commit -q -m "UI screenshots for ${GITHUB_SHA}"
-          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-screenshots
+          for i in 1 2 3 4; do
+            git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/ci-screenshots && exit 0
+            echo "push attempt $i failed; retrying"; sleep $((i * 5))
+          done
+          echo "::warning::could not publish screenshots branch"
 
       - name: Upload test APK (debug-signed, short retention)
         uses: actions/upload-artifact@v4

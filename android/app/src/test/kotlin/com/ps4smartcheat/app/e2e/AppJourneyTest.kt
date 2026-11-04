@@ -37,6 +37,7 @@ import java.io.File
  *
  * This proves the app's screens, view models, networking and core logic work together. It is NOT a PS4 test.
  */
+@OptIn(com.github.takahirom.roborazzi.ExperimentalRoborazziApi::class)
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34], qualifiers = "w411dp-h891dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -193,15 +194,15 @@ class AppJourneyTest {
         step("save cheat: type value")
         tag("newValue").performTextClearance()
         tag("newValue").performTextInput("99999")
-        step("save cheat: open dialog")
+        step("save cheat: open form")
         tag("saveCheat").performScrollTo().performClick()
         repeat(5) { compose.mainClock.advanceTimeBy(100); Thread.sleep(50) }
         screen("10b_after_save_click_raw")
-        step("save cheat: wait for dialog")
+        step("save cheat: fill form")
         waitTag("cheatName")
-        tag("cheatName").performTextInput("Infinite coins")
-        shot("11_save_cheat_dialog")
-        tag("saveConfirm").performClick()
+        tag("cheatName").performScrollTo().performTextInput("Infinite coins")
+        shot("11_save_cheat_form")
+        tag("saveConfirm").performScrollTo().performClick()
         waitText("Saved \"Infinite coins\"")
 
         // 10. Memory viewer around the address.

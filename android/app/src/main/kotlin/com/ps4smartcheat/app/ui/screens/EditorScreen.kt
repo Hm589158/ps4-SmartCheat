@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -282,7 +281,17 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
             ErrorText(error)
         }
         SectionCard("Cheat library") {
-            OutlinedButton(onClick = { showSave = true }, enabled = selected != null && addr != null, modifier = Modifier.testTag("saveCheat")) { Text("Save as cheat") }
+            if (!showSave) {
+                OutlinedButton(onClick = { showSave = true }, enabled = selected != null && addr != null, modifier = Modifier.testTag("saveCheat")) { Text("Save as cheat") }
+            } else {
+                // Inline form instead of a dialog: stays usable while the soft keyboard is open.
+                SaveCheatForm(
+                    profiles = vm.profilesForSelected(),
+                    defaultProfileName = selected?.titleId ?: selected?.name ?: "",
+                    onCancel = { showSave = false },
+                    onSave = { name, profileId, newName, version -> vm.saveCheat(name, profileId, newName, version); showSave = false },
+                )
+            }
         }
     }
 
@@ -300,43 +309,34 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
         )
     }
 
-    if (showSave) {
-        SaveCheatDialog(
-            profiles = vm.profilesForSelected(),
-            defaultProfileName = selected?.titleId ?: selected?.name ?: "",
-            onDismiss = { showSave = false },
-            onSave = { name, profileId, newName, version -> vm.saveCheat(name, profileId, newName, version); showSave = false },
-        )
-    }
 }
 
 @Composable
-private fun SaveCheatDialog(
+private fun SaveCheatForm(
     profiles: List<CheatProfile>,
     defaultProfileName: String,
-    onDismiss: () -> Unit,
+    onCancel: () -> Unit,
     onSave: (name: String, profileId: String?, newProfileName: String, version: String) -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
     var target by remember { mutableStateOf<CheatProfile?>(profiles.firstOrNull()) }
     var newName by remember { mutableStateOf(defaultProfileName) }
     var version by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Save cheat") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("Cheat name") }, singleLine = true, modifier = Modifier.testTag("cheatName"))
-                val options: List<CheatProfile?> = profiles + listOf(null)
-                Selector("Profile", options, target, { it?.name ?: "New profile…" }, { target = it })
-                if (target == null) {
-                    OutlinedTextField(newName, { newName = it }, label = { Text("New profile name") }, singleLine = true)
-                    OutlinedTextField(version, { version = it }, label = { Text("Game version (e.g. 01.00)") }, singleLine = true)
-                    Text("ps4debug does not report the game version; enter it from the game's info screen.", style = MaterialTheme.typography.bodySmall)
-                }
-            }
-        },
-        confirmButton = { TextButton(onClick = { onSave(name, target?.id, newName, version) }, modifier = Modifier.testTag("saveConfirm")) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-    )
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedTextField(
+            name, { name = it }, label = { Text("Cheat name") }, singleLine = true,
+            modifier = Modifier.fillMaxWidth().testTag("cheatName"),
+        )
+        val options: List<CheatProfile?> = profiles + listOf(null)
+        Selector("Profile", options, target, { it?.name ?: "New profile…" }, { target = it })
+        if (target == null) {
+            OutlinedTextField(newName, { newName = it }, label = { Text("New profile name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            OutlinedTextField(version, { version = it }, label = { Text("Game version (e.g. 01.00)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+            Text("ps4debug does not report the game version; enter it from the game's info screen.", style = MaterialTheme.typography.bodySmall)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = { onSave(name, target?.id, newName, version) }, modifier = Modifier.testTag("saveConfirm")) { Text("Save") }
+            TextButton(onClick = onCancel) { Text("Cancel") }
+        }
+    }
 }
