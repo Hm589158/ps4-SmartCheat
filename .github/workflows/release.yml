@@ -50,6 +50,12 @@ jobs:
         if: github.event_name == 'workflow_run'
         run: |
           # Skip if this exact commit is already released under a v* tag (e.g. a manual test release).
+          if gh run list --repo "$GITHUB_REPOSITORY" --workflow release.yml --event workflow_dispatch --limit 50 \
+               --json headSha --jq '.[].headSha' | grep -q "^${RELEASE_SHA}$"; then
+            echo "A manual release run exists for $RELEASE_SHA; not publishing a duplicate."
+            echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
+            exit 0
+          fi
           if git ls-remote --tags origin 'v*' | grep -q "^${RELEASE_SHA}"; then
             echo "Commit $RELEASE_SHA already has a release tag; not publishing a duplicate."
             echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
