@@ -2,7 +2,7 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
-## 0.7.0 (unreleased)
+## 0.7.0
 - First hardware report (owner): FW 11.00 + GoldHEN + ps4debug-NG v1.3.3 — connect, auth, process list, Turbo Scan,
   refines and a write to a real game worked. Recorded in docs/COMPATIBILITY.md.
 - Automatic reconnection after dropped/server-closed connections (exponential backoff, "Reconnecting" state).
@@ -14,6 +14,8 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 - Game lifecycle: exit is detected (scan session closed, freeze stopped, stored originals discarded, scanning
   blocked); a restart of the same game under a new pid is picked up automatically with a fresh session.
 - Structured diagnostics log (category + fields), exportable as JSON Lines from Settings.
+- A closed session is shown as information ("Scan session closed: … exited"), not as a failure, and is cleared
+  when another process is selected.
 
 ## 0.6.0
 - End-to-end UI journey test (Robolectric + Roborazzi) drives the real app against the mock ps4debug-NG

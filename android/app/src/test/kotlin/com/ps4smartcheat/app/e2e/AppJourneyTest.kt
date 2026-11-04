@@ -252,6 +252,7 @@ class AppJourneyTest {
         server.killProcess(DemoGame.PID)
         waitText("exited", timeoutMs = 20_000)
         waitText("Scanning is disabled until the game runs again")
+        waitText("Scan session closed") // informational, not shown as a failure
         shot("30_game_exited")
         // It starts again under a new pid: picked up automatically, old results not reused.
         server.addProcess(MockPs4DebugServer.Process(123, "eboot.bin", titleId = "MOCK00001", path = "/app0/eboot.bin").also {
@@ -259,6 +260,8 @@ class AppJourneyTest {
         })
         waitText("eboot.bin (123)", timeoutMs = 20_000)
         compose.waitUntil(10_000) { compose.onAllNodesWithText("Scan 1: ", substring = true).fetchSemanticsNodes().isEmpty() }
+        // The "session closed" notice belongs to the old pid and must not linger.
+        compose.waitUntil(10_000) { compose.onAllNodesWithText("Scan session closed", substring = true).fetchSemanticsNodes().isEmpty() }
         shot("31_game_restarted")
     }
 

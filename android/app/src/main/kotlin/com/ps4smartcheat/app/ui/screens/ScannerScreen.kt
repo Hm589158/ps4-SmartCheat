@@ -299,6 +299,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit) {
                     }
                     is ScanStatus.Failed -> Text("Failed: ${st.message}", color = MaterialTheme.colorScheme.error)
                     ScanStatus.Cancelled -> Text("Cancelled — previous results kept.", style = MaterialTheme.typography.bodySmall)
+                    is ScanStatus.Ended -> Text("Scan session closed: ${st.reason}.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                     ScanStatus.Idle -> {}
                 }
             }

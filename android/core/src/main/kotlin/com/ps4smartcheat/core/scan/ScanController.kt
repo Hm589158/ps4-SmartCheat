@@ -21,6 +21,8 @@ sealed interface ScanStatus {
     data class Completed(val message: String) : ScanStatus
     data class Failed(val message: String) : ScanStatus
     data object Cancelled : ScanStatus
+    /** The session was closed for an expected reason (e.g. the game exited); not an error. */
+    data class Ended(val reason: String) : ScanStatus
 }
 
 /** Read-only summary of a per-process scan session. */
@@ -143,8 +145,11 @@ class ScanController(
 
     /** Switches the active process; existing sessions for other processes are kept. */
     fun activate(pid: Int?) {
+        val changed = pid != activePid
         activePid = pid
         _session.value = pid?.let { sessions[it]?.view() }
+        // A status from another process (e.g. "ended: pid 77 exited") must not linger on the new one.
+        if (changed && !isRunning) _status.value = ScanStatus.Idle
     }
 
     fun firstScan(
@@ -361,7 +366,7 @@ class ScanController(
         s.dispose()
         if (activePid == pid) {
             _session.value = null
-            _status.value = ScanStatus.Failed("Scan session ended: $reason")
+            _status.value = ScanStatus.Ended(reason)
         }
     }
 

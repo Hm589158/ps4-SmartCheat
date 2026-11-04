@@ -137,7 +137,9 @@ class ProcessLifecycleTest {
         assertFalse(controller.hasSession(DemoGame.PID))
         assertNull(controller.session.value)
         val st = controller.status.value
-        assertTrue(st.toString(), st is ScanStatus.Failed && st.message.contains("game exited"))
+        assertTrue(st.toString(), st is ScanStatus.Ended && st.reason.contains("game exited"))
+        controller.activate(999)
+        assertEquals(ScanStatus.Idle, controller.status.value)
     }
 
     @Test fun monitorRepairsSilentlyDroppedLink() = runBlocking {
