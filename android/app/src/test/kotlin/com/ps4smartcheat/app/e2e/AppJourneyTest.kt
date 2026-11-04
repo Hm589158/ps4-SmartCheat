@@ -134,16 +134,19 @@ class AppJourneyTest {
         }
     }
 
-    /**
-     * Waits for a condition on the mock console. compose.waitUntil idles the main looper between checks, so
-     * coroutines resuming on Main (each read/write step of an edit) keep running while we wait.
-     */
+    /** Waits for a condition on the mock console while letting the app's main-thread work run. */
     private fun waitMock(timeoutMs: Long = 20_000, cond: () -> Boolean) {
-        try {
-            compose.waitUntil(timeoutMs) { cond() }
-        } catch (e: Throwable) {
-            dumpThreads()
-            throw e
+        val end = System.currentTimeMillis() + timeoutMs
+        // waitForIdle drains the main looper: coroutines resuming on Dispatchers.Main (each step of an edit) only
+        // run then. compose.waitUntil alone does not idle when the condition never touches Compose semantics.
+        while (true) {
+            compose.waitForIdle()
+            if (cond()) return
+            if (System.currentTimeMillis() > end) {
+                dumpThreads()
+                throw AssertionError("mock condition not reached within $timeoutMs ms")
+            }
+            Thread.sleep(20)
         }
     }
 
