@@ -52,6 +52,14 @@ class AppJourneyTest {
     @get:Rule(order = 1) val watcher = object : TestWatcher() {
         override fun failed(e: Throwable, d: Description) {
             println("E2E FAILED in ${d.methodName} after step '$lastStep': ${e.javaClass.simpleName}: ${e.message?.take(300)}")
+            runCatching {
+                val c = (compose.activity.application as com.ps4smartcheat.app.SmartCheatApp).container
+                println("E2E app log (last 40):")
+                c.log.lines.value.takeLast(40).forEach { println("  " + it.format()) }
+                println("E2E journal: " + c.editor.journal.value.map { "pid ${it.pid} ${Address.format(it.address)} len ${it.original.size}" })
+                println("E2E undo: " + c.editor.undoStack.value.map { "${it.label} ${Address.format(it.target.address)}" })
+                println("E2E selected: " + c.selectedProcess.value?.let { "${it.name} ${it.pid} exited=${it.exited}" } + " state=" + c.backend.state.value)
+            }.onFailure { println("E2E diagnostics failed: $it") }
             runCatching { File(OUT).mkdirs(); captureScreenRoboImage("$OUT/FAILED_${d.methodName}.png") }
                 .onFailure { println("E2E failure screenshot failed: $it") }
         }
