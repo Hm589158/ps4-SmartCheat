@@ -290,6 +290,9 @@ class AppContainer(context: Context) {
         return "Saved \"${entry.name}\"" + if (module == null) " (absolute address — may not survive a game restart)" else " (${module.name} relative)"
     }
 
+    /** Automatic reconnections since the app started (diagnostics). */
+    val reconnectCount: Int get() = client.reconnectCount.get()
+
     fun gameKey(sel: SelectedProcess): String = WatchKeys.gameKey(sel.titleId, sel.name)
 
     /** Pointer scans run here (application scope) so they survive leaving the screen. */

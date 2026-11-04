@@ -2,7 +2,15 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
-## 0.10.0 (in progress)
+## 1.0.0 (in progress)
+- Connection diagnostics (Settings → Connection diagnostics): debugger, firmware, auth and Turbo engines, traffic,
+  idle time, automatic reconnects, measured link, a 5-request latency test (CMD_VERSION only — no game memory is
+  read) and the recent warnings/errors.
+- In-app guide (ⓘ in the top bar): connect, find a value, edit safely, keep what you found, troubleshooting, and
+  the offline-only / trusted-network notice.
+- Wide screens (≥ 720 dp: tablets, landscape phones) use a side navigation rail; content is limited to 900 dp.
+
+## 0.10.0
 - Memory viewer: patch raw bytes ("DE AD BE EF", up to 64) at the highlighted address — same policy, region checks,
   confirmation dialog (current vs new bytes) and fresh read-back verification as typed writes.
 - Undo/redo of verified writes in this session (editor → History): each step is confirmed, shows the bytes in

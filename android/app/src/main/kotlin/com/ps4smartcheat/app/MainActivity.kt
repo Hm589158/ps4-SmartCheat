@@ -5,12 +5,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -21,6 +26,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationRail
+import androidx.compose.material3.NavigationRailItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -47,7 +54,9 @@ import com.ps4smartcheat.app.ui.appContainer
 import com.ps4smartcheat.app.ui.screens.AddressesScreen
 import com.ps4smartcheat.app.ui.screens.CheatsScreen
 import com.ps4smartcheat.app.ui.screens.ConnectionScreen
+import com.ps4smartcheat.app.ui.screens.DiagnosticsScreen
 import com.ps4smartcheat.app.ui.screens.EditorScreen
+import com.ps4smartcheat.app.ui.screens.HelpScreen
 import com.ps4smartcheat.app.ui.screens.HexViewerScreen
 import com.ps4smartcheat.app.ui.screens.PatternSearchScreen
 import com.ps4smartcheat.app.ui.screens.PointerScanScreen
@@ -70,6 +79,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+/** Screens opened on top of a tab: they show a back arrow. */
+private val backRoutes = setOf(Routes.EDITOR, Routes.HEX, Routes.PATTERN, Routes.POINTER, Routes.DIAGNOSTICS, Routes.HELP)
+
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
 private val tabs = listOf(
@@ -91,6 +103,8 @@ object Routes {
     const val HEX = "hex"
     const val PATTERN = "pattern"
     const val POINTER = "pointer"
+    const val DIAGNOSTICS = "diagnostics"
+    const val HELP = "help"
 
     fun pointer(address: Long?, type: ValueType?): String =
         POINTER + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "") + "&type=" + (type?.name ?: "")
@@ -111,6 +125,9 @@ private fun AppRoot() {
     val connection by container.backend.state.collectAsStateWithLifecycle()
     val selected by container.selectedProcess.collectAsStateWithLifecycle()
     val snackbar = remember { SnackbarHostState() }
+    val wide = LocalConfiguration.current.screenWidthDp >= 720
+    // Tapping the tab you are in (e.g. from Pointer scan opened from Addresses) returns to its root.
+    val openTab: (String) -> Unit = { r -> if (!nav.popBackStack(r, inclusive = false)) nav.navigateTab(r) }
 
     LaunchedEffect(Unit) {
         container.log.messages.collect { snackbar.showSnackbar(it) }
@@ -133,13 +150,16 @@ private fun AppRoot() {
                     }
                 },
                 navigationIcon = {
-                    if (route == Routes.EDITOR || route == Routes.HEX || route == Routes.PATTERN || route == Routes.POINTER) {
+                    if (route in backRoutes) {
                         IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                     }
                 },
                 actions = {
                     if (route != Routes.EDITOR && route != Routes.HEX) {
                         IconButton(onClick = { nav.navigate(Routes.editor(null, null)) }) { Icon(Icons.Filled.Edit, contentDescription = "Memory editor") }
+                    }
+                    if (route != Routes.HELP) {
+                        IconButton(onClick = { nav.navigate(Routes.HELP) }) { Icon(Icons.Filled.Info, contentDescription = "Guide") }
                     }
                     if (route != Routes.SETTINGS) {
                         IconButton(onClick = { nav.navigateTab(Routes.SETTINGS) }) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
@@ -148,21 +168,36 @@ private fun AppRoot() {
             )
         },
         bottomBar = {
-            NavigationBar {
-                tabs.forEach { tab ->
-                    NavigationBarItem(
-                        selected = route == tab.route,
-                        // Tapping the tab you are in (e.g. from Pointer scan opened from Addresses) returns to its root.
-                        onClick = { if (!nav.popBackStack(tab.route, inclusive = false)) nav.navigateTab(tab.route) },
-                        icon = { Icon(tab.icon, contentDescription = null) },
-                        label = { Text(tab.label, maxLines = 1) },
-                    )
+            if (!wide) {
+                NavigationBar {
+                    tabs.forEach { tab ->
+                        NavigationBarItem(
+                            selected = route == tab.route,
+                            onClick = { openTab(tab.route) },
+                            icon = { Icon(tab.icon, contentDescription = null) },
+                            label = { Text(tab.label, maxLines = 1) },
+                        )
+                    }
                 }
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        NavHost(nav, startDestination = Routes.CONNECTION, modifier = Modifier.padding(padding)) {
+      Row(Modifier.padding(padding)) {
+        // Tablets and landscape phones: a side rail instead of the bottom bar, so content keeps its height.
+        if (wide) {
+            NavigationRail {
+                tabs.forEach { tab ->
+                    NavigationRailItem(
+                        selected = route == tab.route,
+                        onClick = { openTab(tab.route) },
+                        icon = { Icon(tab.icon, contentDescription = null) },
+                        label = { Text(tab.label, maxLines = 1) },
+                    )
+                }
+            }
+        }
+        NavHost(nav, startDestination = Routes.CONNECTION, modifier = Modifier.weight(1f).widthIn(max = 900.dp)) {
             composable(Routes.CONNECTION) { ConnectionScreen(onConnected = { nav.navigateTab(Routes.PROCESSES) }) }
             composable(Routes.PROCESSES) { ProcessesScreen(onOpenScanner = { nav.navigateTab(Routes.SCANNER) }) }
             composable(Routes.SCANNER) { ScannerScreen(onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) }, onPatternSearch = { nav.navigate(Routes.PATTERN) }) }
@@ -204,8 +239,11 @@ private fun AppRoot() {
             }
             composable(Routes.PATTERN) { PatternSearchScreen(onOpen = { a -> nav.navigate(Routes.hex(a)) }) }
             composable(Routes.CHEATS) { CheatsScreen() }
-            composable(Routes.SETTINGS) { SettingsScreen() }
+            composable(Routes.SETTINGS) { SettingsScreen(onDiagnostics = { nav.navigate(Routes.DIAGNOSTICS) }, onHelp = { nav.navigate(Routes.HELP) }) }
+            composable(Routes.DIAGNOSTICS) { DiagnosticsScreen() }
+            composable(Routes.HELP) { HelpScreen() }
         }
+      }
     }
 }
 
@@ -217,6 +255,8 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.HEX -> "Memory viewer"
     Routes.PATTERN -> "Pattern search"
     Routes.POINTER -> "Pointer scan"
+    Routes.DIAGNOSTICS -> "Connection diagnostics"
+    Routes.HELP -> "Guide"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"
     Routes.SETTINGS -> "Settings"

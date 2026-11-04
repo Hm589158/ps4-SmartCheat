@@ -19,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -78,7 +79,7 @@ private fun NumberField(label: String, value: Int, range: IntRange, onValue: (In
 }
 
 @Composable
-fun SettingsScreen() {
+fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
     val vm = appViewModel { SettingsViewModel(it) }
     val s by vm.settings.collectAsStateWithLifecycle()
     val log by vm.log.collectAsStateWithLifecycle()
@@ -159,6 +160,10 @@ fun SettingsScreen() {
         }
         SectionCard("Diagnostics log") {
             Text("Structured events (connection, protocol, process, scan…). Kept in memory only; never uploaded. Export to share when reporting a problem.", style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = onDiagnostics, modifier = Modifier.testTag("openDiagnostics")) { Text("Connection diagnostics") }
+                OutlinedButton(onClick = onHelp) { Text("Guide") }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = vm::clearLog) { Text("Clear") }
                 OutlinedButton(onClick = { logLauncher.launch("smartcheat-log.jsonl") }) { Text("Export (JSON Lines)") }

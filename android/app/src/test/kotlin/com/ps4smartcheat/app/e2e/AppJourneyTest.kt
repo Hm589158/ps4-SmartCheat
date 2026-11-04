@@ -450,6 +450,38 @@ class AppJourneyTest {
         shot("37_pointer_entry_follows")
     }
 
+    @Test fun diagnosticsAndGuide() {
+        server.faults.linkLatencyMs = 20L
+        connect()
+        openSettings()
+        waitTag("openDiagnostics")
+        press("openDiagnostics")
+        waitTag("pingTest")
+        waitText("ps4debug-NG")
+        press("pingTest")
+        waitTag("pingResult", timeoutMs = 20_000)
+        waitText("avg")
+        shot("38_diagnostics")
+        compose.onNodeWithContentDescription("Guide").performClick()
+        waitTag("help")
+        waitText("Find a value")
+        shot("39_guide")
+    }
+
+    @Config(qualifiers = "w1280dp-h800dp-land-xhdpi")
+    @Test fun tabletLayoutUsesNavigationRail() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        tab("Scanner")
+        waitTag("scanValue")
+        tag("scanValue").performTextInput("5000")
+        tag("firstScan").performClick()
+        waitText("Scan 1: ")
+        shot("40_tablet_scanner")
+        tab("Addresses")
+        waitTag("addressList")
+    }
+
     @Test fun droppedConnectionIsRecoveredAutomatically() {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
