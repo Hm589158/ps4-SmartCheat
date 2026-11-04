@@ -27,6 +27,13 @@ The mock is an independent implementation of the server side over real TCP, with
 * `ToolsTest` – hex rows with change/unmapped flags, viewer never requests unmapped memory, CSV export format/escaping.
 * `ScanBenchmark` (`./gradlew :core:benchmark`, not part of `test`) – see docs/PERFORMANCE.md.
 * `FreezeManagerTest` – freeze/unfreeze, stop on process exit, disconnect, editing disabled.
+* `WatchListTest` – per-game persistence, duplicate detection, corrupt-file backup, module-relative resolution after
+  relocation, absolute addresses trusted only in their session, batched read plan (never across regions), live
+  values from the mock in one request, entry follows a mock game restart.
+* `RangeModesTest` – bigger/smaller/between for signed ints and floats (NaN never matches), fallback from server
+  tiers, results equal to brute force.
+* `PatternSearchTest` – hex/wildcard/text parsing, matches across chunk borders, none across regions, alignment,
+  hit cap; results equal to brute force over mock memory.
 
 Run: `cd android && ./gradlew :core:test` (works without an Android SDK).
 
@@ -37,7 +44,8 @@ Turbo first scan → refine → read-only editor → enable editing → confirme
 cheat → memory viewer → cheat library → settings. It asserts on-screen text and the mock's memory, and saves a
 screenshot per step (`app/build/outputs/roborazzi/`). CI publishes the screenshots and JUnit XML to the
 `ci-screenshots` branch (see its README.md). Further tests: refused connection is reported and recoverable;
-public addresses are blocked. This shows the app works end to end with a ps4debug-NG-compatible server; it is
+public addresses are blocked; address list survives a game restart (module-relative) without duplicates; byte
+pattern search; "Value between" scan. This shows the app works end to end with a ps4debug-NG-compatible server; it is
 not a PS4 test.
 
 ## Android

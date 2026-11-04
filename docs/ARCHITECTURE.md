@@ -20,7 +20,9 @@ plain JVM (locally and in CI). `app` is a thin MVVM layer over `core`.
 | `edit` | `MemoryEditor` (policy checks, original journal, verified write, restore), `ProcessSafety` |
 | `cheat` | Models, `CheatJson` (format + validation), `CheatRepository` (atomic JSON file), `ProfileValidator`, `GoldHenExporter` |
 | `live` | `FreezeManager` (client-side periodic writes while connected) |
-| `tools` | `MemoryViewer`/`HexDump` (mapped-only display reads, change diff), `ScanResultsCsv` |
+| `tools` | `MemoryViewer`/`HexDump` (mapped-only display reads, change diff), `ScanResultsCsv`, `BytePattern`/`PatternSearch` (AOB and text search) |
+| `watch` | Per-game address list: `WatchRepository` (atomic JSON keyed by title ID), `WatchResolver` (module-relative / same session / earlier session / unmapped), `WatchReader` (batched reads within one region) |
+| `process` | `GameDetector`, `ProcessWatcher` (exit/restart detection) |
 
 ## Key decisions
 

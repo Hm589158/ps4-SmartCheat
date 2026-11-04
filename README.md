@@ -15,8 +15,12 @@ server-side and Turbo scanning); classic ps4debug works in compatibility mode wi
 * Three scan backends chosen automatically: **Turbo Scan** and **server-side scan** on the PS4 (ps4debug-NG),
   falling back to an optimized **chunked scan on Android** — with live elapsed time, MiB/s, network bytes and the
   backend used ([measurements](docs/PERFORMANCE.md))
-* Scan Int8/16/32/64, Float, Double: exact, unknown initial, increased, decreased, changed, unchanged,
-  increased/decreased by; progressive refinement, cancellation, paginated results with live values
+* Scan Int8/16/32/64, Float, Double: exact, bigger/smaller than, value between, unknown initial, increased,
+  decreased, changed, unchanged, increased/decreased by; progressive refinement, cancellation, paginated results
+  with live values
+* Byte pattern (AOB, `??`/nibble wildcards) and text (ASCII/UTF-8, UTF-16LE) search
+* Address list per game: named addresses with live values, module-relative entries that follow the game across
+  restarts, freeze and edit from the list
 * Memory editor: read-only by default, confirmation for every write, fresh read-back verification, restore of
   original bytes, client-side freeze while connected
 * Memory viewer (hex + ASCII, live refresh with changed-byte highlighting), live result values, CSV export of results
