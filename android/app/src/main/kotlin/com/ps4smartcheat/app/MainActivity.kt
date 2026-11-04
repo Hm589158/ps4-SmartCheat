@@ -152,7 +152,8 @@ private fun AppRoot() {
                 tabs.forEach { tab ->
                     NavigationBarItem(
                         selected = route == tab.route,
-                        onClick = { nav.navigateTab(tab.route) },
+                        // Tapping the tab you are in (e.g. from Pointer scan opened from Addresses) returns to its root.
+                        onClick = { if (!nav.popBackStack(tab.route, inclusive = false)) nav.navigateTab(tab.route) },
                         icon = { Icon(tab.icon, contentDescription = null) },
                         label = { Text(tab.label, maxLines = 1) },
                     )
