@@ -149,6 +149,8 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
         try {
             c.scanner.firstScan(sel.pid, sel.name, _type.value, _firstMode.value, _value.value, s.regionFilter(), s.scanOptions(), valueText2 = _value2.value)
             _rows.value = emptyList()
+            // Keep refining with the same kind of compare (e.g. "Value between") unless the user picks another.
+            if (_firstMode.value in ScanMode.NEXT_SCAN_MODES) _nextMode.value = _firstMode.value
             c.log.info("First scan ${_type.value.label} ${_firstMode.value.label} '${_value.value}'" + (if (_firstMode.value.needsSecondValue) "..'${_value2.value}'" else "") + " in ${sel.name}")
         } catch (e: IllegalArgumentException) {
             _error.value = e.message

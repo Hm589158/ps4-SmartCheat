@@ -72,7 +72,7 @@ class ServerScanner(private val t: ServerScanTransport) {
         /** Null when the request can run server-side, otherwise the reason it cannot. */
         fun ineligibility(matcher: Matcher, options: ScanOptions, first: Boolean): String? {
             if (typeCode(matcher.type) == null) return "${matcher.type.label} is compared on Android (server float policy differs)"
-            if (compareCode(matcher.mode) == null) return "${matcher.mode.label} is not offloaded"
+            if (compareCode(matcher.mode) == null) return "${matcher.mode.label} compares run on Android (no verified PS4-side code)"
             if (first && matcher.mode != ScanMode.EXACT) return "only exact first scans are offloaded"
             if (options.effectiveAlignment(matcher.type) != matcher.type.size) return "unaligned scans run on Android"
             return null
