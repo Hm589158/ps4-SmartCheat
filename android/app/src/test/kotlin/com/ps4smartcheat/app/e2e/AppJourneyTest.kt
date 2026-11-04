@@ -134,7 +134,7 @@ class AppJourneyTest {
         waitTag("scanValue")
         tag("scanValue").performTextInput("5000")
         tag("firstScan").performClick()
-        waitText("after scan 1")
+        waitText("Scan 1: ")
         waitText("Turbo Scan (PS4)")
         shot("05_first_scan")
 
@@ -144,7 +144,7 @@ class AppJourneyTest {
         tag("scanValue").performTextClearance()
         tag("scanValue").performTextInput("4200")
         tag("nextScan").performClick()
-        waitText("after scan 2")
+        waitText("Scan 2: ")
         compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("result-$coins"))
         waitTag("result-$coins")
         waitText("eboot.bin+0x120") // region shown on the result row
