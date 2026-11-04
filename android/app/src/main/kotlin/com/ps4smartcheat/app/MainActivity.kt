@@ -50,6 +50,7 @@ import com.ps4smartcheat.app.ui.screens.ConnectionScreen
 import com.ps4smartcheat.app.ui.screens.EditorScreen
 import com.ps4smartcheat.app.ui.screens.HexViewerScreen
 import com.ps4smartcheat.app.ui.screens.PatternSearchScreen
+import com.ps4smartcheat.app.ui.screens.PointerScanScreen
 import com.ps4smartcheat.app.ui.screens.ProcessesScreen
 import com.ps4smartcheat.app.ui.screens.ScannerScreen
 import com.ps4smartcheat.app.ui.screens.SettingsScreen
@@ -89,6 +90,10 @@ object Routes {
     const val SETTINGS = "settings"
     const val HEX = "hex"
     const val PATTERN = "pattern"
+    const val POINTER = "pointer"
+
+    fun pointer(address: Long?, type: ValueType?): String =
+        POINTER + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "") + "&type=" + (type?.name ?: "")
 
     fun hex(address: Long?): String = HEX + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "")
 
@@ -128,7 +133,7 @@ private fun AppRoot() {
                     }
                 },
                 navigationIcon = {
-                    if (route == Routes.EDITOR || route == Routes.HEX || route == Routes.PATTERN) {
+                    if (route == Routes.EDITOR || route == Routes.HEX || route == Routes.PATTERN || route == Routes.POINTER) {
                         IconButton(onClick = { nav.popBackStack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back") }
                     }
                 },
@@ -179,7 +184,22 @@ private fun AppRoot() {
                 HexViewerScreen(address, onOpenEditor = { a -> nav.navigate(Routes.editor(a, null)) })
             }
             composable(Routes.ADDRESSES) {
-                AddressesScreen(onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) }, onViewMemory = { a -> nav.navigate(Routes.hex(a)) })
+                AddressesScreen(
+                    onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) },
+                    onViewMemory = { a -> nav.navigate(Routes.hex(a)) },
+                    onPointerScan = { a, t -> nav.navigate(Routes.pointer(a, t)) },
+                )
+            }
+            composable(
+                Routes.POINTER + "?address={address}&type={type}",
+                arguments = listOf(
+                    navArgument("address") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("type") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { entry ->
+                val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
+                val type = entry.arguments?.getString("type")?.let { t -> ValueType.entries.firstOrNull { it.name == t } }
+                PointerScanScreen(address, type)
             }
             composable(Routes.PATTERN) { PatternSearchScreen(onOpen = { a -> nav.navigate(Routes.hex(a)) }) }
             composable(Routes.CHEATS) { CheatsScreen() }
@@ -195,6 +215,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.EDITOR -> "Memory editor"
     Routes.HEX -> "Memory viewer"
     Routes.PATTERN -> "Pattern search"
+    Routes.POINTER -> "Pointer scan"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"
     Routes.SETTINGS -> "Settings"

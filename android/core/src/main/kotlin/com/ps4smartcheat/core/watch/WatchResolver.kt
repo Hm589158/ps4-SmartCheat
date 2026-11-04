@@ -4,6 +4,8 @@ import com.ps4smartcheat.core.backend.DebugBackend
 import com.ps4smartcheat.core.cheat.ModuleResolver
 import com.ps4smartcheat.core.model.MemoryRegion
 import com.ps4smartcheat.core.model.regionFor
+import com.ps4smartcheat.core.pointer.PointerResolution
+import com.ps4smartcheat.core.pointer.PointerResolver
 import com.ps4smartcheat.core.util.Address
 
 enum class WatchStatus(val label: String, val readable: Boolean) {
@@ -15,6 +17,12 @@ enum class WatchStatus(val label: String, val readable: Boolean) {
     ABSOLUTE_UNVERIFIED("from an earlier session — verify", true),
     /** The address is not inside a readable region of the current process. Never read. */
     UNMAPPED("not mapped in this process", false),
+    /** Pointer chain followed in the current process. */
+    POINTER("pointer chain", true),
+    /** Pointer chain not followed yet (not connected) — never read. */
+    POINTER_UNRESOLVED("pointer chain (not resolved yet)", false),
+    /** Pointer chain leads to unmapped memory now (e.g. the object does not exist at the moment). */
+    POINTER_BROKEN("pointer chain broken", false),
 }
 
 data class ResolvedWatch(
@@ -28,6 +36,7 @@ data class ResolvedWatch(
 object WatchResolver {
     /** Resolves [entry] against the memory map of the current process [pid]. Pure; does not touch the console. */
     fun resolve(entry: WatchEntry, pid: Int, regions: List<MemoryRegion>): ResolvedWatch {
+        if (entry.pointer != null) return ResolvedWatch(entry, entry.address, WatchStatus.POINTER_UNRESOLVED, null)
         val viaModule = entry.module?.let { ModuleResolver.resolve(it, regions) }
         val address = viaModule ?: entry.address
         val region = regions.regionFor(address, entry.type.size)?.takeIf { it.isReadable }
@@ -42,6 +51,16 @@ object WatchResolver {
 
     fun resolveAll(entries: List<WatchEntry>, pid: Int, regions: List<MemoryRegion>): List<ResolvedWatch> =
         entries.map { resolve(it, pid, regions) }
+
+    /** Like [resolveAll], and follows pointer chains by reading the pointers (mapped memory only). */
+    suspend fun resolveLive(backend: DebugBackend, pid: Int, entries: List<WatchEntry>, regions: List<MemoryRegion>): List<ResolvedWatch> =
+        entries.map { e ->
+            val chain = e.pointer ?: return@map resolve(e, pid, regions)
+            when (val r = PointerResolver.resolve(backend, pid, chain, regions, e.type.size)) {
+                is PointerResolution.Resolved -> ResolvedWatch(e, r.address, WatchStatus.POINTER, regions.regionFor(r.address, e.type.size))
+                is PointerResolution.Broken -> ResolvedWatch(e, e.address, WatchStatus.POINTER_BROKEN, null)
+            }
+        }
 }
 
 /**

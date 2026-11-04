@@ -16,6 +16,13 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
   wildcards, or UTF-8/ASCII and UTF-16LE text with optional ASCII case folding. Read-only; runs on Android with
   CMD_PROC_READ chunks; matches across chunk borders are found, matches never span two regions; hits open the
   memory viewer.
+- Pointer scan (address list → entry → "Find pointers…"): builds a pointer map on Android from all readable,
+  non-executable regions (read-only; limited by the snapshot size limit and "Max region size"), then searches
+  backwards from the target to static module data, up to depth 1–5 and offsets up to 0x4000. After restarting the
+  game, "Keep chains that lead there" filters the chains against the value's new address. Chains can be added to
+  the address list; such entries are followed on every read, are marked "pointer chain broken" when a pointer
+  leads to unmapped memory, and never trigger reads of unmapped memory. Pointer chains are app-only: they are not
+  part of the GoldHEN export.
 - Settings moved to the top bar to make room for the Addresses tab.
 
 ## 0.7.0

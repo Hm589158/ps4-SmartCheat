@@ -18,6 +18,8 @@ import com.ps4smartcheat.core.cheat.ModuleResolver
 import com.ps4smartcheat.core.scan.ValueType
 import com.ps4smartcheat.core.util.Address
 import com.ps4smartcheat.core.watch.WatchEntry
+import com.ps4smartcheat.core.watch.WatchKeys
+import com.ps4smartcheat.core.pointer.PointerChain
 import com.ps4smartcheat.core.watch.WatchRepository
 import com.ps4smartcheat.core.edit.MemoryEditor
 import com.ps4smartcheat.core.live.FreezeManager
@@ -204,6 +206,19 @@ class AppContainer(context: Context) {
         log.event(EventLevel.INFO, EventCategory.CHEAT, "address list add", "address" to Address.format(address), "type" to type.name, "duplicate" to res.alreadyPresent)
         return if (res.alreadyPresent) "Already in the address list as \"${res.entry.label}\""
         else "Added \"${res.entry.label}\" to the address list" + if (module == null) " (absolute address: valid for this session)" else ""
+    }
+
+    fun gameKey(sel: SelectedProcess): String = WatchKeys.gameKey(sel.titleId, sel.name)
+
+    /** Pointer scans run here (application scope) so they survive leaving the screen. */
+    val pointerScan by lazy { PointerScanService(this) }
+
+    /** Adds a pointer-chain entry for the selected game. [resolved] is the address the chain leads to now. */
+    suspend fun addPointerToAddressList(chain: PointerChain, type: ValueType, resolved: Long): String {
+        val sel = _selected.value ?: return "Select a process first"
+        val res = addresses.add(sel.titleId, sel.name, WatchEntry("", chain.describe(), type, resolved, null, sel.pid, pointer = chain))
+        log.event(EventLevel.INFO, EventCategory.CHEAT, "address list add pointer", "chain" to chain.describe(), "type" to type.name, "duplicate" to res.alreadyPresent)
+        return if (res.alreadyPresent) "Already in the address list as \"${res.entry.label}\"" else "Added pointer ${chain.describe()} to the address list"
     }
 
     fun updateRegions(regions: List<MemoryRegion>) {

@@ -353,6 +353,44 @@ class AppJourneyTest {
         shot("35_range_scan")
     }
 
+    @Test fun pointerScanFindsChainThatFollowsMovingObject() {
+        // Static eboot.bin data points at a heap "player" object whose field +0x48 holds the value.
+        val player = DemoGame.HEAP_START + 0x1000
+        val target = player + 0x48
+        fun le64(v: Long) = java.nio.ByteBuffer.allocate(8).order(java.nio.ByteOrder.LITTLE_ENDIAN).putLong(v).array()
+        server.poke(DemoGame.PID, DemoGame.DATA_START + 0x200, le64(player))
+        server.pokeInt32(DemoGame.PID, target, 31337)
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        // Add the (absolute, heap) address to the list, then search pointers to it from the list entry.
+        tab("Addresses")
+        waitTag("addManual")
+        tag("addManual").performClick()
+        waitTag("watchAddress")
+        tag("watchAddress").performTextInput(Address.format(target))
+        tag("watchAdd").performClick()
+        val label = Address.format(target)
+        waitWatchValue(label, "31337")
+        compose.onAllNodesWithText(label)[0].performClick()
+        waitTag("pointerScan-$label")
+        tag("pointerScan-$label").performScrollTo().performClick()
+        waitTag("pointerStart")
+        tag("pointerStart").performClick()
+        val chain = "[eboot.bin+0x100200]+0x48"
+        waitTag("chain-$chain", timeoutMs = 30_000)
+        shot("36_pointer_scan")
+        tag("addChain-$chain").performClick()
+        waitText("Added pointer")
+        // The game moves the object: the pointer entry follows it, the absolute entry does not.
+        val moved = DemoGame.HEAP_START + 0x2000
+        server.pokeInt32(DemoGame.PID, moved + 0x48, 4242)
+        server.poke(DemoGame.PID, DemoGame.DATA_START + 0x200, le64(moved))
+        tab("Addresses")
+        waitWatchValue(chain, "4242")
+        waitText("pointer chain")
+        shot("37_pointer_entry_follows")
+    }
+
     @Test fun droppedConnectionIsRecoveredAutomatically() {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)

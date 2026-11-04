@@ -70,17 +70,20 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
 
     private val _values = MutableStateFlow<Map<String, ByteArray>>(emptyMap())
     val values = _values.asStateFlow()
+    /** Last live resolution (pointer chains followed); falls back to [resolved] for entries not read yet. */
+    private val _live = MutableStateFlow<List<ResolvedWatch>>(emptyList())
+    val liveResolved = _live.asStateFlow()
     private val _error = MutableStateFlow<String?>(null)
     val error = _error.asStateFlow()
     private val _message = MutableStateFlow<String?>(null)
     val message = _message.asStateFlow()
-    private val _live = MutableStateFlow(true)
-    val live = _live.asStateFlow()
+    private val _liveOn = MutableStateFlow(true)
+    val live = _liveOn.asStateFlow()
     private var reading = false
 
     val intervalMs: Long get() = c.settings.value.monitorIntervalMs.coerceIn(250, 10_000).toLong()
 
-    fun setLive(v: Boolean) { _live.value = v }
+    fun setLive(v: Boolean) { _liveOn.value = v }
 
     fun gameKey(): String? = c.selectedProcess.value?.let { WatchKeys.gameKey(it.titleId, it.name) }
 
@@ -95,12 +98,15 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
     fun refresh() {
         val sel = c.selectedProcess.value ?: return
         if (sel.exited || reading || c.backend.state.value !is ConnectionState.Connected) return
-        val items = resolved()
-        if (items.isEmpty()) { _values.value = emptyMap(); return }
+        val key = gameKey() ?: return
+        val entries = c.addresses.entries(key)
+        if (entries.isEmpty()) { _values.value = emptyMap(); _live.value = emptyList(); return }
         reading = true
         viewModelScope.launch {
             try {
+                val items = WatchResolver.resolveLive(c.backend, sel.pid, entries, sel.regions)
                 _values.value = reader.read(c.backend, sel.pid, items)
+                _live.value = items
                 _error.value = null
             } catch (e: BackendException) {
                 _error.value = "Could not read values: ${e.message}"
@@ -170,7 +176,7 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> Unit) {
+fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> Unit, onPointerScan: (Long, ValueType) -> Unit = { _, _ -> }) {
     val vm = appViewModel { AddressesViewModel(it) }
     val connection by vm.connection.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -181,13 +187,17 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
     val error by vm.error.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
     val live by vm.live.collectAsStateWithLifecycle()
+    val liveResolved by vm.liveResolved.collectAsStateWithLifecycle()
     val connected = connection is ConnectionState.Connected
     val sel = selected
     val alive = sel != null && !sel.exited
 
     // games is read so the rows recompute when the list changes.
-    val rows = remember(games, sel, values, frozen) {
-        vm.resolved().map { r -> WatchRow(r, values[r.entry.id], frozen.any { it.pid == sel?.pid && it.address == r.address }) }
+    val rows = remember(games, sel, values, frozen, liveResolved) {
+        vm.resolved().map { pure ->
+            val r = liveResolved.firstOrNull { it.entry == pure.entry } ?: pure
+            WatchRow(r, values[r.entry.id].takeIf { r.status.readable }, frozen.any { it.pid == sel?.pid && it.address == r.address })
+        }
     }
 
     LaunchedEffect(sel?.pid, sel?.regions, games, connected) { vm.refresh() }
@@ -210,8 +220,9 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
             }
             if (!connected) Text("Not connected.", color = MaterialTheme.colorScheme.error)
             Text(
-                "Saved per game. Module-relative entries (e.g. eboot.bin+0x120) follow the game across restarts; " +
-                    "absolute heap addresses are only trusted in the session they were added. Nothing here is written to the PS4 unless you edit or freeze it.",
+                "Saved per game. Module-relative entries (e.g. eboot.bin+0x120) and pointer chains follow the game across restarts; " +
+                    "absolute heap addresses are only trusted in the session they were added (use \"Find pointers…\" for those). " +
+                    "Nothing here is written to the PS4 unless you edit or freeze it.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -238,6 +249,7 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
                     onToggle = { expanded = if (expanded == row.id) null else row.id },
                     onEdit = { onEdit(row.resolved.address, row.resolved.entry.type) },
                     onView = { onViewMemory(row.resolved.address) },
+                    onPointerScan = { onPointerScan(row.resolved.address, row.resolved.entry.type) },
                     onFreeze = { vm.toggleFreeze(row) },
                     onRename = { vm.rename(row, it) },
                     onDelete = { vm.remove(row); expanded = null },
@@ -251,7 +263,7 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
 @Composable
 private fun WatchRowView(
     row: WatchRow, region: String, expanded: Boolean, canWrite: Boolean,
-    onToggle: () -> Unit, onEdit: () -> Unit, onView: () -> Unit, onFreeze: () -> Unit,
+    onToggle: () -> Unit, onEdit: () -> Unit, onView: () -> Unit, onPointerScan: () -> Unit, onFreeze: () -> Unit,
     onRename: (String) -> Unit, onDelete: () -> Unit,
 ) {
     val r = row.resolved
@@ -282,6 +294,7 @@ private fun WatchRowView(
             Column(Modifier.padding(bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(region, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
                 e.module?.let { Text("Saved as ${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}", style = MaterialTheme.typography.bodySmall) }
+                e.pointer?.let { Text("Pointer: ${it.describe()}", style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = onEdit, enabled = r.status.readable) { Text("Edit") }
                     OutlinedButton(onClick = onFreeze, enabled = canWrite && r.status.readable && (row.frozen || row.value != null), modifier = Modifier.testTag("freeze-${e.label}")) {
@@ -293,7 +306,12 @@ private fun WatchRowView(
                     OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.weight(1f))
                     TextButton(onClick = { onRename(name) }) { Text("Rename") }
                 }
-                TextButton(onClick = onDelete) { Text("Remove from list", color = MaterialTheme.colorScheme.error) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (e.pointer == null) {
+                        TextButton(onClick = onPointerScan, enabled = r.status.readable, modifier = Modifier.testTag("pointerScan-${e.label}")) { Text("Find pointers…") }
+                    }
+                    TextButton(onClick = onDelete) { Text("Remove from list", color = MaterialTheme.colorScheme.error) }
+                }
             }
         }
     }
@@ -308,6 +326,6 @@ private fun AddAddressForm(onAdd: (String, ValueType, String) -> Unit) {
         OutlinedTextField(address, { address = it.trim() }, label = { Text("Address (hex)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("watchAddress"))
         Selector("Value type", ValueType.entries, type, { it.label }, { type = it })
         OutlinedTextField(label, { label = it }, label = { Text("Name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { onAdd(address, type, label) }, enabled = address.isNotBlank()) { Text("Add") }
+        Button(onClick = { onAdd(address, type, label) }, enabled = address.isNotBlank(), modifier = Modifier.testTag("watchAdd")) { Text("Add") }
     }
 }

@@ -2,6 +2,7 @@ package com.ps4smartcheat.core.watch
 
 import com.ps4smartcheat.core.cheat.HexAddressSerializer
 import com.ps4smartcheat.core.cheat.ModuleRef
+import com.ps4smartcheat.core.pointer.PointerChain
 import com.ps4smartcheat.core.scan.ValueType
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -23,6 +24,8 @@ data class WatchEntry(
     val discoveredPid: Int? = null,
     val notes: String = "",
     val createdAtMillis: Long = 0,
+    /** Pointer path to the value; when set, the address is found by following it on every read. */
+    val pointer: PointerChain? = null,
 )
 
 /** The address list of one game. Lists are keyed by title ID (or process name when no title ID is known). */

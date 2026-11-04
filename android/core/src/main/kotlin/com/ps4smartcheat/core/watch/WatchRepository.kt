@@ -97,6 +97,7 @@ class WatchRepository(
 
     private fun sameLocation(a: WatchEntry, b: WatchEntry): Boolean {
         if (a.type != b.type) return false
+        if (a.pointer != null || b.pointer != null) return a.pointer == b.pointer
         val am = a.module
         val bm = b.module
         return if (am != null && bm != null) am == bm else a.address == b.address && a.discoveredPid == b.discoveredPid
