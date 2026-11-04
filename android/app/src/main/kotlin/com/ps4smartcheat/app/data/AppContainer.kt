@@ -14,7 +14,10 @@ import com.ps4smartcheat.core.process.listProcessDetails
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.DebugBackend
 import com.ps4smartcheat.core.cheat.CheatRepository
+import com.ps4smartcheat.core.cheat.CheatEntry
 import com.ps4smartcheat.core.cheat.ModuleResolver
+import com.ps4smartcheat.core.scan.ValueCodec
+import com.ps4smartcheat.core.util.Hex
 import com.ps4smartcheat.core.scan.ValueType
 import com.ps4smartcheat.core.util.Address
 import com.ps4smartcheat.core.watch.WatchEntry
@@ -206,6 +209,30 @@ class AppContainer(context: Context) {
         log.event(EventLevel.INFO, EventCategory.CHEAT, "address list add", "address" to Address.format(address), "type" to type.name, "duplicate" to res.alreadyPresent)
         return if (res.alreadyPresent) "Already in the address list as \"${res.entry.label}\""
         else "Added \"${res.entry.label}\" to the address list" + if (module == null) " (absolute address: valid for this session)" else ""
+    }
+
+    /**
+     * Saves [address] of the selected process as a cheat. [profileId] null → a new profile named [newProfileName]
+     * for [gameVersion]. The module-relative form is stored when the address lies in a module image.
+     * Returns a user-facing message; throws [IllegalArgumentException] for invalid input.
+     */
+    suspend fun saveCheat(
+        address: Long, type: ValueType, name: String, replacement: String?, original: ByteArray?,
+        profileId: String?, newProfileName: String, gameVersion: String,
+    ): String {
+        val sel = _selected.value ?: throw IllegalArgumentException("Select a process first")
+        require(name.isNotBlank()) { "Enter a cheat name" }
+        val value = replacement?.trim()?.ifBlank { null }
+        if (value != null) ValueCodec.parse(type, value) // throws ValueParseException (an IllegalArgumentException)
+        val pid = profileId ?: cheats.createProfile(newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name).id
+        val module = ModuleResolver.refFor(address, sel.regions)
+        val entry = CheatEntry(
+            id = cheats.newId(), name = name.trim(), type = type, address = address, module = module, replacementValue = value,
+            originalBytes = original?.takeIf { it.size == type.size }?.let { Hex.encode(it) }, discoveredPid = sel.pid,
+        )
+        cheats.upsertCheat(pid, entry)
+        log.event(EventLevel.INFO, EventCategory.CHEAT, "cheat saved", "address" to Address.format(address), "module" to (module?.name ?: "absolute"))
+        return "Saved \"${entry.name}\"" + if (module == null) " (absolute address — may not survive a game restart)" else " (${module.name} relative)"
     }
 
     fun gameKey(sel: SelectedProcess): String = WatchKeys.gameKey(sel.titleId, sel.name)

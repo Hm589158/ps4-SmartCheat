@@ -98,8 +98,8 @@ class AppJourneyTest {
     private fun tab(label: String) = compose.onAllNodesWithText(label)[0].performClick()
 
     /** Snackbars sit above the bottom of the content; wait until the auto-select notice is gone before tapping there. */
-    private fun waitNoSnackbar(timeoutMs: Long = 20_000) {
-        compose.waitUntil(timeoutMs) { compose.onAllNodesWithText("Detected game", substring = true).fetchSemanticsNodes().isEmpty() }
+    private fun waitNoSnackbar(text: String = "Detected game", timeoutMs: Long = 20_000) {
+        compose.waitUntil(timeoutMs) { compose.onAllNodesWithText(text, substring = true).fetchSemanticsNodes().isEmpty() }
     }
 
     private fun openSettings() = compose.onNodeWithContentDescription("Settings").performClick()
@@ -319,6 +319,19 @@ class AppJourneyTest {
         waitText("module-relative")
         assertEquals(1, compose.onAllNodesWithTag("watch-$COINS_LABEL", useUnmergedTree = true).fetchSemanticsNodes().size)
         shot("33_address_list_after_restart")
+        // The entry becomes a cheat in the library (module-relative, value typed here).
+        waitNoSnackbar("Already in the address list")
+        waitNoSnackbar()
+        compose.onAllNodesWithText(COINS_LABEL)[0].performClick()
+        waitTag("saveAsCheat-$COINS_LABEL")
+        tag("saveAsCheat-$COINS_LABEL").performScrollTo().performClick()
+        waitTag("cheatValue")
+        tag("cheatValue").performTextInput("99999")
+        tag("saveConfirm").performScrollTo().performClick()
+        waitText("eboot.bin relative")
+        tab("Cheats")
+        waitText(COINS_LABEL)
+        shot("33b_cheat_from_address_list")
     }
 
     @Test fun bytePatternSearchFindsPlantedBytes() {

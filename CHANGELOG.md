@@ -2,6 +2,13 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 0.9.0
+- Address list → cheat library: "Save as cheat…" on an entry stores it with a value (module-relative when inside a
+  module image, ready for GoldHEN export). Pointer-chain entries cannot become cheats (GoldHEN files hold fixed
+  offsets only). Editor and address list share one save path.
+- Address list export/import (JSON, current game or all): imports merge by game, skip entries already present and
+  reject foreign or newer files without changing anything.
+
 ## 0.8.0
 - Address list per game (new "Addresses" tab): addresses are saved by title ID with a name and type and show
   live values (nearby entries are read in one request; unmapped entries are never read). Entries inside a module

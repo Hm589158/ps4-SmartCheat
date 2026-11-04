@@ -60,6 +60,8 @@ data class WatchRow(val resolved: ResolvedWatch, val value: ByteArray?, val froz
     val id: String get() = resolved.entry.id
 }
 
+private const val MAX_IMPORT_BYTES = 4 * 1024 * 1024
+
 class AddressesViewModel(private val c: AppContainer) : ViewModel() {
     val connection = c.backend.state
     val selected = c.selectedProcess
@@ -173,6 +175,60 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun describe(address: Long): String = c.selectedProcess.value?.regions?.describe(address) ?: ""
+
+    /** Writes this game's list (or all lists when no game is selected) to [uri]. */
+    fun exportTo(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch {
+        try {
+            val keys = gameKey()?.let { listOf(it) }
+            val text = c.addresses.exportJson(keys)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { resolver.openOutputStream(uri, "wt")!!.bufferedWriter().use { it.write(text) } }
+            _message.value = "Address list exported"
+        } catch (e: Exception) {
+            _error.value = "Export failed: ${e.message}"
+        }
+    }
+
+    fun importFrom(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch {
+        try {
+            val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                resolver.openInputStream(uri)!!.use { input ->
+                    // Bounded read (InputStream.readNBytes needs API 33).
+                    val out = java.io.ByteArrayOutputStream()
+                    val buf = ByteArray(8192)
+                    while (out.size() <= MAX_IMPORT_BYTES) { val n = input.read(buf); if (n < 0) break; out.write(buf, 0, n) }
+                    out.toString("UTF-8")
+                }
+            }
+            if (text.length > MAX_IMPORT_BYTES) { _error.value = "File is too large for an address list"; return@launch }
+            val r = c.addresses.importJson(text)
+            _message.value = "Imported ${r.added} address(es)" + if (r.skipped > 0) ", ${r.skipped} already in the list" else ""
+            _error.value = null
+            refresh()
+        } catch (e: com.ps4smartcheat.core.watch.WatchFormatException) {
+            _error.value = e.message
+        } catch (e: Exception) {
+            _error.value = "Import failed: ${e.message}"
+        }
+    }
+
+    fun profilesForSelected() = c.selectedProcess.value?.let { c.cheats.profilesForGame(it.titleId, null, it.name) }.orEmpty()
+
+    /** Saves a (non-pointer) entry as a cheat with [value]; the current bytes become the stored original. */
+    fun saveCheat(row: WatchRow, name: String, value: String, profileId: String?, newProfileName: String, version: String) {
+        val r = row.resolved
+        if (r.entry.pointer != null) { _error.value = "Pointer chains cannot be saved as cheats (GoldHEN files hold fixed offsets only)"; return }
+        if (!r.status.readable) { _error.value = "\"${r.entry.label}\" is not mapped in this process"; return }
+        viewModelScope.launch {
+            try {
+                _message.value = c.saveCheat(r.address, r.entry.type, name, value, row.value, profileId, newProfileName, version)
+                _error.value = null
+            } catch (e: IllegalArgumentException) {
+                _error.value = e.message
+            } catch (e: Exception) {
+                _error.value = "Could not save cheat: ${e.message}"
+            }
+        }
+    }
 }
 
 @Composable
@@ -209,6 +265,13 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
     }
 
     var expanded by remember { mutableStateOf<String?>(null) }
+    val resolver = androidx.compose.ui.platform.LocalContext.current.contentResolver
+    val exportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.CreateDocument("application/json")) { uri ->
+        if (uri != null) vm.exportTo(resolver, uri)
+    }
+    val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) vm.importFrom(resolver, uri)
+    }
     var showAdd by remember { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().testTag("addressList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -235,6 +298,10 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
                     TextButton(onClick = vm::refresh, enabled = connected && alive) { Text("Refresh") }
                     TextButton(onClick = { showAdd = !showAdd }, modifier = Modifier.testTag("addManual")) { Text(if (showAdd) "Close" else "Add address…") }
                 }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { importLauncher.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }) { Text("Import") }
+                    TextButton(onClick = { exportLauncher.launch("smartcheat-addresses-${(sel.titleId ?: sel.name).replace(Regex("[^A-Za-z0-9._-]"), "_")}.json") }, enabled = rows.isNotEmpty()) { Text("Export") }
+                }
                 if (showAdd) AddAddressForm { a, t, l -> vm.addManual(a, t, l); showAdd = false }
                 message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
                 ErrorText(error)
@@ -253,6 +320,9 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
                     onFreeze = { vm.toggleFreeze(row) },
                     onRename = { vm.rename(row, it) },
                     onDelete = { vm.remove(row); expanded = null },
+                    saveForm = {
+                        SaveAsCheat(row, vm.profilesForSelected(), sel.titleId ?: sel.name) { n, v, pid, np, ver -> vm.saveCheat(row, n, v, pid, np, ver) }
+                    },
                 )
                 HorizontalDivider()
             }
@@ -265,6 +335,7 @@ private fun WatchRowView(
     row: WatchRow, region: String, expanded: Boolean, canWrite: Boolean,
     onToggle: () -> Unit, onEdit: () -> Unit, onView: () -> Unit, onPointerScan: () -> Unit, onFreeze: () -> Unit,
     onRename: (String) -> Unit, onDelete: () -> Unit,
+    saveForm: @Composable () -> Unit = {},
 ) {
     val r = row.resolved
     val e = r.entry
@@ -306,6 +377,7 @@ private fun WatchRowView(
                     OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.weight(1f))
                     TextButton(onClick = { onRename(name) }) { Text("Rename") }
                 }
+                if (e.pointer == null) saveForm()
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (e.pointer == null) {
                         TextButton(onClick = onPointerScan, enabled = r.status.readable, modifier = Modifier.testTag("pointerScan-${e.label}")) { Text("Find pointers…") }
@@ -327,5 +399,29 @@ private fun AddAddressForm(onAdd: (String, ValueType, String) -> Unit) {
         Selector("Value type", ValueType.entries, type, { it.label }, { type = it })
         OutlinedTextField(label, { label = it }, label = { Text("Name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Button(onClick = { onAdd(address, type, label) }, enabled = address.isNotBlank(), modifier = Modifier.testTag("watchAdd")) { Text("Add") }
+    }
+}
+
+@Composable
+private fun SaveAsCheat(
+    row: WatchRow, profiles: List<com.ps4smartcheat.core.cheat.CheatProfile>, defaultProfile: String,
+    onSave: (name: String, value: String, profileId: String?, newProfileName: String, version: String) -> Unit,
+) {
+    var open by remember(row.id) { mutableStateOf(false) }
+    var value by remember(row.id) { mutableStateOf("") }
+    if (!open) {
+        TextButton(onClick = { open = true }, enabled = row.resolved.status.readable, modifier = Modifier.testTag("saveAsCheat-${row.resolved.entry.label}")) { Text("Save as cheat…") }
+        return
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        OutlinedTextField(
+            value, { value = it }, singleLine = true, label = { Text("Cheat value (${row.resolved.entry.type.label})") },
+            modifier = Modifier.fillMaxWidth().testTag("cheatValue"),
+        )
+        SaveCheatForm(
+            profiles = profiles, defaultProfileName = defaultProfile, initialName = row.resolved.entry.label,
+            onCancel = { open = false },
+            onSave = { n, pid, np, ver -> onSave(n, value, pid, np, ver); open = false },
+        )
     }
 }

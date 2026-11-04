@@ -13,6 +13,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.UUID
 
+class WatchFormatException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+data class WatchImportResult(val added: Int, val skipped: Int, val games: Int)
+
 /** Result of [WatchRepository.add]: the stored entry and whether it was already in the list. */
 data class AddResult(val entry: WatchEntry, val alreadyPresent: Boolean)
 
@@ -91,6 +95,42 @@ class WatchRepository(
     suspend fun remove(gameKey: String, entryId: String) = mutate { games ->
         games.map { g -> if (g.gameKey == gameKey) g.copy(entries = g.entries.filterNot { it.id == entryId }) else g }
             .filter { it.entries.isNotEmpty() }
+    }
+
+    /** JSON of the given games' lists (all when null), in the same format as the stored file. */
+    fun exportJson(gameKeys: Collection<String>? = null): String =
+        CheatJson.json.encodeToString(WatchListFile.serializer(), WatchListFile(games = _games.value.filter { gameKeys == null || it.gameKey in gameKeys }))
+
+    /**
+     * Merges an exported file: lists are matched by game key, entries already present (same location and type)
+     * are skipped, the rest get new ids. Invalid files throw [WatchFormatException] and change nothing.
+     */
+    suspend fun importJson(text: String): WatchImportResult {
+        val incoming = try {
+            CheatJson.json.decodeFromString(WatchListFile.serializer(), text)
+        } catch (e: Exception) {
+            throw WatchFormatException("Not an address list file: ${e.message?.lineSequence()?.firstOrNull()}", e)
+        }
+        if (incoming.format != WatchListFile.FORMAT_ID) throw WatchFormatException("Unknown file format \"${incoming.format}\"")
+        if (incoming.formatVersion > WatchListFile.FORMAT_VERSION) throw WatchFormatException("This file is from a newer app version")
+        var added = 0
+        var skipped = 0
+        mutate { games ->
+            val out = games.toMutableList()
+            for (g in incoming.games) {
+                val i = out.indexOfFirst { it.gameKey == g.gameKey }
+                var cur = if (i >= 0) out[i] else GameWatchList(g.gameKey, g.titleId, g.processName)
+                for (e in g.entries) {
+                    if (cur.entries.any { sameLocation(it, e) }) { skipped++; continue }
+                    cur = cur.copy(entries = cur.entries + e.copy(id = idGenerator(), label = e.label.trim()))
+                    added++
+                }
+                if (cur.entries.isEmpty()) continue
+                if (i >= 0) out[i] = cur else out += cur
+            }
+            out
+        }
+        return WatchImportResult(added, skipped, incoming.games.size)
     }
 
     suspend fun clear(gameKey: String) = mutate { games -> games.filterNot { it.gameKey == gameKey } }

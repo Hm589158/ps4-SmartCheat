@@ -165,3 +165,40 @@ class WatchListTest {
         assertEquals("777", ValueCodec.format(ValueType.INT32, WatchReader().read(client, 123, listOf(r)).getValue("coins")))
     }
 }
+
+class WatchImportExportTest {
+    @get:Rule val tmp = TemporaryFolder()
+    private var ids = 0
+    private fun repo(name: String) = WatchRepository(tmp.root.resolve(name), clock = { 5L }, idGenerator = { "id-${ids++}" })
+    private val regions = listOf(MemoryRegion("eboot.bin", 0x400000, 0x410000, 0, 5), MemoryRegion("eboot.bin", 0x500000, 0x510000, 0, 3))
+    private fun e(a: Long, label: String) = WatchEntry("", label, ValueType.INT32, a, ModuleResolver.refFor(a, regions), 77)
+
+    @Test fun exportImportRoundTripMergesWithoutDuplicates() = runBlocking {
+        val a = repo("a.json"); a.load()
+        a.add("CUSA00001", "eboot.bin", e(0x500120, "Coins"))
+        a.add("CUSA00001", "eboot.bin", e(0x500124, "Gems"))
+        a.add("CUSA00002", "eboot.bin", e(0x500200, "Other"))
+        val onlyFirst = a.exportJson(listOf("CUSA00001"))
+        assertFalse(onlyFirst.contains("Other"))
+
+        val b = repo("b.json"); b.load()
+        b.add("CUSA00001", "eboot.bin", e(0x500120, "Coins (mine)"))
+        val r = b.importJson(a.exportJson())
+        assertEquals(WatchImportResult(added = 2, skipped = 1, games = 2), r)
+        assertEquals(listOf("Coins (mine)", "Gems"), b.entries("CUSA00001").map { it.label }) // existing entry kept
+        assertEquals(listOf("Other"), b.entries("CUSA00002").map { it.label })
+        assertEquals(3, b.games.value.flatMap { it.entries }.map { it.id }.toSet().size) // fresh, unique ids
+        // Importing the same file again adds nothing.
+        assertEquals(0, b.importJson(a.exportJson()).added)
+    }
+
+    @Test fun invalidFilesAreRejectedWithoutChanges() = runBlocking {
+        val b = repo("b.json"); b.load()
+        b.add("CUSA00001", "eboot.bin", e(0x500120, "Coins"))
+        val before = b.games.value
+        for (bad in listOf("nope", "{\"format\":\"ps4-smartcheat-cheats\",\"profiles\":[]}", "{\"format\":\"ps4-smartcheat-addresses\",\"formatVersion\":99,\"games\":[]}")) {
+            try { b.importJson(bad); throw AssertionError("accepted $bad") } catch (_: WatchFormatException) { }
+        }
+        assertEquals(before, b.games.value)
+    }
+}

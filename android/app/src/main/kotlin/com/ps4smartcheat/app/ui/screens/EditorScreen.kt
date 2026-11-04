@@ -38,9 +38,7 @@ import com.ps4smartcheat.app.ui.components.SectionCard
 import com.ps4smartcheat.app.ui.components.Selector
 import com.ps4smartcheat.app.ui.components.WarningBanner
 import com.ps4smartcheat.core.backend.BackendException
-import com.ps4smartcheat.core.cheat.CheatEntry
 import com.ps4smartcheat.core.cheat.CheatProfile
-import com.ps4smartcheat.core.cheat.ModuleResolver
 import com.ps4smartcheat.core.edit.EditDeniedException
 import com.ps4smartcheat.core.edit.EditTarget
 import com.ps4smartcheat.core.edit.WriteOutcome
@@ -197,26 +195,12 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     fun saveCheat(name: String, profileId: String?, newProfileName: String, gameVersion: String) {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         val addr = parsedAddress() ?: return
-        val type = _type.value
-        val replacement = _replacement.value.trim().ifBlank { null }
-        if (replacement != null) {
-            try { ValueCodec.parse(type, replacement) } catch (e: ValueParseException) { _error.value = e.message; return }
-        }
-        if (name.isBlank()) { _error.value = "Enter a cheat name"; return }
         viewModelScope.launch {
             try {
                 val original = c.editor.originalFor(sel.pid, addr)?.original ?: _current.value
-                val pid = profileId ?: c.cheats.createProfile(
-                    newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name,
-                ).id
-                val entry = CheatEntry(
-                    id = c.cheats.newId(), name = name.trim(), type = type, address = addr,
-                    module = ModuleResolver.refFor(addr, sel.regions), replacementValue = replacement,
-                    originalBytes = original?.takeIf { it.size == type.size }?.let { Hex.encode(it) },
-                    discoveredPid = sel.pid,
-                )
-                c.cheats.upsertCheat(pid, entry)
-                _message.value = "Saved \"${entry.name}\"" + if (entry.module == null) " (absolute address — may not survive a game restart)" else " (${entry.module!!.name} relative)"
+                _message.value = c.saveCheat(addr, _type.value, name, _replacement.value, original, profileId, newProfileName, gameVersion)
+            } catch (e: IllegalArgumentException) {
+                _error.value = e.message
             } catch (e: Exception) {
                 _error.value = "Could not save cheat: ${e.message}"
             }
@@ -317,14 +301,16 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
 
 }
 
+/** Inline form (not a dialog: stays usable while the soft keyboard is open). Shared by the editor and the address list. */
 @Composable
-private fun SaveCheatForm(
+internal fun SaveCheatForm(
     profiles: List<CheatProfile>,
     defaultProfileName: String,
     onCancel: () -> Unit,
     onSave: (name: String, profileId: String?, newProfileName: String, version: String) -> Unit,
+    initialName: String = "",
 ) {
-    var name by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf(initialName) }
     var target by remember { mutableStateOf<CheatProfile?>(profiles.firstOrNull()) }
     var newName by remember { mutableStateOf(defaultProfileName) }
     var version by remember { mutableStateOf("") }
