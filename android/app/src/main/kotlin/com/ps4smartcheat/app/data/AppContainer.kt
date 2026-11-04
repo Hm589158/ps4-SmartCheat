@@ -41,10 +41,14 @@ class AppContainer(context: Context) {
     val backend: DebugBackend = Ps4DebugClient()
 
     private val cacheDir: File = context.cacheDir
-    val scanner = ScanController(backend, appScope) { size ->
-        if (size <= IN_MEMORY_SNAPSHOT_LIMIT) InMemorySnapshotStorage(size)
-        else FileSnapshotStorage(File.createTempFile("snapshot-", ".bin", cacheDir))
-    }
+    val scanner = ScanController(
+        backend = backend,
+        scope = appScope,
+        storageFactory = { size: Long ->
+            if (size <= IN_MEMORY_SNAPSHOT_LIMIT) InMemorySnapshotStorage(size)
+            else FileSnapshotStorage(File.createTempFile("snapshot-", ".bin", cacheDir))
+        },
+    )
     val editor = MemoryEditor(backend, { settings.value.editPolicy() })
     val freezer = FreezeManager(backend, appScope, { settings.value.editPolicy() })
     val cheats = CheatRepository(File(context.filesDir, "cheats.json"))
