@@ -53,9 +53,53 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/** Read-only memory viewer with change highlighting (memory diff between consecutive reads). */
+/** Memory viewer with change highlighting (memory diff between consecutive reads) and confirmed byte patches. */
 class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
     val selected = c.selectedProcess
+    val settings = c.settings.settings
+    private val _patch = MutableStateFlow("")
+    val patch = _patch.asStateFlow()
+    private val _plan = MutableStateFlow<com.ps4smartcheat.core.edit.WritePlan?>(null)
+    /** Byte patch waiting for confirmation. */
+    val plan = _plan.asStateFlow()
+    private val _message = MutableStateFlow<String?>(null)
+    val message = _message.asStateFlow()
+
+    fun setPatch(v: String) { _patch.value = v; _error.value = null }
+    fun dismissPlan() { _plan.value = null }
+
+    /** Validates "DE AD BE EF" at the highlighted address; the write happens only after confirmation. */
+    fun preparePatch() {
+        val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
+        val at = _target.value ?: run { _error.value = "Go to an address first"; return }
+        val bytes = try { com.ps4smartcheat.core.util.Hex.decode(_patch.value) } catch (e: IllegalArgumentException) { _error.value = e.message; return }
+        if (bytes.isEmpty()) { _error.value = "Enter bytes, e.g. 90 90"; return }
+        viewModelScope.launch {
+            try {
+                _plan.value = c.editor.planBytes(sel.pid, sel.name, at, bytes)
+            } catch (e: com.ps4smartcheat.core.edit.EditDeniedException) {
+                _error.value = e.message
+            } catch (e: BackendException) {
+                _error.value = e.message
+            }
+        }
+    }
+
+    fun confirmPatch() {
+        val p = _plan.value ?: return
+        _plan.value = null
+        viewModelScope.launch {
+            val out = c.editor.execute(p)
+            if (out is com.ps4smartcheat.core.edit.WriteOutcome.Verified) {
+                _message.value = "${p.target.length} byte(s) written and verified at ${Address.format(p.target.address)}"
+                c.log.info("Patch ${Address.format(p.target.address)} = ${p.replacementText}: verified")
+            } else {
+                _error.value = out.message
+                c.log.error("Patch ${Address.format(p.target.address)}: ${out.message}")
+            }
+            refresh()
+        }
+    }
     val connection = c.backend.state
     private val viewer = MemoryViewer(c.backend)
 
@@ -169,6 +213,10 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
     val live by vm.live.collectAsStateWithLifecycle()
     val target by vm.target.collectAsStateWithLifecycle()
     val targetInfo by vm.targetInfo.collectAsStateWithLifecycle()
+    val settings by vm.settings.collectAsStateWithLifecycle()
+    val patch by vm.patch.collectAsStateWithLifecycle()
+    val plan by vm.plan.collectAsStateWithLifecycle()
+    val message by vm.message.collectAsStateWithLifecycle()
     val connected = connection is ConnectionState.Connected
 
     // Live refresh only while this screen is shown, connected and enabled.
@@ -186,7 +234,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         item {
             if (selected == null) WarningBanner("No process selected.")
-            Text("Read-only view. Tap a line to edit that address.", style = MaterialTheme.typography.bodySmall, color = dim)
+            Text("Tap a line to open that address in the editor.", style = MaterialTheme.typography.bodySmall, color = dim)
             OutlinedTextField(
                 value = address, onValueChange = vm::setAddress, label = { Text("Address (hex)") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -200,6 +248,19 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
             if (loading && !live) LinearProgressIndicator(Modifier.fillMaxWidth())
             targetInfo?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("targetInfo")) }
             if (rows.isNotEmpty()) Text("$changed byte(s) changed since last read · ${vm.describe(rows.first().address)}", style = MaterialTheme.typography.bodySmall, color = dim)
+            if (target != null && rows.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = patch, onValueChange = vm::setPatch, singleLine = true, enabled = settings.editingEnabled,
+                        label = { Text("Bytes at ${Address.format(target!!)}") },
+                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.weight(1f).testTag("patchBytes"),
+                    )
+                    Button(onClick = vm::preparePatch, enabled = settings.editingEnabled && connected && selected?.exited == false && patch.isNotBlank(), modifier = Modifier.testTag("patchWrite")) { Text("Write") }
+                }
+                if (!settings.editingEnabled) Text("Read-only mode: enable memory editing in Settings to patch bytes.", style = MaterialTheme.typography.bodySmall, color = dim)
+            }
+            message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
             ErrorText(error)
         }
         items(rows, key = { it.address }) { row ->
@@ -222,5 +283,18 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
                     .clickable(enabled = row.mapped.any { it }) { onOpenEditor(row.address) }.padding(vertical = 3.dp),
             )
         }
+    }
+    plan?.let { p ->
+        com.ps4smartcheat.app.ui.components.ConfirmDialog(
+            title = if (p.dangerous) "Confirm risky patch" else "Confirm patch",
+            text = buildString {
+                append("Write ${p.target.length} byte(s) at ${Address.format(p.target.address)} in ${p.target.processName}?\n\n")
+                append("Current: ${com.ps4smartcheat.core.util.Hex.encode(p.original, " ")}\nNew:     ${p.replacementText}")
+                if (p.warnings.isNotEmpty()) append("\n\nWarnings:\n• " + p.warnings.joinToString("\n• "))
+            },
+            confirmLabel = "Write",
+            onConfirm = vm::confirmPatch,
+            onDismiss = vm::dismissPlan,
+        )
     }
 }

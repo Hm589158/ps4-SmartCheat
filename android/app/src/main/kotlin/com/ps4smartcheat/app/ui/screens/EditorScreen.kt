@@ -60,6 +60,36 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     val frozen = c.freezer.frozen
     val freezeStop = c.freezer.lastStopReason
     val profiles = c.cheats.profiles
+    val undoStack = c.editor.undoStack
+    val redoStack = c.editor.redoStack
+
+    /** Undo or redo waiting for confirmation: (isUndo, item, bytes in memory now). */
+    data class StepPlan(val undo: Boolean, val item: com.ps4smartcheat.core.edit.HistoryItem, val now: ByteArray)
+    private val _step = MutableStateFlow<StepPlan?>(null)
+    val step = _step.asStateFlow()
+
+    fun prepareStep(undo: Boolean) {
+        viewModelScope.launch {
+            try {
+                val peek = if (undo) c.editor.peekUndo() else c.editor.peekRedo()
+                _step.value = peek?.let { (item, now) -> StepPlan(undo, item, now) }
+            } catch (e: BackendException) {
+                _error.value = e.message
+            }
+        }
+    }
+
+    fun dismissStep() { _step.value = null }
+
+    fun confirmStep() {
+        val st = _step.value ?: return
+        _step.value = null
+        viewModelScope.launch {
+            val out = if (st.undo) c.editor.undo() else c.editor.redo()
+            report(out, (if (st.undo) "Undo " else "Redo ") + Address.format(st.item.target.address))
+            if (Address.parse(_address.value) == st.item.target.address) read()
+        }
+    }
 
     private val _address = MutableStateFlow("")
     val address = _address.asStateFlow()
@@ -227,6 +257,9 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
     val frozen by vm.frozen.collectAsStateWithLifecycle()
     val freezeStop by vm.freezeStop.collectAsStateWithLifecycle()
     var showSave by remember { mutableStateOf(false) }
+    val undoStack by vm.undoStack.collectAsStateWithLifecycle()
+    val redoStack by vm.redoStack.collectAsStateWithLifecycle()
+    val step by vm.step.collectAsStateWithLifecycle()
 
     val addr = Address.parse(address)
     val original = journal.firstOrNull { it.pid == selected?.pid && it.address == addr }
@@ -270,6 +303,16 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
             ErrorText(error)
         }
+        SectionCard("History") {
+            Text(
+                undoStack.lastOrNull()?.let { "Last write: ${it.label} at ${Address.format(it.target.address)}" } ?: "No writes in this session.",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(onClick = { vm.prepareStep(true) }, enabled = undoStack.isNotEmpty() && settings.editingEnabled, modifier = Modifier.testTag("undo")) { Text("Undo (${undoStack.size})") }
+                OutlinedButton(onClick = { vm.prepareStep(false) }, enabled = redoStack.isNotEmpty() && settings.editingEnabled, modifier = Modifier.testTag("redo")) { Text("Redo (${redoStack.size})") }
+            }
+        }
         SectionCard("Cheat library") {
             if (!showSave) {
                 OutlinedButton(onClick = { showSave = true }, enabled = selected != null && addr != null, modifier = Modifier.testTag("saveCheat")) { Text("Save as cheat") }
@@ -283,6 +326,22 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
                 )
             }
         }
+    }
+
+    step?.let { st ->
+        val bytes = if (st.undo) st.item.before else st.item.after
+        val expectedNow = if (st.undo) st.item.after else st.item.before
+        ConfirmDialog(
+            title = if (st.undo) "Confirm undo" else "Confirm redo",
+            text = buildString {
+                append("${if (st.undo) "Undo" else "Redo"} \"${st.item.label}\" at ${Address.format(st.item.target.address)} in ${st.item.target.processName}?\n\n")
+                append("In memory now: ${Hex.encode(st.now, " ")}\nWill write:    ${Hex.encode(bytes, " ")}")
+                if (!st.now.contentEquals(expectedNow)) append("\n\nThe game changed this memory since that write.")
+            },
+            confirmLabel = if (st.undo) "Undo" else "Redo",
+            onConfirm = vm::confirmStep,
+            onDismiss = vm::dismissStep,
+        )
     }
 
     plan?.let { p ->

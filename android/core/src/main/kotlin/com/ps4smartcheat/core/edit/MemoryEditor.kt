@@ -36,7 +36,11 @@ object ProcessSafety {
 
 class EditDeniedException(message: String) : Exception(message)
 
-data class EditTarget(val pid: Int, val processName: String, val address: Long, val type: ValueType)
+/** [length] is the number of bytes written: the value type's size, or the byte count of a raw patch. */
+data class EditTarget(val pid: Int, val processName: String, val address: Long, val type: ValueType, val length: Int = type.size)
+
+/** One verified write, kept for undo/redo within the session (never persisted, never re-applied automatically). */
+data class HistoryItem(val target: EditTarget, val before: ByteArray, val after: ByteArray, val label: String, val timestampMillis: Long)
 
 data class WritePlan(
     val target: EditTarget,
@@ -85,6 +89,9 @@ data class JournalEntry(
  * Controlled memory editing: validate → read original → (user confirmation) → write → fresh read-back.
  * Original bytes are journaled per address before the first write so they can be restored.
  */
+const val MAX_PATCH_BYTES = 64
+const val MAX_HISTORY = 100
+
 class MemoryEditor(
     private val backend: DebugBackend,
     private val policy: () -> EditPolicy,
@@ -106,14 +113,34 @@ class MemoryEditor(
 
     /** Validates and prepares a write. Throws [EditDeniedException] when policy forbids it. */
     suspend fun plan(target: EditTarget, valueText: String): WritePlan {
+        checkPolicy(target)
+        val replacement = ValueCodec.encode(ValueCodec.parse(target.type, valueText))
+        return planChecked(target.copy(length = target.type.size), replacement, valueText.trim())
+    }
+
+    /**
+     * Validates and prepares a raw byte patch (1..[MAX_PATCH_BYTES] bytes) at [address], e.g. from the memory
+     * viewer. Same policy, region and confirmation rules as typed writes.
+     */
+    suspend fun planBytes(pid: Int, processName: String, address: Long, bytes: ByteArray): WritePlan {
+        if (bytes.isEmpty() || bytes.size > MAX_PATCH_BYTES) throw EditDeniedException("Patch 1..$MAX_PATCH_BYTES bytes at a time")
+        val target = EditTarget(pid, processName, address, ValueType.INT8, bytes.size)
+        checkPolicy(target)
+        return planChecked(target, bytes, Hex.encode(bytes, " "))
+    }
+
+    private fun checkPolicy(target: EditTarget) {
         val p = policy()
         if (!p.editingEnabled) throw EditDeniedException("Read-only mode: enable memory editing in Settings first.")
         if (ProcessSafety.isSystemProcess(target.processName) && !p.allowSystemProcesses) {
             throw EditDeniedException("\"${target.processName}\" looks like a system process. Writes to system processes are blocked.")
         }
-        val replacement = ValueCodec.encode(ValueCodec.parse(target.type, valueText))
+    }
+
+    private suspend fun planChecked(target: EditTarget, replacement: ByteArray, text: String): WritePlan {
+        val p = policy()
         val regions = backend.getMemoryRegions(target.pid)
-        val region = regions.regionFor(target.address, target.type.size)
+        val region = regions.regionFor(target.address, target.length)
             ?: throw EditDeniedException("${Address.format(target.address)} is not mapped in pid ${target.pid}.")
         val warnings = ArrayList<String>()
         if (!region.isWritable) {
@@ -123,8 +150,8 @@ class MemoryEditor(
             warnings += "Target region is not writable (${region.protString()}); this patches read-only/code memory."
         }
         if (ProcessSafety.isSystemProcess(target.processName)) warnings += "Target is a system process."
-        val original = backend.readMemory(target.pid, target.address, target.type.size)
-        return WritePlan(target, region, original, replacement, valueText.trim(), warnings)
+        val original = backend.readMemory(target.pid, target.address, target.length)
+        return WritePlan(target, region, original, replacement, text, warnings)
     }
 
     /** Performs a confirmed write and verifies it with a fresh read. */
@@ -132,11 +159,14 @@ class MemoryEditor(
         val t = plan.target
         return try {
             // Journal the bytes present right before our first modification of this address.
-            val before = backend.readMemory(t.pid, t.address, t.type.size)
+            val before = backend.readMemory(t.pid, t.address, t.length)
             recordOriginal(t, before)
             when (val st = backend.writeMemory(t.pid, t.address, plan.replacement)) {
                 is WriteStatus.Rejected -> WriteOutcome.Rejected(st.statusCode)
-                WriteStatus.Accepted -> verify(t, plan.replacement).also { updateLastWritten(t, plan.replacement) }
+                WriteStatus.Accepted -> verify(t, plan.replacement).also {
+                    updateLastWritten(t, plan.replacement)
+                    if (it is WriteOutcome.Verified) pushHistory(HistoryItem(t, before, plan.replacement.copyOf(), plan.replacementText, clock()))
+                }
             }
         } catch (e: BackendException) {
             WriteOutcome.Failed(e.message ?: "Write failed")
@@ -149,11 +179,16 @@ class MemoryEditor(
             ?: return WriteOutcome.Failed("No original value recorded for ${Address.format(address)}")
         if (!policy().editingEnabled) return WriteOutcome.Failed("Read-only mode: enable memory editing to restore values.")
         return try {
+            val t = EditTarget(pid, entry.processName, address, entry.type, entry.original.size)
+            val before = backend.readMemory(pid, address, entry.original.size)
             when (val st = backend.writeMemory(pid, address, entry.original)) {
                 is WriteStatus.Rejected -> WriteOutcome.Rejected(st.statusCode)
                 WriteStatus.Accepted -> {
-                    val out = verify(EditTarget(pid, entry.processName, address, entry.type), entry.original)
-                    if (out is WriteOutcome.Verified) _journal.update { list -> list.filterNot { it === entry } }
+                    val out = verify(t, entry.original)
+                    if (out is WriteOutcome.Verified) {
+                        _journal.update { list -> list.filterNot { it === entry } }
+                        pushHistory(HistoryItem(t, before, entry.original.copyOf(), "restore original", clock()))
+                    }
                     out
                 }
             }
@@ -165,8 +200,58 @@ class MemoryEditor(
     fun originalFor(pid: Int, address: Long): JournalEntry? =
         _journal.value.firstOrNull { it.pid == pid && it.address == address }
 
-    /** Forget journal entries of a process (e.g. when it exits: its addresses are meaningless now). */
-    fun forgetProcess(pid: Int) = _journal.update { list -> list.filterNot { it.pid == pid } }
+    /** Forget journal and history entries of a process (e.g. when it exits: its addresses are meaningless now). */
+    fun forgetProcess(pid: Int) {
+        _journal.update { list -> list.filterNot { it.pid == pid } }
+        _undo.update { list -> list.filterNot { it.target.pid == pid } }
+        _redo.update { list -> list.filterNot { it.target.pid == pid } }
+    }
+
+    // ------------------------------------------------------------------ undo / redo
+
+    private val _undo = MutableStateFlow<List<HistoryItem>>(emptyList())
+    /** Verified writes, oldest first; the last one is undone first. */
+    val undoStack: StateFlow<List<HistoryItem>> = _undo.asStateFlow()
+    private val _redo = MutableStateFlow<List<HistoryItem>>(emptyList())
+    val redoStack: StateFlow<List<HistoryItem>> = _redo.asStateFlow()
+
+    private fun pushHistory(item: HistoryItem) {
+        _undo.update { (it + item).takeLast(MAX_HISTORY) }
+        _redo.value = emptyList()
+    }
+
+    /** What undo would do: the item, and the bytes in memory now (differ from item.after if the game changed them). */
+    suspend fun peekUndo(): Pair<HistoryItem, ByteArray>? = _undo.value.lastOrNull()?.let { it to current(it) }
+    suspend fun peekRedo(): Pair<HistoryItem, ByteArray>? = _redo.value.lastOrNull()?.let { it to current(it) }
+
+    private suspend fun current(i: HistoryItem) = backend.readMemory(i.target.pid, i.target.address, i.target.length)
+
+    /** Writes back the bytes from before the last write (user-confirmed), verified by a fresh read. */
+    suspend fun undo(): WriteOutcome = step(_undo, _redo) { it.before }
+
+    /** Re-applies the last undone write (user-confirmed), verified by a fresh read. */
+    suspend fun redo(): WriteOutcome = step(_redo, _undo) { it.after }
+
+    private suspend fun step(
+        from: MutableStateFlow<List<HistoryItem>>, to: MutableStateFlow<List<HistoryItem>>, bytes: (HistoryItem) -> ByteArray,
+    ): WriteOutcome {
+        val item = from.value.lastOrNull() ?: return WriteOutcome.Failed("Nothing to do")
+        if (!policy().editingEnabled) return WriteOutcome.Failed("Read-only mode: enable memory editing first.")
+        return try {
+            val t = item.target
+            when (val st = backend.writeMemory(t.pid, t.address, bytes(item))) {
+                is WriteStatus.Rejected -> WriteOutcome.Rejected(st.statusCode)
+                WriteStatus.Accepted -> verify(t, bytes(item)).also {
+                    if (it is WriteOutcome.Verified) {
+                        from.update { l -> l.dropLast(1) }
+                        to.update { l -> (l + item).takeLast(MAX_HISTORY) }
+                    }
+                }
+            }
+        } catch (e: BackendException) {
+            WriteOutcome.Failed(e.message ?: "Write failed")
+        }
+    }
 
     fun clearJournal() { _journal.value = emptyList() }
 
@@ -176,7 +261,7 @@ class MemoryEditor(
     }
 
     private fun recordOriginal(t: EditTarget, before: ByteArray) = _journal.update { list ->
-        if (list.any { it.pid == t.pid && it.address == t.address }) list
+        if (list.any { it.pid == t.pid && it.address == t.address && it.original.size == before.size }) list
         else list + JournalEntry(t.pid, t.processName, t.address, t.type, before, before, clock())
     }
 

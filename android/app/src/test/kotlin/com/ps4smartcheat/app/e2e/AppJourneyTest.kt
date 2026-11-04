@@ -209,6 +209,19 @@ class AppJourneyTest {
         waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
         assertEquals(4200, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
 
+        // 8b. Undo the restore (back to 99999), then redo it (4200 again) — each confirmed.
+        step("undo/redo")
+        tag("undo").performScrollTo().performClick()
+        waitTag("confirm")
+        waitText("Will write:")
+        shot("10c_undo_confirmation")
+        tag("confirm").performClick()
+        waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 99999 }
+        tag("redo").performScrollTo().performClick()
+        waitTag("confirm")
+        tag("confirm").performClick()
+        waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
+
         // 9. Save as a cheat.
         step("save cheat: type value")
         tag("newValue").performTextClearance()
@@ -235,6 +248,22 @@ class AppJourneyTest {
         waitText("byte(s) changed")
         waitText("Int32 4200") // typed value at the target address (restored original)
         shot("12_memory_viewer")
+
+        // 10b. Patch raw bytes in the viewer (confirmed + verified), then put 4200 back the same way.
+        step("hex patch")
+        tag("patchBytes").performTextInput("2A 00 00 00")
+        tag("patchWrite").performClick()
+        waitTag("confirm")
+        shot("12b_patch_confirmation")
+        tag("confirm").performClick()
+        waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 42 }
+        waitText("written and verified")
+        tag("patchBytes").performTextClearance()
+        tag("patchBytes").performTextInput("68 10 00 00")
+        tag("patchWrite").performClick()
+        waitTag("confirm")
+        tag("confirm").performClick()
+        waitMock { server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS) == 4200 }
 
         // 11. Cheat library shows the saved cheat.
         step("cheat library")

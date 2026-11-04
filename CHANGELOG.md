@@ -2,6 +2,13 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 0.10.0 (in progress)
+- Memory viewer: patch raw bytes ("DE AD BE EF", up to 64) at the highlighted address — same policy, region checks,
+  confirmation dialog (current vs new bytes) and fresh read-back verification as typed writes.
+- Undo/redo of verified writes in this session (editor → History): each step is confirmed, shows the bytes in
+  memory now and warns when the game changed them since; it is verified by a fresh read. History is per session,
+  never persisted, never replayed automatically, and dropped when the game exits.
+
 ## 0.9.0
 - Address list → cheat library: "Save as cheat…" on an entry stores it with a value (module-relative when inside a
   module image, ready for GoldHEN export). Pointer-chain entries cannot become cheats (GoldHEN files hold fixed
