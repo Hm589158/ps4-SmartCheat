@@ -1,0 +1,99 @@
+name: Release
+
+# Publishes an APK to GitHub Releases.
+#  - Signed release APK when the signing secrets are configured:
+#      SMARTCHEAT_KEYSTORE_BASE64, SMARTCHEAT_KEYSTORE_PASSWORD, SMARTCHEAT_KEY_ALIAS, SMARTCHEAT_KEY_PASSWORD
+#  - Otherwise a clearly labelled, debug-signed TEST build published as a pre-release.
+# An existing release with the same tag is never overwritten.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create, e.g. v0.4.0-test.1"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      HAS_SIGNING: ${{ secrets.SMARTCHEAT_KEYSTORE_BASE64 != '' }}
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate tag and refuse duplicates
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Tag '$TAG' must look like v1.2.3 or v1.2.3-test.1"; exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists; refusing to upload a duplicate."; exit 1
+          fi
+          echo "VERSION_NAME=${TAG#v}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Tests (release gate)
+        run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug
+
+      - name: Build signed release APK
+        if: env.HAS_SIGNING == 'true'
+        env:
+          SMARTCHEAT_KEYSTORE_BASE64: ${{ secrets.SMARTCHEAT_KEYSTORE_BASE64 }}
+          SMARTCHEAT_KEYSTORE_PASSWORD: ${{ secrets.SMARTCHEAT_KEYSTORE_PASSWORD }}
+          SMARTCHEAT_KEY_ALIAS: ${{ secrets.SMARTCHEAT_KEY_ALIAS }}
+          SMARTCHEAT_KEY_PASSWORD: ${{ secrets.SMARTCHEAT_KEY_PASSWORD }}
+        run: |
+          export SMARTCHEAT_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          echo "$SMARTCHEAT_KEYSTORE_BASE64" | base64 -d > "$SMARTCHEAT_KEYSTORE_FILE"
+          export SMARTCHEAT_VERSION_NAME="$VERSION_NAME" SMARTCHEAT_VERSION_CODE="${{ github.run_number }}"
+          ./gradlew --no-daemon :app:assembleRelease
+          rm -f "$SMARTCHEAT_KEYSTORE_FILE"
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
+          BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)
+          "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "$APK"
+          mkdir -p dist && cp "$APK" "dist/PS4-SmartCheat-$VERSION_NAME.apk"
+          echo "KIND=release" >> "$GITHUB_ENV"
+
+      - name: Build debug-signed TEST APK (no signing secrets)
+        if: env.HAS_SIGNING != 'true'
+        run: |
+          export SMARTCHEAT_VERSION_NAME="$VERSION_NAME" SMARTCHEAT_VERSION_CODE="${{ github.run_number }}"
+          ./gradlew --no-daemon :app:assembleDebug
+          APK=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
+          mkdir -p dist && cp "$APK" "dist/PS4-SmartCheat-$VERSION_NAME-TEST-debug.apk"
+          echo "KIND=test" >> "$GITHUB_ENV"
+
+      - name: Publish GitHub release
+        run: |
+          cd dist && sha256sum *.apk > SHA256SUMS.txt && cd ..
+          if [ "$KIND" = "release" ]; then
+            NOTES="Signed release build of PS4 SmartCheat $VERSION_NAME. Real-PS4 functionality: see docs/COMPATIBILITY.md (pending hardware verification unless stated)."
+            FLAGS=""
+          else
+            NOTES="TEST BUILD — debug-signed, not a production release. Installs as com.ps4smartcheat.app.debug. Real-PS4 functionality is pending hardware verification; see docs/COMPATIBILITY.md."
+            FLAGS="--prerelease"
+          fi
+          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "PS4 SmartCheat $VERSION_NAME${KIND:+ ($KIND)}" --notes "$NOTES" $FLAGS

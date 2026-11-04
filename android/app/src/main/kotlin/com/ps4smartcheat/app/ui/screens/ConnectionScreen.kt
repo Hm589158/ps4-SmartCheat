@@ -1,0 +1,147 @@
+package com.ps4smartcheat.app.ui.screens
+
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewModelScope
+import com.ps4smartcheat.app.data.AppContainer
+import com.ps4smartcheat.app.ui.appViewModel
+import com.ps4smartcheat.app.ui.components.ErrorText
+import com.ps4smartcheat.app.ui.components.KeyValue
+import com.ps4smartcheat.app.ui.components.SectionCard
+import com.ps4smartcheat.app.ui.components.WarningBanner
+import com.ps4smartcheat.core.backend.BackendException
+import com.ps4smartcheat.core.backend.ConnectionState
+import com.ps4smartcheat.core.protocol.NetworkPolicy
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+
+class ConnectionViewModel(private val c: AppContainer) : ViewModel() {
+    val state: StateFlow<ConnectionState> = c.backend.state
+    private val _host = MutableStateFlow(c.settings.value.host)
+    val host = _host.asStateFlow()
+    private val _port = MutableStateFlow(c.settings.value.port.toString())
+    val port = _port.asStateFlow()
+    private val _error = MutableStateFlow<String?>(null)
+    val error = _error.asStateFlow()
+
+    fun setHost(v: String) { _host.value = v.trim(); _error.value = null }
+    fun setPort(v: String) { _port.value = v.filter { it.isDigit() }.take(5); _error.value = null }
+
+    fun connect() {
+        val host = _host.value
+        val port = _port.value.toIntOrNull() ?: -1
+        val problem = NetworkPolicy.validateHostSyntax(host) ?: NetworkPolicy.validatePort(port)
+        if (problem != null) { _error.value = problem; return }
+        c.settings.update { it.copy(host = host, port = port) }
+        _error.value = null
+        viewModelScope.launch {
+            try {
+                c.backend.connect(c.settings.value.connectOptions())
+            } catch (e: BackendException) {
+                _error.value = e.message
+                c.log.error("Connect to $host:$port failed: ${e.message}", notifyUser = false)
+            }
+        }
+    }
+
+    fun disconnect() {
+        viewModelScope.launch {
+            c.backend.disconnect()
+            c.log.info("Disconnected by user")
+        }
+    }
+}
+
+@Composable
+fun ConnectionScreen(onConnected: () -> Unit) {
+    val vm = appViewModel { ConnectionViewModel(it) }
+    val state by vm.state.collectAsStateWithLifecycle()
+    val host by vm.host.collectAsStateWithLifecycle()
+    val port by vm.port.collectAsStateWithLifecycle()
+    val error by vm.error.collectAsStateWithLifecycle()
+    val connected = state is ConnectionState.Connected
+    val connecting = state is ConnectionState.Connecting
+
+    Column(
+        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SectionCard("PS4 address") {
+            OutlinedTextField(
+                value = host, onValueChange = vm::setHost, label = { Text("IP address (e.g. 192.168.1.50)") },
+                singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            )
+            OutlinedTextField(
+                value = port, onValueChange = vm::setPort, label = { Text("Port (ps4debug default 744)") },
+                singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
+            ErrorText(error)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (connected) {
+                    OutlinedButton(onClick = vm::disconnect) { Text("Disconnect") }
+                    Button(onClick = onConnected) { Text("Processes") }
+                } else {
+                    Button(onClick = vm::connect, enabled = !connecting) { Text(if (state is ConnectionState.Failed) "Reconnect" else "Connect") }
+                    if (connecting) CircularProgressIndicator(Modifier.padding(start = 8.dp))
+                }
+            }
+        }
+
+        SectionCard("Status") {
+            when (val s = state) {
+                ConnectionState.Disconnected -> Text("Not connected")
+                is ConnectionState.Connecting -> Text("Connecting to ${s.host}:${s.port}…")
+                is ConnectionState.Failed -> Text("Connection failed: ${s.message}", color = MaterialTheme.colorScheme.error)
+                is ConnectionState.Connected -> {
+                    KeyValue("Console", "${s.info.host}:${s.info.port}", mono = true)
+                    KeyValue("Backend", "ps4debug (standard protocol)")
+                    KeyValue("Debugger ver.", s.info.debuggerVersion.ifBlank { "unknown" })
+                    KeyValue("Firmware", s.info.firmwareText ?: "unknown (not reported by payload)")
+                }
+            }
+        }
+
+        WarningBanner(
+            "ps4debug is an unauthenticated debugging service: anyone on your network can read and write " +
+                "console memory while it runs. Use it only on a trusted home network and never expose port 744 " +
+                "to the internet. Connections to non-local addresses are blocked by default.",
+        )
+        SectionCard("Before connecting") {
+            Text(
+                "1. Jailbroken PS4 with GoldHEN.\n2. Load the ps4debug payload (GoldHEN → Plugins/Payloads, or send ps4debug.bin).\n" +
+                    "3. Phone and PS4 on the same Wi-Fi/LAN.\n4. Start the offline game you want to inspect.",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                "Real-console compatibility has not been verified by this project yet; see docs/COMPATIBILITY.md.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
