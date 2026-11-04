@@ -2,7 +2,7 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
-## 0.6.0 (unreleased)
+## 0.6.0
 - End-to-end UI journey test (Robolectric + Roborazzi) drives the real app against the mock ps4debug-NG
   server and records screenshots of every step; CI publishes them to the `ci-screenshots` branch.
 - UI polish from reviewing those screenshots: region shown under each scan result, no duplicated result count,
