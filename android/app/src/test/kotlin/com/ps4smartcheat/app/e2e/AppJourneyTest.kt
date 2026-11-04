@@ -351,6 +351,7 @@ class AppJourneyTest {
         // The entry becomes a cheat in the library (module-relative, value typed here).
         waitNoSnackbar("Already in the address list")
         waitNoSnackbar()
+        tag("watchLive").performClick() // stop live refresh so the form is not recomposed under the test's taps
         compose.onAllNodesWithText(COINS_LABEL)[0].performClick()
         waitTag("saveAsCheat-$COINS_LABEL")
         tag("saveAsCheat-$COINS_LABEL").performScrollTo().performClick()

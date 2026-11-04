@@ -220,7 +220,9 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
         if (!r.status.readable) { _error.value = "\"${r.entry.label}\" is not mapped in this process"; return }
         viewModelScope.launch {
             try {
-                _message.value = c.saveCheat(r.address, r.entry.type, name, value, row.value, profileId, newProfileName, version)
+                val msg = c.saveCheat(r.address, r.entry.type, name, value, row.value, profileId, newProfileName, version)
+                _message.value = msg
+                c.log.notify(msg) // the list header may be scrolled away while the form is open
                 _error.value = null
             } catch (e: IllegalArgumentException) {
                 _error.value = e.message
@@ -292,7 +294,7 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
         if (sel != null) {
             item {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LabeledSwitch("Live values", live, vm::setLive, "Every ${vm.intervalMs} ms", enabled = connected)
+                    LabeledSwitch("Live values", live, vm::setLive, "Every ${vm.intervalMs} ms", enabled = connected, tag = "watchLive")
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     TextButton(onClick = vm::refresh, enabled = connected && alive) { Text("Refresh") }
