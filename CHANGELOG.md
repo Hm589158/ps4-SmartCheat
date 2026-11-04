@@ -8,6 +8,9 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
   read) and the recent warnings/errors.
 - In-app guide (ⓘ in the top bar): connect, find a value, edit safely, keep what you found, troubleshooting, and
   the offline-only / trusted-network notice.
+- Client: the request lock is now taken and released on the IO dispatcher. Before, a request started from the UI
+  thread released the lock only after resuming on that thread, so a busy UI thread could hold up every other request
+  (found while investigating an intermittent E2E failure).
 - Wide screens (≥ 720 dp: tablets, landscape phones) use a side navigation rail; content is limited to 900 dp.
 
 ## 0.10.0

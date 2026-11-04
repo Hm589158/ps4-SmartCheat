@@ -172,6 +172,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     fun restore() {
         val sel = c.selectedProcess.value ?: return
         val addr = parsedAddress() ?: return
+        c.log.event(com.ps4smartcheat.core.logging.EventLevel.DEBUG, com.ps4smartcheat.core.logging.EventCategory.EDIT, "restore requested", "address" to Address.format(addr))
         c.freezer.unfreeze(sel.pid, addr)
         viewModelScope.launch {
             report(c.editor.restore(sel.pid, addr), "Restore ${Address.format(addr)}")

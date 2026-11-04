@@ -98,8 +98,8 @@ class Ps4DebugClient(
 
     override fun traffic(): Traffic = Traffic(bytesIn.get(), bytesOut.get())
 
-    override suspend fun connect(options: ConnectOptions): ConsoleInfo = mutex.withLock {
-        withContext(ioDispatcher) {
+    override suspend fun connect(options: ConnectOptions): ConsoleInfo = withContext(ioDispatcher) {
+        mutex.withLock {
             closeSocketQuietly()
             userDisconnecting = false
             _state.value = ConnectionState.Connecting(options.host, options.port)
@@ -278,8 +278,13 @@ class Ps4DebugClient(
      * (writes, server scans) is never repeated and fails with [ConnectionInterruptedException] while the
      * connection itself is restored.
      */
-    private suspend fun <T> request(what: String, idempotent: Boolean = true, block: () -> T): T = mutex.withLock {
-        withContext(ioDispatcher) {
+    /*
+     * The lock is taken and released on the IO dispatcher. (It used to be taken on the caller's dispatcher and
+     * released only after resuming there: a request started from the UI thread kept every other request waiting
+     * until the UI thread got to run that resumption.)
+     */
+    private suspend fun <T> request(what: String, idempotent: Boolean = true, block: () -> T): T = withContext(ioDispatcher) {
+        mutex.withLock {
             val opts = options ?: throw NotConnectedException()
             if (reconnectPending || socket == null) {
                 if (userDisconnecting) throw NotConnectedException()
