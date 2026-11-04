@@ -255,7 +255,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.HEX -> "Memory viewer"
     Routes.PATTERN -> "Pattern search"
     Routes.POINTER -> "Pointer scan"
-    Routes.DIAGNOSTICS -> "Connection diagnostics"
+    Routes.DIAGNOSTICS -> "Diagnostics"
     Routes.HELP -> "Guide"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"
