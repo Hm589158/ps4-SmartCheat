@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ps4smartcheat.app.e2e.AppJourneyTest" tests="11" skipped="0" failures="0" errors="0" timestamp="2026-11-05T04:30:18.308Z" hostname="runnervm48cm3" time="76.064">
+  <properties/>
+  <testcase name="addressListFollowsGameRestart" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="25.704"/>
+  <testcase name="pointerScanFindsChainThatFollowsMovingObject" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="3.753"/>
+  <testcase name="tabletLayoutUsesNavigationRail" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="3.263"/>
+  <testcase name="connectionErrorIsShownAndRecoverable" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="0.987"/>
+  <testcase name="bytePatternSearchFindsPlantedBytes" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="2.439"/>
+  <testcase name="runningGameIsAutoSelectedAndExitIsDetected" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="6.804"/>
+  <testcase name="droppedConnectionIsRecoveredAutomatically" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="2.761"/>
+  <testcase name="fullUserJourney" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="25.154"/>
+  <testcase name="rangeScanFindsValueBetweenBounds" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="1.695"/>
+  <testcase name="nonLocalAddressIsBlocked" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="0.356"/>
+  <testcase name="diagnosticsAndGuide" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="3.147"/>
+  <system-out><![CDATA[E2E step: connect
+E2E step: pick process
+E2E step: first scan
+E2E step: refine
+E2E step: editor read-only
+E2E step: enable editing
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: write
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: restore
+E2E step: undo/redo
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: save cheat: type value
+E2E step: save cheat: open form
+E2E step: save cheat: fill form
+E2E step: add to address list
+E2E step: memory viewer
+E2E step: hex patch
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: cheat library
+E2E step: address list
+E2E step: settings
+]]></system-out>
+  <system-err><![CDATA[[Robolectric] WARN: Android SDK 36 requires Java 21 (have Java 17). Tests won't be run on SDK 36 unless explicitly requested.
+]]></system-err>
+</testsuite>

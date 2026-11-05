@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ps4smartcheat.app.AppSettingsTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-11-05T04:30:17.006Z" hostname="runnervm48cm3" time="0.011">
+  <properties/>
+  <testcase name="regionSizeLimitMapsToBytes" classname="com.ps4smartcheat.app.AppSettingsTest" time="0.008"/>
+  <testcase name="scanOptionsAreClamped" classname="com.ps4smartcheat.app.AppSettingsTest" time="0.001"/>
+  <testcase name="defaultsAreSafe" classname="com.ps4smartcheat.app.AppSettingsTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>
