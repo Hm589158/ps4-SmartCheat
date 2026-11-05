@@ -141,8 +141,8 @@ real consoles.
 Tested something? Please file a **[hardware test report](https://github.com/Hm589158/ps4-SmartCheat/issues/new?template=hardware_report.yml)**.
 Details are in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
-**Builds on the Releases page:** beta builds are named `PS4-SmartCheat-v1.0.0-beta.<build>.apk` and published
-automatically after every green CI run on `main`. They are debug-signed by CI (package `com.ps4smartcheat.app.debug`).
+**Builds on the Releases page:** the newest beta build is always the **Latest** release, named
+`PS4-SmartCheat-v1.0.0-beta.<build>.apk` and published automatically after every green CI run on `main`. They are debug-signed by CI (package `com.ps4smartcheat.app.debug`).
 Releases signed with the project key will use `com.ps4smartcheat.app` ([signing](docs/RELEASE_SIGNING.md)). Verify a
 download with its `SHA256SUMS.txt`.
 
