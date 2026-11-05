@@ -13,9 +13,7 @@
 [![Backend: ps4debug-NG](https://img.shields.io/badge/backend-ps4debug--NG-003791?logo=playstation&logoColor=white)](docs/PROTOCOL.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-**English** · [العربية](README.ar.md)
-
-[Install](#install) · [Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) · [Safety](#safety-and-scope) · [Build](#building-from-source) · [Docs](#documentation)
+[Install](#install) · [Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) · [Build](#building-from-source) · [Docs](#documentation)
 
 </div>
 
@@ -132,17 +130,6 @@ flowchart LR
   megabytes per scan in the [benchmark](docs/PERFORMANCE.md)).
 - Every protocol command used is verified against upstream source and documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 - The `core` module has no Android dependencies and is tested against an independent mock ps4debug-NG server over real TCP.
-
-## Safety and scope
-
-> [!IMPORTANT]
-> For **offline, single-player** games and homebrew on **your own** console. No online/multiplayer cheating,
-> anti-cheat evasion, DRM bypass, save-file editing or kernel memory editing — these are out of scope by design.
-
-- **ps4debug has no authentication.** Use it only on a trusted local network; the app refuses non-local addresses by
-  default and never exposes anything to the internet.
-- No telemetry, no accounts, no cloud: the log stays on the phone until you export it.
-- Writes are never re-applied automatically — not after a reconnect, not after a game restart.
 
 ## Compatibility
 
