@@ -1,0 +1,37 @@
+name: Delete tags without a release
+
+# Manual maintenance: removes git tags whose GitHub release was deleted, so they stop cluttering the
+# repository's tag list. Tags that still have a release are never touched. Commits are not affected.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print which tags would be deleted"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - name: Delete orphan tags
+        run: |
+          set -euo pipefail
+          releases=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name' | sort -u)
+          tags=$(gh api --paginate "repos/$GITHUB_REPOSITORY/tags?per_page=100" --jq '.[].name' | sort -u)
+          echo "Tags with a release (kept):"; echo "$releases" | sed 's/^/  /'
+          for t in $tags; do
+            if echo "$releases" | grep -qxF "$t"; then continue; fi
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "would delete: $t"
+            else
+              gh api -X DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$t" && echo "deleted: $t"
+            fi
+          done
