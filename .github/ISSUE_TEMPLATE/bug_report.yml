@@ -1,0 +1,62 @@
+name: Bug report
+description: Something does not work as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Please do not include your public IP address or anything that identifies your network.
+  - type: input
+    id: app
+    attributes:
+      label: App version
+      description: Settings → About (e.g. 1.0.0-build.46-debug)
+    validations:
+      required: true
+  - type: input
+    id: console
+    attributes:
+      label: Console firmware and loader
+      placeholder: "FW 11.00, GoldHEN 2.4b18"
+    validations:
+      required: true
+  - type: dropdown
+    id: debugger
+    attributes:
+      label: Debugger payload
+      options:
+        - ps4debug-NG (version below)
+        - GoldHEN ps4debug (classic)
+        - Mock server (no PS4)
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: debugger_version
+    attributes:
+      label: Debugger version / branding
+      description: Shown on the Connect screen or in Settings → Connection diagnostics
+  - type: input
+    id: game
+    attributes:
+      label: Game (title ID and version)
+      placeholder: "CUSA12345 v01.05"
+  - type: textarea
+    id: steps
+    attributes:
+      label: What did you do?
+      placeholder: "1. Connect  2. First scan Int32 100  3. …"
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Event log
+      description: Settings → Export (JSON Lines). Paste the relevant lines or attach the file.
+      render: text

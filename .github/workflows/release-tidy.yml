@@ -1,0 +1,63 @@
+name: Tidy releases
+
+# One-off maintenance, run manually: brings releases published before the current naming scheme in line with it.
+#  - title  "PS4 SmartCheat v1.0.0 · Test build 46"
+#  - asset  PS4-SmartCheat-v1.0.0-build.46-test.apk (renamed in place; the file itself is not touched)
+#  - SHA256SUMS.txt rewritten for the new file name (hashes are recomputed from the downloaded APK)
+#  - notes  regenerated from CHANGELOG.md by .github/scripts/release-notes.sh
+# Tags, commits and APK contents never change. Releases already following the scheme are skipped.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Only print what would change"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  tidy:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DRY_RUN: ${{ inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags, to resolve each release's commit
+
+      - name: Retitle, rename assets, refresh notes
+        run: |
+          set -euo pipefail
+          for TAG in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName'); do
+            V="${TAG#v}"; BASE="${V%%-*}"
+            if [[ "$V" =~ -build\.([0-9]+)$ ]]; then LABEL="Test build ${BASH_REMATCH[1]}";
+            elif [[ "$V" =~ -test\.([0-9]+)$ ]]; then LABEL="Test ${BASH_REMATCH[1]}";
+            else LABEL=""; fi
+            TITLE="PS4 SmartCheat v$BASE${LABEL:+ · $LABEL}"
+            KIND=$([ -n "$LABEL" ] && echo test || echo release)
+            NEW_APK="PS4-SmartCheat-v$V$([ "$KIND" = test ] && echo -test).apk"
+            INFO=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
+            OLD_TITLE=$(echo "$INFO" | jq -r .name)
+            APK_ID=$(echo "$INFO" | jq -r '.assets[] | select(.name|endswith(".apk")) | .id' | head -n1)
+            OLD_APK=$(echo "$INFO" | jq -r '.assets[] | select(.name|endswith(".apk")) | .name' | head -n1)
+            SHA=$(git rev-list -n1 "$TAG" 2>/dev/null || echo "$INFO" | jq -r .target_commitish)
+            echo "::group::$TAG"
+            echo "title: '$OLD_TITLE' -> '$TITLE'"
+            echo "apk:   '$OLD_APK' -> '$NEW_APK'"
+            if [ "$DRY_RUN" != "true" ]; then
+              if [ -n "$APK_ID" ] && [ "$OLD_APK" != "$NEW_APK" ]; then
+                gh api -X PATCH "repos/$GITHUB_REPOSITORY/releases/assets/$APK_ID" -f name="$NEW_APK" >/dev/null
+                rm -rf work && mkdir work
+                gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$NEW_APK" --dir work
+                (cd work && sha256sum "$NEW_APK" > SHA256SUMS.txt)
+                gh release upload "$TAG" work/SHA256SUMS.txt --repo "$GITHUB_REPOSITORY" --clobber
+              fi
+              .github/scripts/release-notes.sh "$V" "$KIND" "$NEW_APK" "$SHA" > notes.md
+              gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --notes-file notes.md
+            fi
+            echo "::endgroup::"
+          done

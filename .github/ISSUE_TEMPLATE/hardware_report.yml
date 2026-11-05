@@ -1,0 +1,35 @@
+name: Hardware test report
+description: Tell us what worked (or not) on a real console — this is how features get verified
+labels: ["hardware-report"]
+body:
+  - type: input
+    id: app
+    attributes:
+      label: App version
+    validations:
+      required: true
+  - type: input
+    id: setup
+    attributes:
+      label: Console setup
+      placeholder: "FW 11.00, GoldHEN 2.4b18, ps4debug-NG 1.3.3"
+    validations:
+      required: true
+  - type: checkboxes
+    id: features
+    attributes:
+      label: Worked on hardware
+      options:
+        - label: Connect + authentication
+        - label: Turbo Scan / refines
+        - label: Write + restore / undo
+        - label: Address list survives a game restart
+        - label: Pointer scan + filter after restart
+        - label: Byte pattern / text search
+        - label: GoldHEN file import (enable/disable a mod)
+        - label: Reconnect after Wi-Fi drop
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes, timings, problems
+      description: Diagnostics latency numbers and scan times are very useful.

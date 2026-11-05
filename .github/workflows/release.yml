@@ -104,7 +104,7 @@ jobs:
           APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)
           "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "$APK"
-          mkdir -p dist && cp "$APK" "dist/PS4-SmartCheat-$VERSION_NAME.apk"
+          mkdir -p dist && cp "$APK" "dist/PS4-SmartCheat-v$VERSION_NAME.apk"
           echo "KIND=release" >> "$GITHUB_ENV"
 
       - name: Build debug-signed TEST APK (no signing secrets)
@@ -113,20 +113,23 @@ jobs:
           export SMARTCHEAT_VERSION_NAME="$VERSION_NAME" SMARTCHEAT_VERSION_CODE="${{ github.run_number }}"
           ./gradlew --no-daemon :app:assembleDebug
           APK=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          mkdir -p dist && cp "$APK" "dist/PS4-SmartCheat-$VERSION_NAME-TEST-debug.apk"
+          mkdir -p dist && cp "$APK" "dist/PS4-SmartCheat-v$VERSION_NAME-test.apk"
           echo "KIND=test" >> "$GITHUB_ENV"
 
       - name: Publish GitHub release
         if: env.SKIP_RELEASE != 'true'
         run: |
           cd dist && sha256sum *.apk > SHA256SUMS.txt && cd ..
+          APK_NAME=$(basename dist/*.apk)
+          BASE="${VERSION_NAME%%-*}"
+          BUILD=$(echo "$VERSION_NAME" | sed -n 's/.*-build\.\([0-9]*\)$/\1/p')
+          # Titles: "PS4 SmartCheat v1.0.0" (signed) / "PS4 SmartCheat v1.0.0 · Test build 46" (debug-signed).
           if [ "$KIND" = "release" ]; then
-            NOTES="Signed release build of PS4 SmartCheat $VERSION_NAME. Real-PS4 functionality: see docs/COMPATIBILITY.md (pending hardware verification unless stated)."
-            FLAGS=""
+            TITLE="PS4 SmartCheat v$BASE"; FLAGS="--latest"
           else
-            NOTES="TEST BUILD — debug-signed, not a production release. Installs as com.ps4smartcheat.app.debug. Real-PS4 functionality is pending hardware verification; see docs/COMPATIBILITY.md."
-            FLAGS="--prerelease"
+            TITLE="PS4 SmartCheat v$BASE · Test build ${BUILD:-${VERSION_NAME#*-}}"; FLAGS="--prerelease"
           fi
+          ../.github/scripts/release-notes.sh "$VERSION_NAME" "$KIND" "$APK_NAME" "$RELEASE_SHA" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
-            --title "PS4 SmartCheat $VERSION_NAME${KIND:+ ($KIND)}" --notes "$NOTES" $FLAGS
+            --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md" $FLAGS

@@ -10,3 +10,5 @@
 * Safety invariants: read-only by default; every write confirmed + verified by fresh read; no automatic
   re-application of cheats; local-network-only hosts by default; no kernel memory editing; no telemetry.
 * `google()` repositories are content-filtered in `settings.gradle.kts` so JVM modules resolve without Google Maven.
+* README images in `docs/images/` are generated from the CI UI-test screenshots (`ci-screenshots` branch) with
+  `scripts/make-readme-images.py`; release notes come from `CHANGELOG.md` via `.github/scripts/release-notes.sh`.
