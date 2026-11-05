@@ -88,6 +88,8 @@ class AppJourneyTest {
     @After fun stopServer() = server.close()
 
     private fun shot(name: String) {
+        // Screenshots double as README images: let the auto-select notice disappear first (never fails the test).
+        runCatching { waitNoSnackbar("Detected game", timeoutMs = 8_000) }
         compose.waitForIdle()
         File(OUT).mkdirs()
         compose.onRoot().captureRoboImage("$OUT/$name.png")
