@@ -1,7 +1,8 @@
 # Signed releases
 
-Without signing secrets the release workflow publishes a **debug-signed TEST pre-release**
-(`PS4-SmartCheat-<version>-build.<n>-TEST-debug.apk`, package `com.ps4smartcheat.app.debug`). To publish a
+Without signing secrets the release workflow publishes a **debug-signed pre-release**
+(`PS4-SmartCheat-v1.0.0-beta.<n>.apk` during the beta, otherwise `PS4-SmartCheat-v<version>-build.<n>-test.apk`;
+package `com.ps4smartcheat.app.debug`). To publish a
 **signed release APK** (package `com.ps4smartcheat.app`) the repository owner creates a signing key once and stores
 it as GitHub Actions secrets. The key never enters the repository.
 
@@ -37,14 +38,15 @@ Delete the `.b64` file afterwards.
 
 ## 3. Publish
 
-Every successful CI run on `main` publishes `v<versionName>-build.<run>`; with the secrets present it is a signed
-release built with `assembleRelease`, otherwise the TEST build. A manual run (Actions → Release → Run workflow,
+Every successful CI run on `main` publishes `v<versionName>.<run>` for beta versions (e.g. `v1.0.0-beta.53`) or
+`v<versionName>-build.<run>` otherwise; with the secrets present it is signed and built with `assembleRelease`,
+otherwise debug-signed. A manual run (Actions → Release → Run workflow,
 e.g. tag `v1.0.0`) publishes that tag. The workflow decodes the keystore into the runner's temp directory, builds,
 deletes it, writes `SHA256SUMS.txt`, and never overwrites an existing release.
 
 ## Installing
 
-* A signed release and a TEST build are different packages and can be installed side by side.
-* Updating from one signed release to the next keeps data. Moving from the TEST build to the signed build does not
+* A signed release and a debug-signed (beta/test) build are different packages and can be installed side by side.
+* Updating from one signed release to the next keeps data. Moving from a debug-signed build to the signed build does not
   carry data over (different package); export the cheat library and address lists first and import them.
 * Verify a download: `sha256sum -c SHA256SUMS.txt`.

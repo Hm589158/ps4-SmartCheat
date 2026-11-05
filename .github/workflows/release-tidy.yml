@@ -34,12 +34,14 @@ jobs:
           set -euo pipefail
           for TAG in $(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName'); do
             V="${TAG#v}"; BASE="${V%%-*}"
-            if [[ "$V" =~ -build\.([0-9]+)$ ]]; then LABEL="Test build ${BASH_REMATCH[1]}";
+            if [[ "$V" =~ -beta\.([0-9]+)$ ]]; then LABEL="Beta · build ${BASH_REMATCH[1]}";
+            elif [[ "$V" =~ -build\.([0-9]+)$ ]]; then LABEL="Test build ${BASH_REMATCH[1]}";
             elif [[ "$V" =~ -test\.([0-9]+)$ ]]; then LABEL="Test ${BASH_REMATCH[1]}";
             else LABEL=""; fi
             TITLE="PS4 SmartCheat v$BASE${LABEL:+ · $LABEL}"
+            [[ "$V" == *-beta* ]] && TITLE="PS4 SmartCheat v$BASE $LABEL"
             KIND=$([ -n "$LABEL" ] && echo test || echo release)
-            NEW_APK="PS4-SmartCheat-v$V$([ "$KIND" = test ] && echo -test).apk"
+            NEW_APK="PS4-SmartCheat-v$V$([ "$KIND" = test ] && [[ "$V" != *-beta* ]] && echo -test).apk"
             INFO=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG")
             OLD_TITLE=$(echo "$INFO" | jq -r .name)
             APK_ID=$(echo "$INFO" | jq -r '.assets[] | select(.name|endswith(".apk")) | .id' | head -n1)

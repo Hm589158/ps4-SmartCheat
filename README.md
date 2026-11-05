@@ -6,63 +6,84 @@
 
 **A memory scanner and cheat workbench for your own jailbroken PlayStation 4 — running on your Android phone.**
 
-[![CI](https://github.com/Hm589158/ps4-SmartCheat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Hm589158/ps4-SmartCheat/actions/workflows/ci.yml)
+[![Status: Beta](https://img.shields.io/badge/status-beta-orange)](#status)
 [![Latest build](https://img.shields.io/github/v/release/Hm589158/ps4-SmartCheat?include_prereleases&sort=date&label=latest%20build&color=2ea44f)](https://github.com/Hm589158/ps4-SmartCheat/releases)
-[![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white)](#install)
-[![Kotlin · Jetpack Compose](https://img.shields.io/badge/Kotlin-Jetpack%20Compose-7F52FF?logo=kotlin&logoColor=white)](docs/ARCHITECTURE.md)
-[![Backend: ps4debug-NG](https://img.shields.io/badge/backend-ps4debug--NG-003791?logo=playstation&logoColor=white)](docs/PROTOCOL.md)
+[![CI](https://github.com/Hm589158/ps4-SmartCheat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Hm589158/ps4-SmartCheat/actions/workflows/ci.yml)
+[![Requires ps4debug-NG](https://img.shields.io/badge/requires-ps4debug--NG-003791?logo=playstation&logoColor=white)](https://github.com/Pharaoh2k/ps4debug-NG)
+[![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white)](#required-downloads)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-[Install](#install) · [Quick start](#quick-start) · [Features](#features) · [How it works](#how-it-works) · [Build](#building-from-source) · [Docs](#documentation)
+[Downloads](#required-downloads) · [Setup](#setup-in-5-steps) · [Features](#features) · [Status](#status) · [Build](#building-from-source) · [Credits](#credits-and-licenses)
 
 </div>
 
 ---
 
-PS4 SmartCheat connects over your local network to **ps4debug-NG** (or GoldHEN's classic ps4debug) and turns the phone
-into a complete memory tool: find a value in seconds with scans that run *on the console*, edit it safely with
-verification and undo, keep it across game restarts with module-relative addresses and pointer chains, and package it
-as a GoldHEN cheat — for offline games and homebrew on hardware you own.
+PS4 SmartCheat connects over your local network to **ps4debug-NG** and turns the phone into a complete memory tool:
+find a value in seconds with scans that run *on the console*, edit it safely with verification and undo, keep it across
+game restarts with module-relative addresses and pointer chains, and package it as a GoldHEN cheat — for offline games
+and homebrew on hardware you own.
+
+## Required downloads
+
+| | What | Where |
+|:-:|---|---|
+| 📱 | **PS4 SmartCheat** — the Android app (APK, Android 8.0+) | **[Releases](https://github.com/Hm589158/ps4-SmartCheat/releases)** — take the newest build |
+| 🎮 | **ps4debug-NG** — the debugger payload that runs on the PS4 | **[Official project](https://github.com/Pharaoh2k/ps4debug-NG)** · **[Releases](https://github.com/Pharaoh2k/ps4debug-NG/releases/latest)** |
+| 🔓 | **GoldHEN** — homebrew enabler on the jailbroken console | [GoldHEN](https://github.com/GoldHEN/GoldHEN) |
+
+> [!IMPORTANT]
+> **ps4debug-NG is required for scanning and editing.** It is the debugger the app is built and tested for: the app
+> authenticates with it automatically and uses its Turbo and server-side scans. The classic ps4debug payload (for example
+> [GoldHEN/ps4debug](https://github.com/GoldHEN/ps4debug)) only works in an untested compatibility mode and is not supported.
+
+**The ps4debug-NG payload file.** Each ps4debug-NG release ships one ready-to-send `.bin` payload. At the time of
+writing the latest is **v1.3.4**:
+[`ps4debug-ng_v1.3.4_release_2026-11-05.bin`](https://github.com/Pharaoh2k/ps4debug-NG/releases/download/1.3.4/ps4debug-ng_v1.3.4_release_2026-11-05.bin)
+(3.03 MB, SHA-256 `8bfe0507972718e6078778c5f9c44d84293197c0547239ab4227bdb351299b3e`). The file name changes with every
+release, so check the [latest release](https://github.com/Pharaoh2k/ps4debug-NG/releases/latest) for newer versions. You
+can also build it from source with the project's `build.sh`. The output is `ps4debug-ng.bin`.
+
+## Setup in 5 steps
+
+1. **Jailbreak and start GoldHEN** on the PS4 with the method for your firmware.
+2. **Load ps4debug-NG.** Send the `.bin` to your jailbreak's payload loader. The ps4debug-NG README names ports
+   **9020 or 9021**, depending on the jailbreak. Example from a computer on the same network:
+   ```bash
+   nc <PS4-IP> 9020 < ps4debug-ng_v1.3.4_release_2026-11-05.bin
+   ```
+   (or use your favourite payload sender app). The console shows the notification **"ps4debug-NG v1.3.4 by Pharaoh2k"**
+   when it is running and listening on port **744**.
+3. **Start the game** you want to inspect (offline / single-player).
+4. **Connect the app.** Phone on the same Wi-Fi/LAN → PS4 SmartCheat → enter the PS4's local IP, port **744** →
+   **Connect**. The app shows *ps4debug-NG*, *Scan auth: granted* and selects the running game automatically.
+5. **Scan and edit.** Scanner → enter the value you see (e.g. ammo `30`) → **First scan** → change it in the game →
+   **Next scan** until a few results remain. Settings → *Enable memory editing* → tap the result → new value →
+   **Write** → confirm. Tap **+** to keep it in the game's address list.
+
+> [!TIP]
+> The PS4's IP address is under *Settings → Network → View Connection Status*. If **Connect** fails, check that the
+> ps4debug-NG notification appeared, and use *Settings → Connection diagnostics* in the app. The in-app guide (ⓘ) covers
+> every screen.
 
 <div align="center">
 <table>
   <tr>
-    <td align="center"><img src="docs/images/scanner.png" width="200" alt="Memory scanner"><br><sub><b>Turbo Scan on the PS4</b></sub></td>
-    <td align="center"><img src="docs/images/address-list.png" width="200" alt="Address list"><br><sub><b>Address list with live values</b></sub></td>
-    <td align="center"><img src="docs/images/pointer-scan.png" width="200" alt="Pointer scan"><br><sub><b>Pointer scan</b></sub></td>
-    <td align="center"><img src="docs/images/write-confirmation.png" width="200" alt="Confirmed write"><br><sub><b>Every write confirmed</b></sub></td>
+    <td align="center"><img src="docs/images/scanner.png" width="190" alt="Memory scanner"><br><sub><b>Turbo Scan on the PS4</b></sub></td>
+    <td align="center"><img src="docs/images/address-list.png" width="190" alt="Address list"><br><sub><b>Address list</b></sub></td>
+    <td align="center"><img src="docs/images/pointer-scan.png" width="190" alt="Pointer scan"><br><sub><b>Pointer scan</b></sub></td>
+    <td align="center"><img src="docs/images/write-confirmation.png" width="190" alt="Confirmed write"><br><sub><b>Confirmed writes</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/images/memory-viewer.png" width="200" alt="Memory viewer"><br><sub><b>Hex viewer and byte patches</b></sub></td>
-    <td align="center"><img src="docs/images/cheat-library.png" width="200" alt="Cheat library"><br><sub><b>Cheat library · GoldHEN</b></sub></td>
-    <td align="center"><img src="docs/images/diagnostics.png" width="200" alt="Diagnostics"><br><sub><b>Connection diagnostics</b></sub></td>
-    <td align="center"><img src="docs/images/guide.png" width="200" alt="In-app guide"><br><sub><b>In-app guide</b></sub></td>
+    <td align="center"><img src="docs/images/memory-viewer.png" width="190" alt="Memory viewer"><br><sub><b>Hex viewer</b></sub></td>
+    <td align="center"><img src="docs/images/cheat-library.png" width="190" alt="Cheat library"><br><sub><b>Cheats · GoldHEN</b></sub></td>
+    <td align="center"><img src="docs/images/diagnostics.png" width="190" alt="Diagnostics"><br><sub><b>Diagnostics</b></sub></td>
+    <td align="center"><img src="docs/images/guide.png" width="190" alt="In-app guide"><br><sub><b>In-app guide</b></sub></td>
   </tr>
 </table>
-<img src="docs/images/tablet.png" width="820" alt="Tablet layout with navigation rail"><br>
-<sub>Tablet layout. Screenshots come from the automated UI tests against the mock ps4debug-NG server (not a PS4).</sub>
+<details><summary><b>Tablet layout</b></summary><br><img src="docs/images/tablet.png" width="820" alt="Tablet layout with navigation rail"></details>
+<sub>Screenshots from the automated UI tests, which run against a simulated ps4debug-NG server (not a real PS4).</sub>
 </div>
-
-## Install
-
-1. Download the newest APK from **[Releases](https://github.com/Hm589158/ps4-SmartCheat/releases)** on your phone
-   (Android 8.0 or newer) and allow *Install unknown apps* for your browser or file manager.
-2. Optional: verify it with the release's `SHA256SUMS.txt` (`sha256sum -c SHA256SUMS.txt`).
-
-| Build | File name | Package | Signed with |
-|---|---|---|---|
-| Test build (pre-release, published after every green CI run on `main`) | `PS4-SmartCheat-v1.2.3-build.N-test.apk` | `com.ps4smartcheat.app.debug` | CI debug key |
-| Release | `PS4-SmartCheat-v1.2.3.apk` | `com.ps4smartcheat.app` | owner's release key ([how](docs/RELEASE_SIGNING.md)) |
-
-## Quick start
-
-1. **PS4:** jailbreak with GoldHEN, load the **ps4debug-NG** payload (recommended), start the game.
-2. **App:** enter the PS4's local IP (port `744`) → **Connect**. The running game is detected and selected automatically.
-3. **Find:** Scanner → type the value you see (e.g. ammo `30`) → **First scan** → change it in the game → **Next scan**.
-4. **Edit:** Settings → *Enable memory editing* → tap the result → enter the new value → **Write** → confirm.
-5. **Keep:** tap **+** to add it to the game's address list; use *Find pointers…* for values that move every run.
-
-The in-app guide (ⓘ in the top bar) covers every step, including troubleshooting.
 
 ## Features
 
@@ -70,129 +91,126 @@ The in-app guide (ⓘ in the top bar) covers every step, including troubleshooti
 <tr><td width="50%" valign="top">
 
 **🔎 Fast scanning**
-- Three backends chosen automatically: **Turbo Scan** and **server-side scan** on the PS4 (ps4debug-NG, automatic
-  `CMD_PROC_AUTH`), falling back to an optimized **chunked scan on Android** ([measurements](docs/PERFORMANCE.md))
-- Int8 – Int64, Float, Double · exact, bigger/smaller than, value between, unknown initial, increased/decreased
-  (by), changed/unchanged
-- Live progress, elapsed time, MiB/s, network bytes and the backend used
-- Byte-pattern (AOB, `??` and nibble wildcards) and text search (ASCII/UTF-8, UTF-16LE)
-- Sessions saved after each step and resumable after an app restart
+- **Turbo Scan** and **server-side scan** run on the PS4. The app picks them automatically and falls back to scanning on
+  the phone ([benchmark](docs/PERFORMANCE.md))
+- Int8 – Int64, Float, Double · exact, bigger/smaller, between, unknown initial, increased/decreased (by),
+  changed/unchanged
+- Byte-pattern (AOB, `??` wildcards) and text search
+- Live progress, MiB/s and network traffic. Sessions resume after an app restart
 
 </td><td width="50%" valign="top">
 
 **🛡️ Safe editing**
-- Read-only by default; editing resets to off on every start
-- Every write shows current → new bytes, needs confirmation and is verified by a fresh read
+- Read-only until you enable editing. It turns off again every time the app starts
+- Every write shows the current → new bytes, needs your confirmation, and is checked by reading it back
 - Restore originals, confirmed **undo/redo**, freeze while connected
-- Raw byte patches in the hex viewer under the same rules
-- System processes and code regions blocked unless explicitly allowed
+- System processes and code regions are blocked unless you allow them
 
 </td></tr>
 <tr><td valign="top">
 
 **📌 Keep what you found**
-- Per-game **address list** (by title ID) with live values, freeze and edit
-- Module-relative entries (`eboot.bin+0x…`) that survive restarts
-- **Pointer scan**: pointer map built on the phone (spilled to disk for big games), backward search to static data,
-  filter chains after a restart, pointer entries followed on every read
-- Export/import address lists as JSON
+- Per-game **address list** with live values, freeze and edit
+- Addresses stored relative to the game executable survive restarts
+- **Pointer scan** for values that move every run: filter the chains after a restart
+- Export/import address lists
 
 </td><td valign="top">
 
 **🎮 Cheats and tools**
-- Cheat library with per-game profiles, validation before re-applying, JSON import/export
-- **GoldHEN** cheat export, and import that enables a mod only when memory matches its `off` bytes
-- Hex/ASCII memory viewer with live change highlighting
-- Game detection, exit/restart handling, automatic reconnection
-- Connection diagnostics, structured log export (JSON Lines), tablet layout
+- Cheat library with per-game profiles and JSON import/export
+- **GoldHEN** cheat export. Import enables a mod only if the game's memory matches the mod's original (`off`) bytes
+- Hex viewer with byte patches, game detection, automatic reconnect
+- Connection diagnostics, exportable event log, tablet layout
 
 </td></tr>
 </table>
+
+## Status
+
+**Beta (1.0.0-beta).** Feature-complete and passing every automated check on each commit. It is now being verified on
+real consoles.
+
+| Setup | Result |
+|---|---|
+| FW 11.00 · GoldHEN · ps4debug-NG **1.3.3** | **Reported working by the project owner:** connect, authentication, process list, Turbo Scan, next scans, writing a value in a game |
+| Same setup — tools added since 0.8 (address list, pointer scan, pattern search, byte patches, undo/redo, GoldHEN import, diagnostics) | Verified end to end against the simulated server. **Hardware reports wanted** |
+| ps4debug-NG **1.3.4** (current upstream) and other firmware supported by ps4debug-NG | Expected to work (same protocol). Not yet reported |
+| Classic / GoldHEN ps4debug | Not supported (untested compatibility mode only) |
+
+Tested something? Please file a **[hardware test report](https://github.com/Hm589158/ps4-SmartCheat/issues/new?template=hardware_report.yml)**.
+Details are in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+
+**Builds on the Releases page:** beta builds are named `PS4-SmartCheat-v1.0.0-beta.<build>.apk` and published
+automatically after every green CI run on `main`. They are debug-signed by CI (package `com.ps4smartcheat.app.debug`).
+Releases signed with the project key will use `com.ps4smartcheat.app` ([signing](docs/RELEASE_SIGNING.md)). Verify a
+download with its `SHA256SUMS.txt`.
 
 ## How it works
 
 ```mermaid
 flowchart LR
-    subgraph Phone["Android phone — PS4 SmartCheat"]
-        UI["Compose UI<br/>(scanner, editor, address list, cheats)"]
-        Core["core (pure Kotlin)<br/>protocol · scan · edit · pointer · watch"]
+    subgraph Phone["📱 Android — PS4 SmartCheat"]
+        UI["Compose UI"] --> Core["core: protocol · scans · editor · pointers"]
     end
-    subgraph PS4["PlayStation 4 — GoldHEN"]
-        NG["ps4debug-NG<br/>TCP 744"]
-        Game["Game process<br/>(eboot.bin)"]
+    subgraph PS4["🎮 PS4 — GoldHEN"]
+        NG["ps4debug-NG · TCP 744"] --> Game["Game process"]
     end
-    UI --> Core
-    Core -- "LAN · ps4debug protocol<br/>auth · Turbo/server scans · read/write" --> NG
-    NG -- "process memory" --> Game
+    Core -- "local network" --> NG
 ```
 
-- **Turbo Scan** keeps candidates on the console: only matches travel over Wi-Fi (kilobytes instead of tens of
-  megabytes per scan in the [benchmark](docs/PERFORMANCE.md)).
-- Every protocol command used is verified against upstream source and documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
-- The `core` module has no Android dependencies and is tested against an independent mock ps4debug-NG server over real TCP.
-
-## Compatibility
-
-| Console | Debugger | Status |
-|---|---|---|
-| FW 11.00 · GoldHEN | ps4debug-NG 1.3.3 | Core flow **reported working by the owner**: connect, auth, process list, Turbo Scan, refines, write in a game |
-| FW 11.00 · GoldHEN | ps4debug-NG 1.3.3 | Features since 0.8 (address list, pointer scan, patterns, undo/redo, GoldHEN import, diagnostics): mock-tested, hardware feedback welcome |
-| Other firmware / classic ps4debug | — | Expected to work in compatibility mode (Android-side scanning); not verified |
-
-Details and how to report results: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+**Turbo Scan** keeps the candidates on the console, so only the matches travel over Wi-Fi: kilobytes instead of tens of
+megabytes per scan. Every protocol command the app uses was checked against the ps4debug-NG source and is documented in
+[docs/PROTOCOL.md](docs/PROTOCOL.md). ps4debug has no authentication, so use it only on a trusted home network. The app
+refuses non-local addresses by default and sends nothing anywhere else.
 
 ## Building from source
 
 ```bash
 cd android
-./gradlew :core:test                      # 140+ JVM tests — no Android SDK needed
-./gradlew :app:testDebugUnitTest          # Robolectric end-to-end UI journeys (needs an Android SDK)
+./gradlew :core:test                      # 140+ JVM tests (no Android SDK needed)
+./gradlew :app:testDebugUnitTest          # end-to-end UI journeys (Android SDK)
 ./gradlew :app:assembleDebug              # debug APK
-./gradlew :mockserver:run --args="7440"   # simulated PS4 for trying the app without a console
+./gradlew :mockserver:run --args="7440"   # simulated PS4 to try the app without a console
 ```
 
-Requirements: JDK 17+, Android SDK (for `:app`). Toolchain: Gradle 8.14.3 (wrapper), AGP 8.11.1, Kotlin 2.2.21,
-Compose BOM 2025.08.00, min SDK 26, target SDK 36.
+JDK 17+, Android SDK for `:app`. Gradle 8.14.3, AGP 8.11.1, Kotlin 2.2.21, Compose BOM 2025.08.00, min SDK 26,
+target SDK 36.
 
-**Quality gates (CI on every push):** core + mock-server tests, scan benchmark, Robolectric end-to-end journeys with
-screenshots (published to the [`ci-screenshots`](https://github.com/Hm589158/ps4-SmartCheat/tree/ci-screenshots)
-branch), Android lint, APK build. Every green run on `main` publishes a test build to Releases.
+CI runs on every push:
+- core and mock-server tests and the scan benchmark;
+- UI journeys, with screenshots on the [`ci-screenshots`](https://github.com/Hm589158/ps4-SmartCheat/tree/ci-screenshots) branch;
+- lint and the APK build.
 
 <details>
 <summary><b>Project layout</b></summary>
 
 ```
-android/
-  core/        protocol client, scanners (Turbo / server / Android), editor, pointer scan, address list, cheats — pure Kotlin
-  mockserver/  independent ps4debug-NG emulation used by the tests and as a standalone simulator
-  app/         Jetpack Compose UI (MVVM), Robolectric end-to-end tests
-docs/          protocol, architecture, testing, performance, compatibility, roadmap, signing
-ps4-agent/     notes for an optional console-side component (not needed today)
+android/core/        protocol client, scanners, editor, pointer scan, address list, cheats (pure Kotlin)
+android/mockserver/  independent ps4debug-NG emulation for tests and manual trials
+android/app/         Jetpack Compose UI and end-to-end tests
+docs/                protocol, architecture, testing, performance, compatibility, roadmap, signing
 ```
 </details>
 
 ## Documentation
 
-| | |
-|---|---|
-| [Changelog](CHANGELOG.md) | What changed in every version |
-| [Protocol](docs/PROTOCOL.md) | ps4debug / ps4debug-NG commands used, with upstream sources |
-| [Architecture](docs/ARCHITECTURE.md) | Modules, packages and key decisions |
-| [Testing](docs/TESTING.md) | Test layers, mock server, E2E journeys |
-| [Performance](docs/PERFORMANCE.md) | Scan backend benchmark (mock) |
-| [Compatibility](docs/COMPATIBILITY.md) | Hardware reports |
-| [Release signing](docs/RELEASE_SIGNING.md) | Publishing signed releases |
-| [Roadmap](docs/ROADMAP.md) | What is done and what is next |
-| [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md) | How to help · how to report vulnerabilities |
+[Changelog](CHANGELOG.md) · [Protocol](docs/PROTOCOL.md) · [Architecture](docs/ARCHITECTURE.md) · [Testing](docs/TESTING.md) ·
+[Performance](docs/PERFORMANCE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Roadmap](docs/ROADMAP.md) ·
+[Release signing](docs/RELEASE_SIGNING.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
-## Acknowledgements
+## Credits and licenses
 
-[ps4debug-NG](https://github.com/Pharaoh2k/ps4debug-NG) (server-side and Turbo scanning) ·
-[jogolden/ps4debug](https://github.com/jogolden/ps4debug) (original protocol) ·
-[PS4CheaterNeo](https://github.com/avan06/PS4CheaterNeo) (client reference, GoldHEN cheat format) ·
-[GoldHEN](https://github.com/GoldHEN) and its [cheat repository](https://github.com/GoldHEN/GoldHEN_Cheat_Repository).
+- **[ps4debug-NG](https://github.com/Pharaoh2k/ps4debug-NG)** — the debugger payload this app depends on. It is a
+  clean-room rewrite by **OSR (OpenSourcereR)**, published by **Pharaoh2k**, and licensed under **GPL-3.0**. It builds on
+  **jogolden**'s original [ps4debug](https://github.com/jogolden/ps4debug) and on **Ctn & SiSTRo**'s ps4debug v1.1.19.
+- [PS4CheaterNeo](https://github.com/avan06/PS4CheaterNeo) by **avan06**: client reference and GoldHEN cheat format.
+- [GoldHEN](https://github.com/GoldHEN/GoldHEN) and its [cheat repository](https://github.com/GoldHEN/GoldHEN_Cheat_Repository).
 
-## License
+**This repository does not bundle or redistribute ps4debug-NG.** Download it from its official releases. If you
+redistribute it, follow its GPL-3.0 terms:
+- keep the license and attribution, including the credit to the original authors;
+- provide the complete corresponding source for any binary you distribute, modified or not.
 
-[MIT](LICENSE). PlayStation and PS4 are trademarks of Sony Interactive Entertainment. This project is not affiliated
-with or endorsed by Sony.
+PS4 SmartCheat itself is released under the [MIT License](LICENSE). PlayStation and PS4 are trademarks of Sony Interactive
+Entertainment. This project is not affiliated with or endorsed by Sony.

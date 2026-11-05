@@ -9,17 +9,28 @@ KIND="$2"
 APK="$3"
 SHA="$4"
 BASE="${VERSION_NAME%%-*}"            # 1.0.0
+# Changelog heading for this build: 1.0.0-beta.53 -> 1.0.0-beta, 1.0.0-build.46 -> 1.0.0
+CHAN="$(echo "$VERSION_NAME" | sed -E 's/-build\.[0-9]+$//; s/(-beta)\.[0-9]+$/\1/')"
+BETA=no; case "$VERSION_NAME" in *-beta*) BETA=yes ;; esac
 REPO="${GITHUB_REPOSITORY:-Hm589158/ps4-SmartCheat}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
-changes="$(awk -v v="## ${BASE}" -v full="## ${VERSION_NAME}" '
-  $0 == v || index($0, v " ") == 1 || $0 == full || index($0, full " ") == 1 { on = 1; next }
+changes="$(awk -v v="## ${BASE}" -v full="## ${VERSION_NAME}" -v chan="## ${CHAN}" '
+  $0 == v || index($0, v " ") == 1 || $0 == full || index($0, full " ") == 1 || $0 == chan || index($0, chan " ") == 1 { on = 1; next }
   on && /^## / { exit }
   on { print }
 ' "$ROOT/CHANGELOG.md")"
 [ -n "${changes//[[:space:]]/}" ] || changes="See [CHANGELOG.md](https://github.com/${REPO}/blob/main/CHANGELOG.md)."
 
-if [ "$KIND" = "release" ]; then
+if [ "$BETA" = yes ]; then
+  if [ "$KIND" = release ]; then SIGN="Signed with the release key (package \`com.ps4smartcheat.app\`)."
+  else SIGN="Debug-signed by CI (package \`com.ps4smartcheat.app.debug\`); if Android reports a signature conflict, uninstall the previous build first."; fi
+  cat <<EOF
+> [!NOTE]
+> **Beta** — feature-complete and passing every automated check; still being verified on real consoles. ${SIGN}
+> Please report what works and what does not: [hardware test report](https://github.com/${REPO}/issues/new?template=hardware_report.yml).
+EOF
+elif [ "$KIND" = "release" ]; then
   cat <<EOF
 **Signed release** of PS4 SmartCheat ${BASE} (package \`com.ps4smartcheat.app\`). Updates an earlier signed release in place.
 EOF
@@ -44,12 +55,12 @@ cat <<EOF
 ## Install
 
 1. Download the APK on the phone and allow *Install unknown apps* for the browser or file manager.
-2. On the PS4: GoldHEN → load **ps4debug-NG** (recommended) → start the game.
+2. On the PS4: GoldHEN → load **[ps4debug-NG](https://github.com/Pharaoh2k/ps4debug-NG/releases)** (required) → start the game.
 3. In the app: enter the PS4's local IP (port 744) → **Connect**. The running game is selected automatically.
 
 The in-app guide (ⓘ) walks through scanning, safe editing, the address list and pointer scans.
 
-## What's new in ${BASE}
+## What's new in ${CHAN}
 
 ${changes}
 

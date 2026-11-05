@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping! The most valuable contribution right now is a **hardware test report**
+Thanks for helping! PS4 SmartCheat is in **beta**, so the most valuable contribution right now is a **hardware test report**
 ([open one](https://github.com/Hm589158/ps4-SmartCheat/issues/new?template=hardware_report.yml)): which features
 worked on your console, firmware and debugger version, scan times and the diagnostics latency.
 

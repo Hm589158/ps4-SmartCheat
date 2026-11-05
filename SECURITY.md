@@ -2,9 +2,10 @@
 
 ## Reporting a vulnerability
 
-Please report security problems **privately** through
-[GitHub security advisories](https://github.com/Hm589158/ps4-SmartCheat/security/advisories/new) instead of a public
-issue. Include the app version, what an attacker could do and how to reproduce it.
+Please report security problems **privately**: open the repository's **Security** tab → **Report a vulnerability**
+(GitHub private vulnerability reporting). If that button is not available, open an issue titled "Security contact" without
+any details and a private channel will be arranged. Include the app version, what an attacker could do and how to
+reproduce it.
 
 ## Threat model in short
 

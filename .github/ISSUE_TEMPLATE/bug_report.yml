@@ -26,7 +26,7 @@ body:
       label: Debugger payload
       options:
         - ps4debug-NG (version below)
-        - GoldHEN ps4debug (classic)
+        - Classic ps4debug (not supported)
         - Mock server (no PS4)
         - Other
     validations:

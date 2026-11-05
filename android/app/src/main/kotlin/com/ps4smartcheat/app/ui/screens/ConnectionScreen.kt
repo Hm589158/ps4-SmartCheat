@@ -145,6 +145,10 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                             add("Android")
                         }.joinToString(" → "),
                     )
+                    if (!caps.isNg) WarningBanner(
+                        "Classic ps4debug detected. Use ps4debug-NG for scanning and editing: it is the debugger this app is " +
+                            "built and tested for (github.com/Pharaoh2k/ps4debug-NG). Classic ps4debug runs in an untested compatibility mode.",
+                    )
                     if (caps.isNg && !caps.scanAuthorized) Text("ps4debug-NG detected but the scan handshake failed; scans run on Android.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }
             }
@@ -157,12 +161,14 @@ fun ConnectionScreen(onConnected: () -> Unit) {
         )
         SectionCard("Before connecting") {
             Text(
-                "1. Jailbroken PS4 with GoldHEN.\n2. Load the ps4debug-NG payload (recommended; classic ps4debug works without server-side scanning).\n" +
-                    "3. Phone and PS4 on the same Wi-Fi/LAN.\n4. Start the offline game you want to inspect.",
+                "1. Jailbroken PS4 with GoldHEN.\n2. Send ps4debug-NG (ps4debug-ng_…bin from github.com/Pharaoh2k/ps4debug-NG/releases) " +
+                    "to the payload loader — required for scanning and editing.\n" +
+                    "3. Phone and PS4 on the same Wi-Fi/LAN.\n4. Start the offline game, then connect to the PS4's IP on port 744.",
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "Real-console compatibility has not been verified by this project yet; see docs/COMPATIBILITY.md.",
+                "Beta: the core flow (connect, Turbo Scan, write) is reported working on FW 11.00 + GoldHEN + ps4debug-NG 1.3.3; " +
+                    "newer tools are still being verified on hardware. Report problems on GitHub.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

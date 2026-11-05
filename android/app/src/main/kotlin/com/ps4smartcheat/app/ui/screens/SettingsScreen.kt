@@ -172,13 +172,15 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
             log.takeLast(100).reversed().forEach { Text(it.format(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
         }
         SectionCard("About") {
-            Text("PS4 SmartCheat ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE})")
+            Text("PS4 SmartCheat ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE})" + if (BuildConfig.VERSION_NAME.contains("beta")) " — Beta" else "")
             Text(
-                "Primary backend: ps4debug-NG (port 744) with automatic CMD_PROC_AUTH for server-side scanning; classic ps4debug is " +
-                    "supported in compatibility mode. Tested against an automated mock server only; " +
-                    "real PS4 11.00 + GoldHEN behaviour is pending hardware verification. For offline games and homebrew you control.",
+                "Requires ps4debug-NG (port 744; by OSR, github.com/Pharaoh2k/ps4debug-NG, GPL-3.0) — the app authenticates " +
+                    "automatically for server-side and Turbo scanning. Core flow reported working on FW 11.00 + GoldHEN + " +
+                    "ps4debug-NG 1.3.3; features added since 0.8 are verified against the mock server and in beta testing on " +
+                    "hardware. For offline games and homebrew on your own console.",
                 style = MaterialTheme.typography.bodySmall,
             )
+            Text("Report issues: github.com/Hm589158/ps4-SmartCheat/issues", style = MaterialTheme.typography.bodySmall)
         }
     }
 

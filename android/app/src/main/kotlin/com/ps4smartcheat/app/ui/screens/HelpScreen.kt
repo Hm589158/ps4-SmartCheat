@@ -21,7 +21,7 @@ private val sections = listOf(
     HelpSection(
         "1. Connect",
         listOf(
-            "On the PS4 (jailbroken, GoldHEN): load ps4debug-NG (recommended) or GoldHEN's ps4debug.",
+            "On the PS4 (jailbroken, GoldHEN): send ps4debug-NG to the payload loader (port 9020 or 9021, depending on the jailbreak). Download: github.com/Pharaoh2k/ps4debug-NG/releases. ps4debug-NG is required for scanning and editing.",
             "Phone and PS4 on the same local network. Enter the PS4's IP, port 744, tap Connect.",
             "ps4debug-NG unlocks Turbo Scan and server-side scans automatically (authentication is handled by the app).",
         ),
@@ -66,7 +66,7 @@ private val sections = listOf(
 @Composable
 fun HelpScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp).testTag("help"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        WarningBanner("Offline, single-player use on your own console only. No online play, anti-cheat bypass or save editing. ps4debug has no authentication: use it only on a trusted local network.")
+        WarningBanner("Beta. Offline, single-player use on your own console only. No online play, anti-cheat bypass or save editing. ps4debug has no authentication: use it only on a trusted local network.")
         sections.forEach { s ->
             SectionCard(s.title) {
                 s.steps.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }

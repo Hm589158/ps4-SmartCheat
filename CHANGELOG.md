@@ -2,7 +2,16 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
-## 1.0.0
+## 1.0.0-beta
+- **Beta.** Version 1.0.0-beta: feature-complete, every automated check green, hardware verification in progress.
+  Builds are published as `v1.0.0-beta.<build>` ("PS4 SmartCheat v1.0.0 Beta · build N",
+  `PS4-SmartCheat-v1.0.0-beta.<build>.apk`).
+- ps4debug-NG is required for scanning and editing: the connection screen warns when a classic ps4debug is detected,
+  the guide and About name the download, its author (OSR / Pharaoh2k) and license (GPL-3.0). Compatibility texts in
+  the app now match the owner's hardware report instead of saying nothing was verified.
+- README: "Required downloads" (app, ps4debug-NG with a direct link to the current payload file and its SHA-256),
+  five-step setup (GoldHEN → ps4debug-NG → port 744), status table without contradictions, credits and GPL-3.0
+  redistribution note. docs/COMPATIBILITY.md rewritten from the same facts.
 - Connection diagnostics (Settings → Connection diagnostics): debugger, firmware, auth and Turbo engines, traffic,
   idle time, automatic reconnects, measured link, a 5-request latency test (CMD_VERSION only — no game memory is
   read) and the recent warnings/errors.
