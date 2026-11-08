@@ -56,8 +56,11 @@ The mock is an independent implementation of the server side over real TCP, with
   command on older payloads, whole-instruction planning with NOP padding and refusals, ON/OFF that really changes the
   demo game's behaviour, library round trip, GoldHEN groups and running-title check, switching from the library.
 * `AccessMonitorTest` – find what writes/accesses with the mock debugger (instruction, count, registers, effective
-  address), stop and detach, busy debugger, dropped connection ends the session, failed connect-back, port in use,
-  watchpoint alignment/slot checks, SIGCONT, interrupt packet layout.
+  address), stop and detach, busy debugger, dropped connection ends the session, port in use, watchpoint
+  alignment/slot checks, SIGCONT, interrupt packet layout; extended attach (PR #1): the announced port is used with
+  nothing configured on the mock, body bytes equal the PR's example, out-of-range port rejected before attaching,
+  unpatched payload explained (and its leftover attachment emulated), unpatched payload served through the legacy
+  listener when it can be opened, fallback to a free port.
 * `SessionValidatorTest` – after a restart: module entries valid, absolute entries unverified, broken pointers
   invalid; moved code found again by signature; patched state recognised; pointer candidates ranked over three
   restarts by consensus and by a confirmed address; activity probe; error advice.

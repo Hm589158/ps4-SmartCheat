@@ -36,8 +36,11 @@ class AccessMonitorTest {
 
     private fun connect() = runBlocking { client.connect(ConnectOptions("127.0.0.1", server.port, readTimeoutMs = 3000)) }
 
-    /** Listener on a free high port; the mock is told to connect there instead of 755. */
-    private fun listener(): InterruptListener = InterruptListener.open(0, InetAddress.getLoopbackAddress()).also { server.faults.debugPort = it.port }
+    /**
+     * Listener as the app opens it, but on any free port and without the legacy 755 socket. Nothing is configured on
+     * the mock: the extended attach request tells it where to connect.
+     */
+    private fun listener(): InterruptListener = InterruptListener.open(0, InetAddress.getLoopbackAddress(), legacyPort = null)
 
     /** The game runs its routine [times] times once the watchpoint is in place. */
     private fun gameLoop(times: Int, pauseMs: Long = 5) = thread(isDaemon = true) {
@@ -130,19 +133,79 @@ class AccessMonitorTest {
         session.close()
     }
 
-    @Test fun attachFailsCleanlyWhenThePs4CannotConnectBack() = runBlocking {
+    @Test fun extendedAttachAnnouncesTheListenerPort() = runBlocking {
         connect()
         val l = listener()
-        server.faults.debugPort = ServerSocket(0).use { it.localPort } // nothing listens there
-        try { DebugSession.attach(client, DemoGame.PID, l); fail() } catch (e: DebuggerException) { assertTrue(e.message!!.contains("connect back")) }
+        assertEquals(755, server.faults.debugPort) // nothing configured on the "PS4"
+        val session = DebugSession.attach(client, DemoGame.PID, l)
+        assertEquals(l.port, server.lastAttachPort)
+        session.detach()
+    }
+
+    @Test fun attachBodyMatchesThePullRequestExample() {
+        // PROTOCOL.md (PR #1): pid 0x55, client 192.168.1.10, port 7550.
+        val body = DebugProtocol.attachBody(0x55, byteArrayOf(192.toByte(), 168.toByte(), 1, 10), 7550)
+        assertEquals("55000000C0A8010A7E1D0000", com.ps4smartcheat.core.util.Hex.encode(body))
+        assertEquals(DebugProtocol.ATTACH_EX_PACKET_SIZE, body.size)
+        try { DebugProtocol.attachBody(1, ByteArray(4), 70000); fail() } catch (_: IllegalArgumentException) {}
+    }
+
+    @Test fun serverRejectsAnOutOfRangePortWithoutAttaching() = runBlocking {
+        connect()
+        // Raw request as a buggy client would send it: debug_port > 65535 → CMD_ERROR before PT_ATTACH.
+        val st = client.exclusive("raw attach") { w ->
+            w.send(w.header(DebugProtocol.CMD_DEBUG_ATTACH, 12), com.ps4smartcheat.core.util.LE.bytes32(DemoGame.PID.toLong()) + byteArrayOf(127, 0, 0, 1) + com.ps4smartcheat.core.util.LE.bytes32(70000))
+            w.readU32().also { w.invalidate() }
+        }
+        assertEquals(com.ps4smartcheat.core.protocol.Ps4DebugProtocol.CMD_ERROR, st)
         assertFalse(server.debugAttached)
+        assertEquals(null, server.orphanedAttachPid)
+    }
+
+    @Test fun unpatchedPayloadFailsWithAClearExplanation() = runBlocking {
+        server.faults.attachPortOption = false // ignores debug_port and connects to 755
+        server.faults.debugPort = ServerSocket(0).use { it.localPort } // nothing listens there (Android cannot bind 755)
+        connect()
+        try {
+            DebugSession.attach(client, DemoGame.PID, listener()); fail()
+        } catch (e: DebuggerException) {
+            assertTrue(e.message!!, e.message!!.contains("PR #1"))
+            assertTrue(e.message!!.contains("Restart the game"))
+            assertEquals("Debugger could not attach", ErrorAdvisor.diagnose(e).title)
+        }
+        assertFalse(server.debugAttached)
+        assertEquals(DemoGame.PID, server.orphanedAttachPid) // what the real server leaves behind
         assertEquals(1, client.getProcesses().count { it.pid == DemoGame.PID }) // connection usable again
+    }
+
+    @Test fun unpatchedPayloadWorksWhenTheLegacyPortCanBeOpened() = runBlocking {
+        // Desktop / rooted case: the listener also binds the legacy port, so an unpatched payload connects there.
+        val legacy = ServerSocket(0).use { it.localPort }
+        server.faults.attachPortOption = false
+        server.faults.debugPort = legacy
+        connect()
+        val l = InterruptListener.open(0, InetAddress.getLoopbackAddress(), legacyPort = legacy)
+        assertEquals(legacy, l.legacyPort)
+        val session = DebugSession.attach(client, DemoGame.PID, l)
+        val game = gameLoop(2)
+        val r = withTimeout(20_000) { AccessMonitor(client).run(session, DemoGame.COINS_ADDRESS, 4, MonitorOptions(WatchType.WRITES, maxHits = 2)) }
+        game.join(5000)
+        assertEquals(2, r.hits)
+    }
+
+    @Test fun listenerFallsBackToAFreePortWhenThePreferredOneIsTaken() {
+        ServerSocket(0).use { busy ->
+            InterruptListener.open(busy.localPort, InetAddress.getLoopbackAddress(), legacyPort = null).use { l ->
+                assertTrue(l.port != busy.localPort && l.port > 0)
+                assertEquals(null, l.legacyPort)
+            }
+        }
     }
 
     @Test fun listenerReportsAPortThatCannotBeUsed() {
         ServerSocket(0).use { busy ->
             try {
-                InterruptListener.open(busy.localPort, InetAddress.getLoopbackAddress()).close(); fail()
+                InterruptListener.openExactly(busy.localPort, InetAddress.getLoopbackAddress()).close(); fail()
             } catch (e: ListenerUnavailableException) {
                 assertEquals("Interrupt connection unavailable", ErrorAdvisor.diagnose(e).title)
             }

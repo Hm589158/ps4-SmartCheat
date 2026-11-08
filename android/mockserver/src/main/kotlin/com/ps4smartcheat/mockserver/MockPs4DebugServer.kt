@@ -104,8 +104,13 @@ class MockPs4DebugServer(
         @Volatile var codeTools = true
         /** Debugger commands (0xBDBBxxxx). */
         @Volatile var debugger = true
-        /** Port the mock connects back to on CMD_DEBUG_ATTACH (the real server always uses 755). */
+        /** Port the mock connects back to when the attach request names none (the real default is 755). */
         @Volatile var debugPort = 755
+        /**
+         * Emulates ps4debug-NG with the configurable interrupt port (PR #1): a 12-byte attach body selects the
+         * connect-back port. false = an unpatched build that ignores the field and always uses [debugPort].
+         */
+        @Volatile var attachPortOption = true
 
         fun enableNg(turbo: Boolean = true) {
             brand = "ps4debug-NG by OSR v1.3.3 (MOCK)"
@@ -169,6 +174,7 @@ class MockPs4DebugServer(
     /** Simulates the game exiting. */
     fun killProcess(pid: Int) {
         processes.removeIf { it.pid == pid }
+        if (orphanedAttachPid == pid) orphanedAttachPid = null
     }
 
     /** Simulates the game being closed and started again: same program and memory layout, new pid. */
@@ -454,6 +460,14 @@ class MockPs4DebugServer(
     @Volatile var lastProcessStop: Pair<Int, Int>? = null
         private set
     val debugAttached: Boolean get() = debug != null
+    /** Port the last successful or attempted connect-back went to (for tests). */
+    @Volatile var lastAttachPort: Int? = null
+        private set
+    /**
+     * pid left ptrace-attached without a session because the connect-back failed — what the real server does
+     * (it attaches before connecting back). Cleared when the game exits or restarts.
+     */
+    @Volatile var orphanedAttachPid: Int? = null
     fun watchpoints(): List<Watchpoint?> = debug?.watch?.toList() ?: emptyList()
 
     private inner class DebugEmulation {
@@ -490,11 +504,20 @@ class MockPs4DebugServer(
             if (debug != null) { status(out, CMD_ALREADY_DEBUG); return false }
             if (body.capacity() < 4) { status(out, CMD_DATA_NULL); return false }
             val pid = body.int
-            if (process(pid) == null) { status(out, CMD_ERROR); return false }
-            val ip = if (body.capacity() >= 8) ByteArray(4).also { body.get(it) } else InetAddress.getLoopbackAddress().address
+            // debug_port.h debug_attach_resolve_port: validated before PT_ATTACH, so a bad port never attaches.
+            var port = faults.debugPort
+            if (faults.attachPortOption && body.capacity() >= 12) {
+                val requested = body.getInt(8).toLong() and 0xFFFFFFFFL
+                if (requested > 0xFFFF) { status(out, CMD_ERROR); return false }
+                if (requested != 0L) port = requested.toInt()
+            }
+            if (process(pid) == null || orphanedAttachPid == pid) { status(out, CMD_ERROR); return false } // PT_ATTACH fails
+            val ip = if (body.capacity() >= 8) ByteArray(4).also { body.position(4); body.get(it) } else InetAddress.getLoopbackAddress().address
+            lastAttachPort = port
             val events = try {
-                Socket().apply { tcpNoDelay = true; connect(InetSocketAddress(InetAddress.getByAddress(ip), faults.debugPort), 2000) }
+                Socket().apply { tcpNoDelay = true; connect(InetSocketAddress(InetAddress.getByAddress(ip), port), 2000) }
             } catch (e: IOException) {
+                orphanedAttachPid = pid // attached by ptrace, but no session (upstream behaviour)
                 status(out, CMD_ERROR); return false
             }
             debug = DebugState(pid, conn, events)

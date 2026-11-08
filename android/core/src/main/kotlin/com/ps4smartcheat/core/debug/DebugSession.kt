@@ -11,7 +11,6 @@ import java.io.Closeable
 import java.io.DataInputStream
 import java.io.EOFException
 import java.io.IOException
-import java.net.BindException
 import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
@@ -20,51 +19,89 @@ import java.net.Socket
 import java.net.SocketException
 import java.net.SocketTimeoutException
 
-/** The interrupt listener could not be opened (on Android: ports below 1024 need root). */
+/** No port could be opened for the debugger's interrupt connection. */
 class ListenerUnavailableException(val port: Int, message: String, cause: Throwable? = null) : BackendException(message, cause)
 
 class DebuggerException(message: String, status: Long = Ps4DebugProtocol.CMD_ERROR) : CommandFailedException(0, status, message)
 
 /**
- * Listens for the debugger's interrupt connection. ps4debug-NG connects *from the PS4 to the client* on port 755
- * when attaching (debug.c `connect_debugger`), so this socket must be open before the attach request is sent.
+ * Listens for the debugger's interrupt connection, which ps4debug-NG opens *from the PS4 to the client* while
+ * attaching (debug.c `connect_debugger`), so it must exist before the attach request is sent.
  *
- * Android apps without root cannot bind ports below 1024. Then a relay on the local network can listen on 755 and
- * forward to this listener on a high port (see docs/WATCHPOINTS.md); the relay's address is announced in the attach
- * request instead of the phone's.
+ * The app listens on a high port ([port], normally 7550 — no root needed) and announces it in the extended attach
+ * request; ps4debug-NG with the configurable interrupt port connects there. When the device also allows binding the
+ * legacy port 755 (root, desktop JVM), that is opened too, so payloads without the change still work.
  */
-class InterruptListener private constructor(private val server: ServerSocket) : Closeable {
-    val port: Int get() = server.localPort
+class InterruptListener private constructor(private val sockets: List<ServerSocket>) : Closeable {
+    /** The port announced in the attach request. */
+    val port: Int get() = sockets[0].localPort
+    /** The legacy port (755) when it could be opened as well; null otherwise (normal on Android). */
+    val legacyPort: Int? get() = sockets.getOrNull(1)?.localPort
 
-    /** Waits for the PS4's connection (normally already queued once the attach request succeeded). */
+    /**
+     * Waits for the PS4's connection on any of the ports (normally already queued once the attach request
+     * succeeded).
+     */
     fun accept(timeoutMs: Int): InterruptChannel {
-        server.soTimeout = timeoutMs
-        val s = try { server.accept() } catch (e: SocketTimeoutException) {
-            throw BackendException("The PS4 did not open the interrupt connection within ${timeoutMs / 1000} s")
+        val deadline = System.currentTimeMillis() + timeoutMs
+        while (true) {
+            for (server in sockets) {
+                server.soTimeout = if (sockets.size == 1) timeoutMs.coerceAtLeast(1) else 50
+                try {
+                    val s = server.accept()
+                    s.tcpNoDelay = true
+                    return InterruptChannel(s)
+                } catch (e: SocketTimeoutException) {
+                    // try the next socket
+                }
+            }
+            if (System.currentTimeMillis() >= deadline) {
+                throw BackendException("The PS4 did not open the interrupt connection within ${timeoutMs / 1000} s")
+            }
         }
-        s.tcpNoDelay = true
-        return InterruptChannel(s)
     }
 
-    override fun close() { runCatching { server.close() } }
+    override fun close() { sockets.forEach { runCatching { it.close() } } }
 
     companion object {
-        fun open(port: Int = DebugProtocol.DEFAULT_INTERRUPT_PORT, bindAddress: InetAddress? = null): InterruptListener {
+        /**
+         * Opens the listener automatically: [preferredPort] (7550), or any free port if it is taken, plus
+         * [legacyPort] (755) when the system allows it. Throws [ListenerUnavailableException] only when no port at
+         * all can be opened.
+         */
+        fun open(
+            preferredPort: Int = DebugProtocol.PREFERRED_INTERRUPT_PORT,
+            bindAddress: InetAddress? = null,
+            legacyPort: Int? = DebugProtocol.DEFAULT_INTERRUPT_PORT,
+        ): InterruptListener {
+            val primary = tryBind(preferredPort, bindAddress) ?: tryBind(0, bindAddress)
+                ?: throw ListenerUnavailableException(preferredPort, "Cannot open a network port for the debugger's interrupt connection.")
+            val legacy = legacyPort?.takeIf { it != primary.localPort }?.let { tryBind(it, bindAddress) }
+            return InterruptListener(listOfNotNull(primary, legacy))
+        }
+
+        /** Listens on exactly [port]; throws [ListenerUnavailableException] if it cannot be opened. */
+        fun openExactly(port: Int, bindAddress: InetAddress? = null): InterruptListener {
             require(port in 0..65535) { "port out of range" }
+            val s = tryBind(port, bindAddress)
+                ?: throw ListenerUnavailableException(port, "Cannot listen on port $port for the debugger's interrupt connection (in use or not allowed).")
+            return InterruptListener(listOf(s))
+        }
+
+        private fun tryBind(port: Int, bindAddress: InetAddress?): ServerSocket? {
+            if (port !in 0..65535) return null
             val s = ServerSocket()
-            try {
+            return try {
                 s.reuseAddress = true
                 s.bind(InetSocketAddress(bindAddress, port), 1)
-            } catch (e: BindException) {
+                s
+            } catch (e: IOException) {
                 runCatching { s.close() }
-                val why = if (port < 1024) "Android allows apps to listen on ports below 1024 only with root. " +
-                    "Use an interrupt relay on your network (Settings → Debugger)." else "Port $port is in use or not allowed."
-                throw ListenerUnavailableException(port, "Cannot listen on port $port for the debugger's interrupt connection. $why", e)
-            } catch (e: SocketException) {
+                null
+            } catch (e: SecurityException) {
                 runCatching { s.close() }
-                throw ListenerUnavailableException(port, "Cannot listen on port $port: ${e.message}", e)
+                null
             }
-            return InterruptListener(s)
         }
     }
 }
@@ -165,8 +202,9 @@ class DebugSession private constructor(
 
     companion object {
         /**
-         * Attaches to [pid]. [listener] must already be open. [announce] is the IPv4 address the PS4 connects to
-         * (default: this device's address on the command connection; a relay's address when one is used).
+         * Attaches to [pid] with the extended request carrying [InterruptListener.port], so ps4debug-NG connects
+         * back to that high port. [listener] must already be open. [announce] is the IPv4 address the PS4 connects
+         * to (default: this device's address on the command connection).
          */
         suspend fun attach(
             t: ServerScanTransport,
@@ -181,15 +219,17 @@ class DebugSession private constructor(
             val epoch = t.connectionEpoch
             try {
                 t.exclusive("debug attach") { w ->
-                    w.send(w.header(DebugProtocol.CMD_DEBUG_ATTACH, DebugProtocol.ATTACH_PACKET_SIZE), LE.bytes32(pid.toLong()) + ip.address)
+                    w.send(
+                        w.header(DebugProtocol.CMD_DEBUG_ATTACH, DebugProtocol.ATTACH_EX_PACKET_SIZE),
+                        DebugProtocol.attachBody(pid, ip.address, listener.port),
+                    )
                     val st = w.readU32()
                     if (st != Ps4DebugProtocol.CMD_SUCCESS) {
                         w.invalidate() // the attach handler returns 1 on failure: the server closes the connection
                         throw DebuggerException(
                             when (st) {
                                 Ps4DebugProtocol.CMD_ALREADY_DEBUG -> "Another debugger session is active on the PS4 (another tool, or a session that did not end). Close it or reload ps4debug-NG."
-                                else -> "The PS4 could not attach to the process or could not connect back to ${ip.hostAddress}:${DebugProtocol.DEFAULT_INTERRUPT_PORT} (${Ps4DebugProtocol.statusName(st)}). " +
-                                    "If the interrupt connection failed, restart the game before trying again."
+                                else -> attachFailure(ip.hostAddress ?: "?", listener, Ps4DebugProtocol.statusName(st))
                             },
                             st,
                         )
@@ -208,6 +248,16 @@ class DebugSession private constructor(
                 throw BackendException("Attached, but the interrupt connection did not arrive: ${e.message}. Detached again.", e)
             }
             return DebugSession(t, pid, listener, channel, epoch)
+        }
+
+        /** Explains a failed attach; the most likely cause is a payload without the configurable interrupt port. */
+        internal fun attachFailure(ip: String, listener: InterruptListener, status: String): String = buildString {
+            append("The PS4 could not attach to the game or could not connect back to this device ($ip:${listener.port}; $status). ")
+            if (listener.legacyPort == null) {
+                append("Watchpoints need a ps4debug-NG build with the configurable interrupt port (Pharaoh2k/ps4debug-NG PR #1); ")
+                append("older builds always connect to port ${DebugProtocol.DEFAULT_INTERRUPT_PORT}, which Android apps cannot open. ")
+            }
+            append("Restart the game before trying again: after a failed connection the payload may leave it attached.")
         }
 
         /** Sends SIGCONT to a process that was stopped (CMD_DEBUG_PROCESS_STOP state 0). Only without a debug session. */

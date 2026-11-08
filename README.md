@@ -140,7 +140,8 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
   hit count, thread and registers; open it in the disassembler
 - **Check after restart**: address list, pointers, value cheats and code patches; moved code is found again by its
   signature. **Pointer candidates** ranked by how often they survive restarts
-- Needs the PS4 to reach the phone on port 755 (root, or a small relay on a PC — [guide](docs/WATCHPOINTS.md))
+- No root and no relay: the app picks a high port for the debugger automatically. Needs a ps4debug-NG build with the
+  configurable interrupt port ([PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1), not merged yet — [details](docs/WATCHPOINTS.md))
 
 </td></tr>
 </table>
@@ -154,7 +155,7 @@ real consoles.
 |---|---|
 | FW 11.00 · GoldHEN · ps4debug-NG **1.3.3** | **Reported working by the project owner:** connect, authentication, process list, Turbo Scan, next scans, writing a value in a game |
 | Same setup — tools added since 0.8 (address list, pointer scan, pattern search, byte patches, undo/redo, GoldHEN import, diagnostics) | Verified end to end against the simulated server. **Hardware reports wanted** |
-| Assembly ON/OFF patches, assembler, reference search, watchpoints (What writes / accesses), session check | Implemented from the ps4debug-NG **1.3.4** source and verified against the simulated server only. **Hardware reports wanted** |
+| Assembly ON/OFF patches, assembler, reference search, watchpoints (What writes / accesses), session check | Implemented from the ps4debug-NG **1.3.4** source (watchpoints: plus [PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1)) and verified against the simulated server only. **Hardware reports wanted** |
 | ps4debug-NG **1.3.4** (current upstream) and other firmware supported by ps4debug-NG | Expected to work (same protocol). Not yet reported |
 | Classic / GoldHEN ps4debug | Not supported (untested compatibility mode only) |
 
@@ -217,7 +218,7 @@ docs/                protocol, architecture, testing, performance, compatibility
 
 [Changelog](CHANGELOG.md) · [Protocol](docs/PROTOCOL.md) · [Architecture](docs/ARCHITECTURE.md) · [Testing](docs/TESTING.md) ·
 [Performance](docs/PERFORMANCE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Roadmap](docs/ROADMAP.md) ·
-[Release signing](docs/RELEASE_SIGNING.md) · [Watchpoints & relay](docs/WATCHPOINTS.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Release signing](docs/RELEASE_SIGNING.md) · [Watchpoints](docs/WATCHPOINTS.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 ## Credits and licenses
 

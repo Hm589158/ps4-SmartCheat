@@ -25,8 +25,8 @@ Only the commands listed under "Used by PS4 SmartCheat" are sent by the app.
   `CMD_DATA_NULL 0xF0000003`, `CMD_ALREADY_DEBUG 0xF0000004`, `CMD_INVALID_INDEX 0xF0000005`.
 * **When a handler returns an error the server usually closes the connection** (`server.c`: `if (r) goto error`).
   The client therefore drops the socket after an error status and reconnects transparently on the next request.
-* UDP 1010 discovery (`0xFFFFAAAA` echo) exists but is **not used**. The TCP 755 debug-interrupt channel is used only
-  by "What writes / accesses" (see *Debugger*).
+* UDP 1010 discovery (`0xFFFFAAAA` echo) exists but is **not used**. The TCP debug-interrupt channel (755 by default,
+  a client-chosen port with PR #1) is used only by "What writes / accesses" (see *Debugger*).
 
 ## Used by PS4 SmartCheat — verified layouts
 
@@ -166,7 +166,7 @@ writes, single-stepping and FS/GS writes are not used.
 
 | Command | Body | Reply | Source |
 |---|---|---|---|
-| `CMD_DEBUG_ATTACH 0xBDBB0001` | `u32 pid; u32 client_ip` (network byte order) | `CMD_SUCCESS` / `CMD_ALREADY_DEBUG` / `CMD_ERROR` (closes) | `debug.c` `debug_attach_handle_svc`, routed in `server.c` |
+| `CMD_DEBUG_ATTACH 0xBDBB0001` | `u32 pid; u32 client_ip` (network byte order); **sent as** `u32 pid; u32 client_ip; u32 debug_port` (12 bytes, PR #1) | `CMD_SUCCESS` / `CMD_ALREADY_DEBUG` / `CMD_ERROR` (closes) | `debug.c` `debug_attach_handle_svc`, routed in `server.c`; `debug_port.h` (PR #1) |
 | `CMD_DEBUG_DETACH 0xBDBB0002` | — | `CMD_SUCCESS` | `debug.c` `debug_detach_handle` → `debug_full_teardown` |
 | `CMD_DEBUG_SET_WATCHPOINT 0xBDBB0004` | `u32 index (0-3); u32 enabled; u32 length; u32 breaktype; u64 address` | `CMD_SUCCESS` / `CMD_INVALID_INDEX` | `debug.c` `debug_set_watchpoint_handle` |
 | `CMD_DEBUG_CONTINUE 0xBDBB0010` | `u32 stop` (0 = resume) | `CMD_SUCCESS` | `debug.c` `debug_continue_handle` |
@@ -175,10 +175,17 @@ writes, single-stepping and FS/GS writes are not used.
 * **Attach order.** The server ptrace-attaches, continues the process, then opens a TCP connection **from the PS4
   to `client_ip:755`** (`connect_debugger`) and only then answers `CMD_SUCCESS`. The listener must therefore exist
   before the request. If that connection fails the server answers `CMD_ERROR` but the process stays ptrace-attached
-  without a session (upstream behaviour) — the app only sends ATTACH after its listener is open and tells the user to
-  restart the game if attaching failed.
-* **Port 755 on Android.** Apps without root cannot listen on ports below 1024. The app listens on the configured
-  port (default 755) and can announce a relay's IPv4 address instead of its own; the relay forwards 755 to the app.
+  without a session (upstream behaviour, unchanged by PR #1) — the app only sends ATTACH after its listener is open and
+  tells the user to restart the game if attaching failed.
+* **Configurable interrupt port — [Pharaoh2k/ps4debug-NG PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1),
+  commit `5a19d63`, not merged upstream yet.** `struct cmd_debug_attach_ex_packet {u32 pid; u32 client_ip; u32
+  debug_port;}` (12 bytes, little-endian, `debug_port` in host order). `debug_attach_resolve_port` in
+  `debug_port.h`: body < 12 bytes → 755; `debug_port` 0 → 755; 1..65535 → that port; > 65535 → `CMD_ERROR`
+  **before** `PT_ATTACH`. Example from the PR: pid `0x55`, client `192.168.1.10`, port 7550 →
+  `55 00 00 00 C0 A8 01 0A 7E 1D 00 00`. The app always sends the 12-byte form with the port it listens on (7550, or
+  any free port), so no root is needed. Unpatched builds ignore the field and connect to 755; the app also listens on
+  755 when the system allows it (not on a normal Android phone). The branding/version is unchanged by the PR, so
+  support cannot be detected before attaching.
 * **Watchpoint encoding.** `length` is the DR7 LEN code (`1→0, 2→1, 8→2, 4→3`, `debug.h DBREG_DR7_LEN_*`) and
   `breaktype` the DR7 R/W code (`EXEC 0, WRONLY 1, RDWR 3`); the server ORs `breaktype | 4*length` into DR7 for the
   slot and applies DR0-3/DR7 to every thread. Addresses must be aligned to the length (x86 rule).

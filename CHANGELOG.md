@@ -4,7 +4,18 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
-### Code tools (new in this build — verified against the simulated server only)
+### Watchpoints without root or relay (new in this build — verified against the simulated server only)
+- "What writes / accesses" uses the configurable interrupt port of ps4debug-NG
+  ([Pharaoh2k/ps4debug-NG PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1), not merged upstream yet): the app
+  listens on a high port (7550, or any free port) and sends the 12-byte `CMD_DEBUG_ATTACH {pid, client_ip,
+  debug_port}`. Nothing to configure: the interrupt port and relay settings were removed.
+- Older payloads ignore the port and connect to 755; the app also listens there when the system allows it. Otherwise
+  the attach fails with an explanation (update the payload, restart the game — the payload may leave the game
+  attached after a failed connect-back).
+- Mock server emulates the extended attach (port 0 = 755, > 65535 rejected before attaching) and an unpatched
+  payload, including the attachment it leaves behind.
+
+### Code tools (verified against the simulated server only)
 - **Disassembler** (Code, wrench icon; "Disassemble" in the memory viewer): x86-64 decoded on the phone (iced-x86,
   MIT) with addresses, `module+offset`, bytes, W/R/branch markers, branch following and "Code using it" (server-side
   reference search, `CMD_PROC_FIND_XREFS_TO`). ps4debug-NG's own disassembler sends no instruction text, so it is
@@ -19,8 +30,8 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
   from the running game.
 - **What writes / accesses this address** (address list, or from the disassembler): attaches ps4debug-NG's debugger,
   sets a hardware watchpoint (DR0), lists every instruction with hit count, thread and registers, resumes the game
-  after every stop and detaches at the end (1000 hits / 2 minutes / Stop / leaving the screen). The PS4 connects back
-  on port 755: rooted phones listen directly, others use a relay ([docs/WATCHPOINTS.md](https://github.com/Hm589158/ps4-SmartCheat/blob/main/docs/WATCHPOINTS.md)).
+  after every stop and detaches at the end (1000 hits / 2 minutes / Stop / leaving the screen)
+  ([docs/WATCHPOINTS.md](https://github.com/Hm589158/ps4-SmartCheat/blob/main/docs/WATCHPOINTS.md)).
 - **Check after restart** (Cheats): read-only check of the address list (module offsets, pointer chains), value cheats
   and code patches; when a patch's bytes changed, its signature is searched and the new offset is shown.
 - **Pointer candidates**: save scan results per game and validate them after each restart against the confirmed

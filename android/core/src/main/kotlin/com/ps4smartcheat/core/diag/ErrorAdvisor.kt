@@ -33,10 +33,15 @@ object ErrorAdvisor {
         return when {
             error is ListenerUnavailableException -> Diagnosis(
                 "Interrupt connection unavailable",
-                "ps4debug-NG reports watchpoint hits by connecting back to this device on port 755. ${error.message}",
+                "ps4debug-NG reports watchpoint hits over a connection to this device, and no network port could be opened for it. ${error.message}",
+                listOf("Close other apps that use the network heavily and try again.", "Check that the app is allowed to use the network."),
+            )
+            error is com.ps4smartcheat.core.debug.DebuggerException && error.status == Ps4DebugProtocol.CMD_ERROR -> Diagnosis(
+                "Debugger could not attach", msg,
                 listOf(
-                    "On a rooted device, allow the app to listen on port 755.",
-                    "Or run a relay on a PC in the same network that listens on 755 and forwards to this phone (Settings → Debugger → Interrupt relay).",
+                    "Use a ps4debug-NG build with the configurable interrupt port (PR #1 on Pharaoh2k/ps4debug-NG).",
+                    "Restart the game, then try again.",
+                    "Phone and PS4 must be on the same network.",
                 ),
             )
             error is AssemblerException -> Diagnosis("Assembly not accepted", error.detail, listOf("Use Intel syntax, one instruction per line, e.g. `mov eax, 999` or `nop`."))

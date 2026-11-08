@@ -18,6 +18,20 @@ object DebugProtocol {
 
     /** `struct cmd_debug_attach_packet { u32 pid; u32 client_ip; }` — client_ip in network byte order. */
     const val ATTACH_PACKET_SIZE = 8
+    /**
+     * `struct cmd_debug_attach_ex_packet { u32 pid; u32 client_ip; u32 debug_port; }` — ps4debug-NG with the
+     * configurable interrupt port (Pharaoh2k/ps4debug-NG PR #1, `debug_port.h debug_attach_resolve_port`):
+     * `debug_port` 1..65535 = connect back there, 0 = 755, > 65535 = `CMD_ERROR` before attaching. Builds without
+     * the change ignore the extra field and connect to 755.
+     */
+    const val ATTACH_EX_PACKET_SIZE = 12
+
+    /** Body of the extended CMD_DEBUG_ATTACH. [ipv4] is the 4-byte address in network order; [port] host order. */
+    fun attachBody(pid: Int, ipv4: ByteArray, port: Int): ByteArray {
+        require(ipv4.size == 4) { "IPv4 address expected" }
+        require(port in 1..65535) { "port out of range" }
+        return LE.bytes32(pid.toLong()) + ipv4 + LE.bytes32(port.toLong())
+    }
     /** `{u32 index; u32 enabled; u32 length; u32 breaktype; u64 address}` (debug.c `debug_set_watchpoint_handle`). */
     const val WATCHPOINT_PACKET_SIZE = 24
     /** `{u32 stop}`: 0 resumes (debug.c `debug_continue_handle`). */
@@ -25,8 +39,10 @@ object DebugProtocol {
     /** `{u32 pid; u8 state}`: 0 = SIGCONT, 1 = SIGSTOP, 2 = SIGKILL when no debug session is active. */
     const val PROCESS_STOP_PACKET_SIZE = 5
 
-    /** The server connects back to the client on this port when attaching (debug.h DEBUG_PORT). */
+    /** Port the server connects back to without a `debug_port` (debug.h / debug_port.h DEBUG_PORT). */
     const val DEFAULT_INTERRUPT_PORT = 755
+    /** High port the app listens on (no root needed); any free port is used when it is taken. */
+    const val PREFERRED_INTERRUPT_PORT = 7550
     const val MAX_WATCHPOINTS = 4
 
     /** `struct debug_interrupt_packet` (packed): lwpid, status, tdname[40], __reg64, savefpu_ymm, __dbreg64. */

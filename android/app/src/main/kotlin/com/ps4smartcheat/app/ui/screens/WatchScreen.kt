@@ -46,7 +46,6 @@ import com.ps4smartcheat.core.debug.MonitorOptions
 import com.ps4smartcheat.core.debug.WatchType
 import com.ps4smartcheat.core.diag.ErrorAdvisor
 import com.ps4smartcheat.core.logging.EventCategory
-import com.ps4smartcheat.core.protocol.NetworkPolicy
 import com.ps4smartcheat.core.util.Address
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -55,8 +54,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.net.Inet4Address
-import java.net.InetAddress
 
 /**
  * "Find out what writes / accesses this address" with a ps4debug-NG hardware watchpoint. Nothing is written to game
@@ -111,21 +108,15 @@ class WatchViewModel(private val c: AppContainer) : ViewModel() {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select the game process first"; return }
         val (addr, size) = target() ?: run { _error.value = "Enter a hexadecimal address"; return }
         if (_running.value) return
-        val st = c.settings.value
         _records.value = emptyList(); _hits.value = 0; _error.value = null
         _running.value = true
         _status.value = "Attaching…"
         job = viewModelScope.launch {
             try {
-                val relay = st.interruptRelay.trim().ifEmpty { null }?.let { h ->
-                    val ip = withContext(Dispatchers.IO) { InetAddress.getByName(h) }
-                    require(ip is Inet4Address) { "The relay needs an IPv4 address" }
-                    require(st.allowNonLocalHosts || NetworkPolicy.isLocal(ip)) { "The relay must be on the local network" }
-                    ip
-                }
-                val listener = withContext(Dispatchers.IO) { InterruptListener.open(st.interruptPort) }
-                val session = DebugSession.attach(c.transport, sel.pid, listener, relay)
-                c.log.event(com.ps4smartcheat.core.logging.EventLevel.INFO, EventCategory.PROCESS, "debugger attached", "pid" to sel.pid, "watch" to Address.format(addr), "type" to _type.value.name)
+                // A high port needs no root; the extended attach request tells ps4debug-NG where to connect.
+                val listener = withContext(Dispatchers.IO) { InterruptListener.open() }
+                val session = DebugSession.attach(c.transport, sel.pid, listener)
+                c.log.event(com.ps4smartcheat.core.logging.EventLevel.INFO, EventCategory.PROCESS, "debugger attached", "pid" to sel.pid, "watch" to Address.format(addr), "type" to _type.value.name, "interruptPort" to listener.port)
                 _status.value = "Watching ${Address.format(addr)} ($size bytes, ${_type.value.label}) — play the game until the value changes"
                 val result = AccessMonitor(c.backend).run(session, addr, size, MonitorOptions(_type.value, maxHits = MAX_HITS, maxMillis = MAX_MILLIS)) { recs, n ->
                     _records.value = recs; _hits.value = n
@@ -174,7 +165,6 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
     val hits by vm.hits.collectAsStateWithLifecycle()
     val status by vm.status.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
-    val settings by vm.settings.collectAsStateWithLifecycle()
     val info = (connection as? ConnectionState.Connected)?.info
     val ng = info?.capabilities?.isNg == true
     var confirm by remember { mutableStateOf(false) }
@@ -189,7 +179,8 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                 if (info != null && !ng) WarningBanner("Watchpoints need ps4debug-NG.")
                 Text(
                     "Uses a hardware watchpoint of the PS4 debugger. Every hit pauses the game for a moment; the app resumes it " +
-                        "immediately. Game memory is not changed. Offline games only.",
+                        "immediately. Game memory is not changed. Offline games only. Needs ps4debug-NG with the configurable " +
+                        "interrupt port (PR #1).",
                     style = MaterialTheme.typography.bodySmall, color = dim,
                 )
                 OutlinedTextField(
@@ -201,11 +192,6 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                     Selector("Size", WatchViewModel.SIZES, size, { "$it bytes" }, vm::setSize, Modifier.weight(1f), enabled = !running)
                 }
                 vm.target()?.let { (a, s) -> if (s != size) Text("${Address.format(a)} is only $s-byte aligned: watching $s byte(s).", style = MaterialTheme.typography.bodySmall, color = dim) }
-                Text(
-                    "Interrupt connection: port ${settings.interruptPort}" + (settings.interruptRelay.ifBlank { null }?.let { " via relay $it" } ?: " on this device") +
-                        if (settings.interruptPort != 755 && settings.interruptRelay.isBlank()) " (the PS4 connects to 755 — set a relay in Settings)" else "",
-                    style = MaterialTheme.typography.bodySmall, color = dim,
-                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { confirm = true }, enabled = !running && selected != null && ng && selected?.exited == false, modifier = Modifier.testTag("wpStart")) { Text("Start") }
                     OutlinedButton(onClick = vm::stop, enabled = running, modifier = Modifier.testTag("wpStop")) { Text("Stop") }

@@ -20,7 +20,7 @@ independent mock ps4debug-NG server in CI only.
 | Turbo page-table aliasing | opt-in flag; never exercised |
 | Assembler (`0xBDAA0024`), reference search (`CMD_PROC_FIND_XREFS_TO`) | mock; layouts from the ps4debug-NG 1.3.4 source |
 | Code patches ON/OFF (writes to executable memory) and their GoldHEN export | mock; GoldHEN offset meaning as for value cheats (not yet checked inside GoldHEN) |
-| Debugger attach, hardware watchpoints, interrupt channel (What writes / accesses) | mock; needs port 755 reachable on the phone (root or relay) |
+| Debugger attach, hardware watchpoints, interrupt channel (What writes / accesses) | mock; needs ps4debug-NG with the configurable interrupt port ([PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1), not merged upstream yet) |
 | Session check, pointer candidates, game activity check, SIGCONT resume | mock |
 | ps4debug-NG 1.3.4 (current upstream) and other firmware listed by ps4debug-NG | expected compatible (same protocol); not yet reported |
 | Classic / GoldHEN ps4debug | not supported (compatibility mode untested; its server scans are never used) |

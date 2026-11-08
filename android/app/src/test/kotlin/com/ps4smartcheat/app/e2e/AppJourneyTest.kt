@@ -578,9 +578,7 @@ class AppJourneyTest {
     }
 
     @Test fun findWhatWritesListsTheInstructionAndDetaches() {
-        val port = java.net.ServerSocket(0).use { it.localPort }
-        server.faults.debugPort = port
-        (compose.activity.application as com.ps4smartcheat.app.SmartCheatApp).container.settings.update { it.copy(interruptPort = port) }
+        // Nothing is configured: the app picks its interrupt port and announces it in the attach request.
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
 
