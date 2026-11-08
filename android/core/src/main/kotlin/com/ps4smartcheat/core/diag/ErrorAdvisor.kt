@@ -36,13 +36,13 @@ object ErrorAdvisor {
                 "ps4debug-NG reports watchpoint hits over a connection to this device, and no network port could be opened for it. ${error.message}",
                 listOf("Close other apps that use the network heavily and try again.", "Check that the app is allowed to use the network."),
             )
+            error is com.ps4smartcheat.core.debug.DebuggerUnsupportedException -> Diagnosis(
+                "ps4debug-NG too old for watchpoints", msg,
+                listOf("Load a ps4debug-NG build that reports capability level 1.2 (configurable interrupt port, PR #1 on Pharaoh2k/ps4debug-NG), then reconnect."),
+            )
             error is com.ps4smartcheat.core.debug.DebuggerException && error.status == Ps4DebugProtocol.CMD_ERROR -> Diagnosis(
                 "Debugger could not attach", msg,
-                listOf(
-                    "Use a ps4debug-NG build with the configurable interrupt port (PR #1 on Pharaoh2k/ps4debug-NG).",
-                    "Restart the game, then try again.",
-                    "Phone and PS4 must be on the same network.",
-                ),
+                listOf("Restart the game, then try again.", "Phone and PS4 must be on the same network."),
             )
             error is AssemblerException -> Diagnosis("Assembly not accepted", error.detail, listOf("Use Intel syntax, one instruction per line, e.g. `mov eax, 999` or `nop`."))
             error is CodeToolUnavailableException -> Diagnosis("Feature not available on this debugger", msg, listOf("Load ps4debug-NG v1.3.4 or newer (see README → Required downloads)."))

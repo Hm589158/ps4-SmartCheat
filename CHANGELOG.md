@@ -4,7 +4,14 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
-### Watchpoints without root or relay (new in this build — verified against the simulated server only)
+### Capability level 1.2 (new in this build — verified against the simulated server only)
+- The app reads ps4debug-NG's capability level from `CMD_BRANDING` (PR #1 commit `e5ce2bf` reports `1.2`, released
+  builds `1.1`; compared numerically) and sends the 12-byte `CMD_DEBUG_ATTACH` only at level ≥ 1.2. Older payloads
+  get no attach request at all — the watchpoint screen explains why and Start is disabled — so a failed
+  connect-back can no longer leave the game attached. Diagnostics shows the level ("watchpoints ready").
+- Mock: payload level selectable (`capability("1.1")` behaves like a released build).
+
+### Watchpoints without root or relay (verified against the simulated server only)
 - "What writes / accesses" uses the configurable interrupt port of ps4debug-NG
   ([Pharaoh2k/ps4debug-NG PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1), not merged upstream yet): the app
   listens on a high port (7550, or any free port) and sends the 12-byte `CMD_DEBUG_ATTACH {pid, client_ip,

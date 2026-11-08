@@ -137,7 +137,9 @@ class AccessMonitorTest {
         connect()
         val l = listener()
         assertEquals(755, server.faults.debugPort) // nothing configured on the "PS4"
+        assertTrue(client.state.value.let { it as com.ps4smartcheat.core.backend.ConnectionState.Connected }.info.capabilities.attachPort)
         val session = DebugSession.attach(client, DemoGame.PID, l)
+        assertEquals(12, server.lastAttachBodySize)
         assertEquals(l.port, server.lastAttachPort)
         session.detach()
     }
@@ -162,35 +164,69 @@ class AccessMonitorTest {
         assertEquals(null, server.orphanedAttachPid)
     }
 
-    @Test fun unpatchedPayloadFailsWithAClearExplanation() = runBlocking {
-        server.faults.attachPortOption = false // ignores debug_port and connects to 755
-        server.faults.debugPort = ServerSocket(0).use { it.localPort } // nothing listens there (Android cannot bind 755)
+    @Test fun payloadBelowLevel12IsRefusedBeforeAnythingIsAttached() = runBlocking {
+        server.faults.capability("1.1") // released ps4debug-NG: connects back on 755 only
         connect()
+        assertFalse((client.state.value as com.ps4smartcheat.core.backend.ConnectionState.Connected).info.capabilities.attachPort)
         try {
             DebugSession.attach(client, DemoGame.PID, listener()); fail()
-        } catch (e: DebuggerException) {
-            assertTrue(e.message!!, e.message!!.contains("PR #1"))
-            assertTrue(e.message!!.contains("Restart the game"))
-            assertEquals("Debugger could not attach", ErrorAdvisor.diagnose(e).title)
+        } catch (e: DebuggerUnsupportedException) {
+            assertTrue(e.message!!, e.message!!.contains("capability level 1.1"))
+            assertTrue(e.message!!.contains("Nothing was attached"))
+            assertEquals("ps4debug-NG too old for watchpoints", ErrorAdvisor.diagnose(e).title)
         }
+        // The safety point of the capability check: no attach request at all, so the game is never left attached.
+        assertEquals(null, server.lastAttachBodySize)
+        assertEquals(null, server.orphanedAttachPid)
         assertFalse(server.debugAttached)
-        assertEquals(DemoGame.PID, server.orphanedAttachPid) // what the real server leaves behind
-        assertEquals(1, client.getProcesses().count { it.pid == DemoGame.PID }) // connection usable again
     }
 
-    @Test fun unpatchedPayloadWorksWhenTheLegacyPortCanBeOpened() = runBlocking {
-        // Desktop / rooted case: the listener also binds the legacy port, so an unpatched payload connects there.
+    @Test fun payloadBelowLevel12UsesTheLegacyRequestWhenPort755CanBeOpened() = runBlocking {
+        // Desktop / privileged case: the legacy port is open, so the 8-byte request is sent and the payload connects there.
         val legacy = ServerSocket(0).use { it.localPort }
-        server.faults.attachPortOption = false
+        server.faults.capability("1.1")
         server.faults.debugPort = legacy
         connect()
         val l = InterruptListener.open(0, InetAddress.getLoopbackAddress(), legacyPort = legacy)
         assertEquals(legacy, l.legacyPort)
         val session = DebugSession.attach(client, DemoGame.PID, l)
+        assertEquals(8, server.lastAttachBodySize)
+        assertEquals(legacy, server.lastAttachPort)
         val game = gameLoop(2)
         val r = withTimeout(20_000) { AccessMonitor(client).run(session, DemoGame.COINS_ADDRESS, 4, MonitorOptions(WatchType.WRITES, maxHits = 2)) }
         game.join(5000)
         assertEquals(2, r.hits)
+    }
+
+    @Test fun failedConnectBackIsExplained() = runBlocking {
+        // Level 1.2 but the connect-back fails (e.g. another network): the payload has already attached.
+        connect()
+        val l = listener()
+        server.faults.attachPortOption = false // emulate a connect-back to the wrong port
+        server.faults.debugPort = ServerSocket(0).use { it.localPort }
+        try { DebugSession.attach(client, DemoGame.PID, l); fail() } catch (e: DebuggerException) {
+            assertTrue(e.message!!.contains("Restart the game"))
+            assertEquals("Debugger could not attach", ErrorAdvisor.diagnose(e).title)
+        }
+        assertEquals(DemoGame.PID, server.orphanedAttachPid)
+        assertEquals(1, client.getProcesses().count { it.pid == DemoGame.PID })
+    }
+
+    @Test fun capabilityLevelsCompareNumerically() {
+        val L = com.ps4smartcheat.core.model.CapabilityLevel
+        assertTrue(L.atLeast("1.2", "1.2"))
+        assertTrue(L.atLeast(" 1.2 ", "1.2"))
+        assertTrue(L.atLeast("1.10", "1.2"))
+        assertTrue(L.atLeast("2.0", "1.2"))
+        assertFalse(L.atLeast("1.1", "1.2"))
+        assertFalse(L.atLeast("1.0", "1.2"))
+        assertFalse(L.atLeast("", "1.2"))
+        assertFalse(L.atLeast(null, "1.2"))
+        assertFalse(L.atLeast("1", "1.2"))
+        assertFalse(L.atLeast("1.2b", "1.2"))
+        val ng = com.ps4smartcheat.core.model.ServerCapabilities(brand = "ps4debug-NG by Pharaoh2k v1.3.4", capabilityLevel = "1.2")
+        assertTrue(ng.attachPort)
+        assertFalse(ng.copy(brand = "ps4debug").attachPort)
     }
 
     @Test fun listenerFallsBackToAFreePortWhenThePreferredOneIsTaken() {

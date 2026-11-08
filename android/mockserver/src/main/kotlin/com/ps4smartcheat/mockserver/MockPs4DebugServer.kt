@@ -81,7 +81,7 @@ class MockPs4DebugServer(
         // ---- ps4debug-NG emulation (off by default: the mock then behaves like a classic server) ----
         /** CMD_BRANDING reply (text before the NUL); null = command unsupported (no reply). */
         @Volatile var brand: String? = null
-        @Volatile var capabilityLevel: String = "1.1"
+        @Volatile var capabilityLevel: String = "1.2"
         /** Enables CMD_PROC_AUTH and the iterative scan commands (0xBDAACC01/02). */
         @Volatile var ngScan = false
         /** Enables Turbo Scan CAPS/START/COUNT/GET/END/CANCEL. */
@@ -111,6 +111,16 @@ class MockPs4DebugServer(
          * connect-back port. false = an unpatched build that ignores the field and always uses [debugPort].
          */
         @Volatile var attachPortOption = true
+
+        /**
+         * Pretends to be a payload at [level]: below 1.2 also turns off the attach `debug_port` option, like a build
+         * without PR #1 (capability.h CAPABILITY_DEBUG_ATTACH_PORT).
+         */
+        fun capability(level: String) {
+            capabilityLevel = level
+            val (major, minor) = level.split('.').map { it.toIntOrNull() ?: 0 }.let { it.getOrElse(0) { 0 } to it.getOrElse(1) { 0 } }
+            attachPortOption = major > 1 || (major == 1 && minor >= 2)
+        }
 
         fun enableNg(turbo: Boolean = true) {
             brand = "ps4debug-NG by OSR v1.3.3 (MOCK)"
@@ -463,6 +473,9 @@ class MockPs4DebugServer(
     /** Port the last successful or attempted connect-back went to (for tests). */
     @Volatile var lastAttachPort: Int? = null
         private set
+    /** Body length of the last CMD_DEBUG_ATTACH (8 = legacy, 12 = with debug_port); null if none was received. */
+    @Volatile var lastAttachBodySize: Int? = null
+        private set
     /**
      * pid left ptrace-attached without a session because the connect-back failed — what the real server does
      * (it attaches before connecting back). Cleared when the game exits or restarts.
@@ -501,6 +514,7 @@ class MockPs4DebugServer(
         }
 
         private fun attach(body: ByteBuffer, out: OutputStream, conn: Conn): Boolean {
+            lastAttachBodySize = body.capacity()
             if (debug != null) { status(out, CMD_ALREADY_DEBUG); return false }
             if (body.capacity() < 4) { status(out, CMD_DATA_NULL); return false }
             val pid = body.int

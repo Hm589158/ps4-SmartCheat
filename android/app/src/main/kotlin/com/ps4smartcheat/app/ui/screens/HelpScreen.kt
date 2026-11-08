@@ -66,7 +66,7 @@ private val sections = listOf(
         "6. What writes / accesses this address",
         listOf(
             "Address list → open an entry → \"What writes?\" (or from Code). The PS4 debugger sets a hardware watchpoint; play until the value changes. Each instruction is listed with its hit count and registers; open it in Code to patch it.",
-            "Needs a ps4debug-NG build with the configurable interrupt port (Pharaoh2k/ps4debug-NG pull request #1). The app sets everything up itself: no root and no extra computer.",
+            "Needs ps4debug-NG with capability level 1.2 (configurable interrupt port, Pharaoh2k/ps4debug-NG pull request #1). The app checks the level when it connects (Diagnostics shows it) and sets everything up itself: no root and no extra computer.",
             "Every hit pauses the game briefly; monitoring stops after 1000 hits or 2 minutes and the debugger detaches. Only one debugger session can exist on the PS4.",
         ),
     ),

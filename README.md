@@ -140,8 +140,9 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
   hit count, thread and registers; open it in the disassembler
 - **Check after restart**: address list, pointers, value cheats and code patches; moved code is found again by its
   signature. **Pointer candidates** ranked by how often they survive restarts
-- No root and no relay: the app picks a high port for the debugger automatically. Needs a ps4debug-NG build with the
-  configurable interrupt port ([PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1), not merged yet — [details](docs/WATCHPOINTS.md))
+- No root and no relay: the app picks a high port for the debugger automatically. Needs ps4debug-NG with
+  **capability level 1.2** (configurable interrupt port, [PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1),
+  not merged yet); the app checks the level before attaching — [details](docs/WATCHPOINTS.md)
 
 </td></tr>
 </table>

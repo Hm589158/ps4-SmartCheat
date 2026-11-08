@@ -22,7 +22,10 @@ import java.net.SocketTimeoutException
 /** No port could be opened for the debugger's interrupt connection. */
 class ListenerUnavailableException(val port: Int, message: String, cause: Throwable? = null) : BackendException(message, cause)
 
-class DebuggerException(message: String, status: Long = Ps4DebugProtocol.CMD_ERROR) : CommandFailedException(0, status, message)
+open class DebuggerException(message: String, status: Long = Ps4DebugProtocol.CMD_ERROR) : CommandFailedException(0, status, message)
+
+/** The payload is below capability level 1.2 and port 755 cannot be opened here; checked before attaching. */
+class DebuggerUnsupportedException(message: String) : DebuggerException(message)
 
 /**
  * Listens for the debugger's interrupt connection, which ps4debug-NG opens *from the PS4 to the client* while
@@ -202,9 +205,13 @@ class DebugSession private constructor(
 
     companion object {
         /**
-         * Attaches to [pid] with the extended request carrying [InterruptListener.port], so ps4debug-NG connects
-         * back to that high port. [listener] must already be open. [announce] is the IPv4 address the PS4 connects
-         * to (default: this device's address on the command connection).
+         * Attaches to [pid]. [listener] must already be open. [announce] is the IPv4 address the PS4 connects to
+         * (default: this device's address on the command connection).
+         *
+         * The request form follows the payload's capability level (CMD_BRANDING, ps4debug-NG `capability.h`):
+         * level ≥ 1.2 → 12-byte body with [InterruptListener.port] (high port, no root); below → legacy 8-byte body,
+         * which makes the payload connect to 755, so it is only sent when [InterruptListener.legacyPort] is open.
+         * Otherwise nothing is sent: an attach whose connect-back fails leaves the game attached on the PS4.
          */
         suspend fun attach(
             t: ServerScanTransport,
@@ -216,20 +223,24 @@ class DebugSession private constructor(
             if (!t.capabilities.isNg) { listener.close(); throw DebuggerException("Watchpoints need ps4debug-NG.") }
             val ip = (announce ?: t.localAddress) as? Inet4Address
                 ?: run { listener.close(); throw DebuggerException("No IPv4 address to announce for the interrupt connection") }
+            val extended = t.capabilities.attachPort
+            if (!extended && listener.legacyPort == null) {
+                listener.close()
+                throw DebuggerUnsupportedException(unsupportedPayload(t.capabilities.capabilityLevel))
+            }
+            val body = if (extended) DebugProtocol.attachBody(pid, ip.address, listener.port) else LE.bytes32(pid.toLong()) + ip.address
+            val connectPort = if (extended) listener.port else listener.legacyPort!!
             val epoch = t.connectionEpoch
             try {
                 t.exclusive("debug attach") { w ->
-                    w.send(
-                        w.header(DebugProtocol.CMD_DEBUG_ATTACH, DebugProtocol.ATTACH_EX_PACKET_SIZE),
-                        DebugProtocol.attachBody(pid, ip.address, listener.port),
-                    )
+                    w.send(w.header(DebugProtocol.CMD_DEBUG_ATTACH, body.size), body)
                     val st = w.readU32()
                     if (st != Ps4DebugProtocol.CMD_SUCCESS) {
                         w.invalidate() // the attach handler returns 1 on failure: the server closes the connection
                         throw DebuggerException(
                             when (st) {
                                 Ps4DebugProtocol.CMD_ALREADY_DEBUG -> "Another debugger session is active on the PS4 (another tool, or a session that did not end). Close it or reload ps4debug-NG."
-                                else -> attachFailure(ip.hostAddress ?: "?", listener, Ps4DebugProtocol.statusName(st))
+                                else -> attachFailure(ip.hostAddress ?: "?", connectPort, Ps4DebugProtocol.statusName(st))
                             },
                             st,
                         )
@@ -250,15 +261,18 @@ class DebugSession private constructor(
             return DebugSession(t, pid, listener, channel, epoch)
         }
 
-        /** Explains a failed attach; the most likely cause is a payload without the configurable interrupt port. */
-        internal fun attachFailure(ip: String, listener: InterruptListener, status: String): String = buildString {
-            append("The PS4 could not attach to the game or could not connect back to this device ($ip:${listener.port}; $status). ")
-            if (listener.legacyPort == null) {
-                append("Watchpoints need a ps4debug-NG build with the configurable interrupt port (Pharaoh2k/ps4debug-NG PR #1); ")
-                append("older builds always connect to port ${DebugProtocol.DEFAULT_INTERRUPT_PORT}, which Android apps cannot open. ")
-            }
-            append("Restart the game before trying again: after a failed connection the payload may leave it attached.")
-        }
+        /** Explains a refused or failed attach (after the payload may already have attached to the game). */
+        internal fun attachFailure(ip: String, port: Int, status: String): String =
+            "The PS4 could not attach to the game or could not connect back to this device ($ip:$port; $status). " +
+                "Phone and PS4 must be on the same network. Restart the game before trying again: after a failed " +
+                "connection the payload may leave it attached."
+
+        /** Why nothing was sent to a payload below capability level 1.2 (checked before attaching). */
+        internal fun unsupportedPayload(level: String?): String =
+            "This ps4debug-NG reports capability level ${level ?: "(none)"}. Watchpoints need level " +
+                "${com.ps4smartcheat.core.model.CapabilityLevel.DEBUG_ATTACH_PORT} or newer (configurable interrupt port, " +
+                "Pharaoh2k/ps4debug-NG PR #1): older builds connect back on port ${DebugProtocol.DEFAULT_INTERRUPT_PORT}, " +
+                "which Android apps cannot open. Nothing was attached — load a newer ps4debug-NG."
 
         /** Sends SIGCONT to a process that was stopped (CMD_DEBUG_PROCESS_STOP state 0). Only without a debug session. */
         suspend fun continueProcess(t: ServerScanTransport, pid: Int) {

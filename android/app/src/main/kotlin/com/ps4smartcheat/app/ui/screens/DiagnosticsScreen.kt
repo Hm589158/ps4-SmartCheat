@@ -100,6 +100,7 @@ class DiagnosticsViewModel(private val c: AppContainer) : ViewModel() {
                 append("Console: ").append(st.info.host).append(':').append(st.info.port).append('\n')
                 append("Debugger: ").append(st.info.capabilities.brand ?: "ps4debug ${st.info.debuggerVersion}").append('\n')
                 append("Firmware: ").append(st.info.firmwareText ?: "unknown").append('\n')
+                append("Capability level: ").append(st.info.capabilities.capabilityLevel ?: "none").append(" (attach port: ").append(st.info.capabilities.attachPort).append(")\n")
                 append("Scan auth: ").append(st.info.capabilities.scanAuthorized).append(", turbo: ").append(st.info.capabilities.turboEngines?.let { Integer.toHexString(it) } ?: "none").append('\n')
             }
             else -> append("State: ").append(st).append('\n')
@@ -167,6 +168,10 @@ fun DiagnosticsScreen() {
                     KeyValue("Debugger", caps.brand ?: "ps4debug ${st.info.debuggerVersion}")
                     KeyValue("Firmware", st.info.firmwareText ?: "unknown")
                     KeyValue("Scan auth", if (caps.isNg) (if (caps.scanAuthorized) "granted" else "not granted") else "n/a (classic)")
+                    if (caps.isNg) KeyValue(
+                        "Capability level",
+                        (caps.capabilityLevel ?: "none") + if (caps.attachPort) " · watchpoints ready" else " · watchpoints need 1.2",
+                    )
                     KeyValue("Turbo engines", caps.turboEngines?.let { "0x" + Integer.toHexString(it).uppercase() } ?: "none")
                 }
                 is ConnectionState.Reconnecting -> KeyValue("State", "Reconnecting ${st.attempt}/${st.maxAttempts}: ${st.reason}")

@@ -59,8 +59,9 @@ The mock is an independent implementation of the server side over real TCP, with
   address), stop and detach, busy debugger, dropped connection ends the session, port in use, watchpoint
   alignment/slot checks, SIGCONT, interrupt packet layout; extended attach (PR #1): the announced port is used with
   nothing configured on the mock, body bytes equal the PR's example, out-of-range port rejected before attaching,
-  unpatched payload explained (and its leftover attachment emulated), unpatched payload served through the legacy
-  listener when it can be opened, fallback to a free port.
+  fallback to a free port; capability level 1.2 gate: levels compared numerically, a level-1.1 payload gets no
+  attach request at all (nothing left attached), a level-1.1 payload is served with the 8-byte request when the
+  legacy port can be opened, a failed connect-back at level 1.2 is explained (leftover attachment emulated).
 * `SessionValidatorTest` – after a restart: module entries valid, absolute entries unverified, broken pointers
   invalid; moved code found again by signature; patched state recognised; pointer candidates ranked over three
   restarts by consensus and by a confirmed address; activity probe; error advice.
@@ -81,7 +82,7 @@ rail; pointer scan from an address-list entry finds the static chain, and the
 added pointer entry follows the object when the mock game moves it; an Assembly ON/OFF patch (disassemble, assemble
 `nop` on the mock, ON/OFF with confirmation, the demo routine stops/starts spending coins, save, switch from the
 library, session check); "What writes?" lists the store instruction with its hit count, stops and detaches; game
-activity check. This shows the app works end to end with a ps4debug-NG-compatible server; it is
+activity check and capability level in Diagnostics; a level-1.1 payload disables Start and sends nothing. This shows the app works end to end with a ps4debug-NG-compatible server; it is
 not a PS4 test.
 
 ## Android

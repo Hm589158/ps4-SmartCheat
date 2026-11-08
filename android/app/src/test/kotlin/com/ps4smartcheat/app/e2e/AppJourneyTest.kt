@@ -2,6 +2,7 @@ package com.ps4smartcheat.app.e2e
 
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -618,7 +619,25 @@ class AppJourneyTest {
         press("activityCheck")
         waitTag("activityResult")
         waitText("pid 77")
+        waitText("watchpoints ready") // capability level 1.2 shown in Diagnostics
         shot("47_activity_check")
+    }
+
+    @Test fun payloadBelowCapability12DisablesWatchpoints() {
+        server.faults.capability("1.1") // a released ps4debug-NG without the configurable interrupt port
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        compose.onNodeWithContentDescription("Code").performClick()
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
+        press("codeGo")
+        waitText("What writes?")
+        compose.onAllNodesWithText("What writes?")[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        waitTag("wpStart")
+        waitText("capability level 1.1")
+        compose.onNodeWithTag("wpStart", useUnmergedTree = true).assertIsNotEnabled()
+        assertEquals(null, server.lastAttachBodySize) // nothing was sent to the PS4
+        shot("48_watchpoints_need_level_12")
     }
 
     @Config(qualifiers = "w1280dp-h800dp-land-xhdpi")

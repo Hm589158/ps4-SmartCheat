@@ -167,6 +167,8 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
     val error by vm.error.collectAsStateWithLifecycle()
     val info = (connection as? ConnectionState.Connected)?.info
     val ng = info?.capabilities?.isNg == true
+    /** Capability level ≥ 1.2: the payload connects back to the app's high port (no root needed). */
+    val portOk = info?.capabilities?.attachPort == true
     var confirm by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf<Long?>(null) }
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
@@ -177,10 +179,13 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (selected == null) WarningBanner("No process selected.")
                 if (info != null && !ng) WarningBanner("Watchpoints need ps4debug-NG.")
+                if (ng && !portOk) WarningBanner(
+                    "This ps4debug-NG reports capability level ${info?.capabilities?.capabilityLevel ?: "(none)"}. Watchpoints need " +
+                        "level 1.2 or newer (configurable interrupt port). Load a newer ps4debug-NG and reconnect.",
+                )
                 Text(
                     "Uses a hardware watchpoint of the PS4 debugger. Every hit pauses the game for a moment; the app resumes it " +
-                        "immediately. Game memory is not changed. Offline games only. Needs ps4debug-NG with the configurable " +
-                        "interrupt port (PR #1).",
+                        "immediately. Game memory is not changed. Offline games only.",
                     style = MaterialTheme.typography.bodySmall, color = dim,
                 )
                 OutlinedTextField(
@@ -193,7 +198,7 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                 }
                 vm.target()?.let { (a, s) -> if (s != size) Text("${Address.format(a)} is only $s-byte aligned: watching $s byte(s).", style = MaterialTheme.typography.bodySmall, color = dim) }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { confirm = true }, enabled = !running && selected != null && ng && selected?.exited == false, modifier = Modifier.testTag("wpStart")) { Text("Start") }
+                    Button(onClick = { confirm = true }, enabled = !running && selected != null && ng && portOk && selected?.exited == false, modifier = Modifier.testTag("wpStart")) { Text("Start") }
                     OutlinedButton(onClick = vm::stop, enabled = running, modifier = Modifier.testTag("wpStop")) { Text("Stop") }
                 }
                 if (running) LinearProgressIndicator(Modifier.fillMaxWidth())

@@ -175,17 +175,20 @@ writes, single-stepping and FS/GS writes are not used.
 * **Attach order.** The server ptrace-attaches, continues the process, then opens a TCP connection **from the PS4
   to `client_ip:755`** (`connect_debugger`) and only then answers `CMD_SUCCESS`. The listener must therefore exist
   before the request. If that connection fails the server answers `CMD_ERROR` but the process stays ptrace-attached
-  without a session (upstream behaviour, unchanged by PR #1) — the app only sends ATTACH after its listener is open and
-  tells the user to restart the game if attaching failed.
+  without a session (upstream behaviour, unchanged by PR #1) — the app only sends ATTACH after its listener is open,
+  only in a form the payload's capability level supports, and tells the user to restart the game if it still failed.
 * **Configurable interrupt port — [Pharaoh2k/ps4debug-NG PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1),
-  commit `5a19d63`, not merged upstream yet.** `struct cmd_debug_attach_ex_packet {u32 pid; u32 client_ip; u32
+  commits `5a19d63` and `e5ce2bf`, not merged upstream yet.** `struct cmd_debug_attach_ex_packet {u32 pid; u32 client_ip; u32
   debug_port;}` (12 bytes, little-endian, `debug_port` in host order). `debug_attach_resolve_port` in
   `debug_port.h`: body < 12 bytes → 755; `debug_port` 0 → 755; 1..65535 → that port; > 65535 → `CMD_ERROR`
   **before** `PT_ATTACH`. Example from the PR: pid `0x55`, client `192.168.1.10`, port 7550 →
-  `55 00 00 00 C0 A8 01 0A 7E 1D 00 00`. The app always sends the 12-byte form with the port it listens on (7550, or
-  any free port), so no root is needed. Unpatched builds ignore the field and connect to 755; the app also listens on
-  755 when the system allows it (not on a normal Android phone). The branding/version is unchanged by the PR, so
-  support cannot be detected before attaching.
+  `55 00 00 00 C0 A8 01 0A 7E 1D 00 00`.
+* **Capability gate (PR #1 commit `e5ce2bf`, `capability.h`).** The `CMD_BRANDING` reply's level after the NUL is
+  `PACKET_CAPABILITY_LEVEL` = `"1.2"` (released builds: `"1.1"`); `CAPABILITY_DEBUG_ATTACH_PORT` = `"1.2"`. Levels
+  are compared numerically as `major.minor` (`1.10` > `1.2`). The app sends the 12-byte form with the port it
+  listens on (7550, or any free port) only at level ≥ 1.2. Below that it sends the legacy 8-byte form only if it
+  could also open 755, and otherwise sends no attach at all (so a failed connect-back can never leave the game
+  attached).
 * **Watchpoint encoding.** `length` is the DR7 LEN code (`1→0, 2→1, 8→2, 4→3`, `debug.h DBREG_DR7_LEN_*`) and
   `breaktype` the DR7 R/W code (`EXEC 0, WRONLY 1, RDWR 3`); the server ORs `breaktype | 4*length` into DR7 for the
   slot and applies DR0-3/DR7 to every thread. Addresses must be aligned to the length (x86 rule).

@@ -71,8 +71,32 @@ data class ServerCapabilities(
     val turboRescanAliasing: Boolean get() = turboResident && (turboEngines!! and 0x200) != 0
     val turboAliasing: Boolean get() = turboResident && (turboEngines!! and 0x2) != 0
 
+    /**
+     * `CMD_DEBUG_ATTACH` accepts the optional `debug_port` (connect back to a client-chosen port). Advertised as
+     * capability level 1.2 (ps4debug-NG `capability.h CAPABILITY_DEBUG_ATTACH_PORT`, Pharaoh2k/ps4debug-NG PR #1).
+     */
+    val attachPort: Boolean get() = isNg && CapabilityLevel.atLeast(capabilityLevel, CapabilityLevel.DEBUG_ATTACH_PORT)
+
     companion object {
         val NONE = ServerCapabilities()
+    }
+}
+
+/** ps4debug-NG capability levels ("major.minor", compared numerically: 1.10 > 1.2). */
+object CapabilityLevel {
+    /** Level that adds the `debug_port` field of CMD_DEBUG_ATTACH. */
+    const val DEBUG_ATTACH_PORT = "1.2"
+
+    /** major * 1000 + minor, or null for anything that is not exactly `digits.digits`. */
+    fun value(level: String?): Int? {
+        val m = Regex("^(\\d{1,4})\\.(\\d{1,3})$").matchEntire(level?.trim() ?: return null) ?: return null
+        return m.groupValues[1].toInt() * 1000 + m.groupValues[2].toInt()
+    }
+
+    fun atLeast(level: String?, required: String): Boolean {
+        val have = value(level) ?: return false
+        val need = value(required) ?: return false
+        return have >= need
     }
 }
 
