@@ -124,6 +124,25 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
 - Connection diagnostics, exportable event log, tablet layout
 
 </td></tr>
+<tr><td valign="top">
+
+**🧩 Assembly ON/OFF cheats**
+- **Disassembler** with addresses, `eboot.bin+offset`, bytes and read/write/branch markers; follow branches
+- Type new instructions (`nop`, `mov eax, 999` …): the **PS4 assembles them** (ps4debug-NG's Keystone) at that address
+- Whole instructions are replaced and NOP-padded; preview of ON/OFF bytes and warnings before anything is written
+- **ON (1) / OFF (0)** with confirmation and read-back; save to the library and **export to GoldHEN** — switch it from
+  the GoldHEN menu without the phone
+
+</td><td valign="top">
+
+**🔬 Find what writes / accesses**
+- Hardware **watchpoint** through ps4debug-NG's debugger: every instruction that writes (or reads) an address, with
+  hit count, thread and registers; open it in the disassembler
+- **Check after restart**: address list, pointers, value cheats and code patches; moved code is found again by its
+  signature. **Pointer candidates** ranked by how often they survive restarts
+- Needs the PS4 to reach the phone on port 755 (root, or a small relay on a PC — [guide](docs/WATCHPOINTS.md))
+
+</td></tr>
 </table>
 
 ## Status
@@ -135,6 +154,7 @@ real consoles.
 |---|---|
 | FW 11.00 · GoldHEN · ps4debug-NG **1.3.3** | **Reported working by the project owner:** connect, authentication, process list, Turbo Scan, next scans, writing a value in a game |
 | Same setup — tools added since 0.8 (address list, pointer scan, pattern search, byte patches, undo/redo, GoldHEN import, diagnostics) | Verified end to end against the simulated server. **Hardware reports wanted** |
+| Assembly ON/OFF patches, assembler, reference search, watchpoints (What writes / accesses), session check | Implemented from the ps4debug-NG **1.3.4** source and verified against the simulated server only. **Hardware reports wanted** |
 | ps4debug-NG **1.3.4** (current upstream) and other firmware supported by ps4debug-NG | Expected to work (same protocol). Not yet reported |
 | Classic / GoldHEN ps4debug | Not supported (untested compatibility mode only) |
 
@@ -197,7 +217,7 @@ docs/                protocol, architecture, testing, performance, compatibility
 
 [Changelog](CHANGELOG.md) · [Protocol](docs/PROTOCOL.md) · [Architecture](docs/ARCHITECTURE.md) · [Testing](docs/TESTING.md) ·
 [Performance](docs/PERFORMANCE.md) · [Compatibility](docs/COMPATIBILITY.md) · [Roadmap](docs/ROADMAP.md) ·
-[Release signing](docs/RELEASE_SIGNING.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
+[Release signing](docs/RELEASE_SIGNING.md) · [Watchpoints & relay](docs/WATCHPOINTS.md) · [Contributing](CONTRIBUTING.md) · [Security](SECURITY.md)
 
 ## Credits and licenses
 

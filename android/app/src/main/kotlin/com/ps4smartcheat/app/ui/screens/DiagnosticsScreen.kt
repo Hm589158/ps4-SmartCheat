@@ -50,6 +50,79 @@ class DiagnosticsViewModel(private val c: AppContainer) : ViewModel() {
     fun reconnects() = c.reconnectCount
     fun link() = c.scanner.linkEstimate
 
+    val selected = c.selectedProcess
+    private val _activity = MutableStateFlow<String?>(null)
+    val activity = _activity.asStateFlow()
+    private val _still = MutableStateFlow(false)
+    /** The last activity check found no memory changes. */
+    val still = _still.asStateFlow()
+
+    /** Samples writable memory twice, one second apart (read-only) to tell a running game from a stopped one. */
+    fun checkActivity() {
+        val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: run { _activity.value = "Select the game process first."; return }
+        _activity.value = "Checking…"
+        viewModelScope.launch {
+            try {
+                val regions = c.backend.getMemoryRegions(sel.pid)
+                val a = com.ps4smartcheat.core.diag.ProcessActivity.probe(c.backend, sel.pid, regions)
+                _still.value = a == com.ps4smartcheat.core.diag.Activity.STILL
+                _activity.value = "${sel.name} (pid ${sel.pid}): ${a.label}" + if (_still.value) {
+                    ". A game in a pause menu can look like this too. If the game is frozen after a debugger session or a crash, try Resume."
+                } else ""
+                c.log.info("activity check pid ${sel.pid}: ${a.name}")
+            } catch (e: com.ps4smartcheat.core.backend.BackendException) {
+                _activity.value = com.ps4smartcheat.core.diag.ErrorAdvisor.diagnose(e).format()
+            }
+        }
+    }
+
+    /** Sends SIGCONT to the selected process (CMD_DEBUG_PROCESS_STOP state 0; no debugger session). */
+    fun resumeProcess() {
+        val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: return
+        viewModelScope.launch {
+            try {
+                com.ps4smartcheat.core.debug.DebugSession.continueProcess(c.transport, sel.pid)
+                _activity.value = "Sent SIGCONT to ${sel.name}. Check again in a moment."
+                _still.value = false
+                c.log.info("SIGCONT sent to pid ${sel.pid}")
+            } catch (e: com.ps4smartcheat.core.backend.BackendException) {
+                _activity.value = com.ps4smartcheat.core.diag.ErrorAdvisor.diagnose(e).format()
+            }
+        }
+    }
+
+    /** Plain-text report for bug reports: connection, capabilities, counters, recent problems. No memory contents. */
+    fun report(): String = buildString {
+        append("PS4 SmartCheat ").append(com.ps4smartcheat.app.BuildConfig.VERSION_NAME).append(" diagnostic report\n")
+        append("Time: ").append(java.util.Date()).append('\n')
+        when (val st = c.backend.state.value) {
+            is ConnectionState.Connected -> {
+                append("Console: ").append(st.info.host).append(':').append(st.info.port).append('\n')
+                append("Debugger: ").append(st.info.capabilities.brand ?: "ps4debug ${st.info.debuggerVersion}").append('\n')
+                append("Firmware: ").append(st.info.firmwareText ?: "unknown").append('\n')
+                append("Scan auth: ").append(st.info.capabilities.scanAuthorized).append(", turbo: ").append(st.info.capabilities.turboEngines?.let { Integer.toHexString(it) } ?: "none").append('\n')
+            }
+            else -> append("State: ").append(st).append('\n')
+        }
+        val t = c.backend.traffic()
+        append("Traffic: in ").append(t.bytesIn).append(" B, out ").append(t.bytesOut).append(" B; reconnects ").append(c.reconnectCount).append('\n')
+        _ping.value?.let { append("Ping: avg ").append(it.avgMs).append(" ms, failures ").append(it.failures).append('\n') }
+        c.selectedProcess.value?.let { append("Process: ").append(it.name).append(" pid ").append(it.pid).append(" title ").append(it.titleId ?: "-").append(if (it.exited) " (exited)" else "").append('\n') }
+        _activity.value?.let { append("Activity: ").append(it).append('\n') }
+        append("\nRecent warnings/errors:\n")
+        c.log.lines.value.filter { it.event.level >= EventLevel.WARN }.takeLast(50).forEach { append(it.format()).append('\n') }
+    }
+
+    fun exportReport(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch {
+        val text = report()
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) } }
+            c.log.notify("Diagnostic report exported")
+        } catch (e: Exception) {
+            c.log.error("Report export failed: ${e.message}")
+        }
+    }
+
     /** Five CMD_VERSION round trips: read-only, no game memory is touched. */
     fun runPing() {
         if (_pinging.value || c.backend.state.value !is ConnectionState.Connected) return
@@ -73,6 +146,14 @@ fun DiagnosticsScreen() {
     val ping by vm.ping.collectAsStateWithLifecycle()
     val pinging by vm.pinging.collectAsStateWithLifecycle()
     val lines by vm.lines.collectAsStateWithLifecycle()
+    val selected by vm.selected.collectAsStateWithLifecycle()
+    val activity by vm.activity.collectAsStateWithLifecycle()
+    val still by vm.still.collectAsStateWithLifecycle()
+    var confirmResume by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val resolver = androidx.compose.ui.platform.LocalContext.current.contentResolver
+    val reportLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.CreateDocument("text/plain"),
+    ) { uri -> if (uri != null) vm.exportReport(resolver, uri) }
     // Re-read the counters once a second while the screen is shown.
     var tick by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) { while (true) { delay(1000); tick++ } }
@@ -115,11 +196,24 @@ fun DiagnosticsScreen() {
                 p.avgMs?.let { if (it > 50) WarningBanner("High latency: use 5 GHz Wi-Fi or Ethernet on the PS4; Turbo Scan keeps scans on the console and is least affected.") }
             }
         }
+        SectionCard("Game process") {
+            Text("Checks whether the selected game is running by sampling its memory twice (read-only).", style = MaterialTheme.typography.bodySmall)
+            Button(onClick = vm::checkActivity, enabled = connection is ConnectionState.Connected && selected?.exited == false, modifier = Modifier.testTag("activityCheck")) { Text("Check game activity") }
+            activity?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("activityResult")) }
+            val ng = (connection as? ConnectionState.Connected)?.info?.capabilities?.isNg == true
+            if (still && ng) androidx.compose.material3.OutlinedButton(onClick = { confirmResume = true }) { Text("Resume process (SIGCONT)") }
+        }
         SectionCard("Recent warnings and errors") {
             val recent = lines.filter { it.event.level >= EventLevel.WARN }.takeLast(15)
             if (recent.isEmpty()) Text("None.", style = MaterialTheme.typography.bodySmall)
             recent.forEach { Text(it.format(), style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace) }
             Text("Full log: Settings → Export (JSON Lines).", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            androidx.compose.material3.OutlinedButton(onClick = { reportLauncher.launch("smartcheat-diagnostics.txt") }) { Text("Export diagnostic report") }
         }
     }
+    if (confirmResume) com.ps4smartcheat.app.ui.components.ConfirmDialog(
+        "Resume the process?",
+        "Sends SIGCONT to ${selected?.name} (pid ${selected?.pid}). This only continues a process that was stopped; it does nothing to a running one.",
+        "Resume", { confirmResume = false; vm.resumeProcess() }, { confirmResume = false },
+    )
 }

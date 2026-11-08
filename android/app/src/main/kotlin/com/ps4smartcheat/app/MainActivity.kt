@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
@@ -52,6 +53,8 @@ import androidx.navigation.navArgument
 import com.ps4smartcheat.app.ui.SmartCheatTheme
 import com.ps4smartcheat.app.ui.appContainer
 import com.ps4smartcheat.app.ui.screens.AddressesScreen
+import com.ps4smartcheat.app.ui.screens.CodeScreen
+import com.ps4smartcheat.app.ui.screens.WatchScreen
 import com.ps4smartcheat.app.ui.screens.CheatsScreen
 import com.ps4smartcheat.app.ui.screens.ConnectionScreen
 import com.ps4smartcheat.app.ui.screens.DiagnosticsScreen
@@ -80,7 +83,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Screens opened on top of a tab: they show a back arrow. */
-private val backRoutes = setOf(Routes.EDITOR, Routes.HEX, Routes.PATTERN, Routes.POINTER, Routes.DIAGNOSTICS, Routes.HELP)
+private val backRoutes = setOf(Routes.EDITOR, Routes.HEX, Routes.PATTERN, Routes.POINTER, Routes.DIAGNOSTICS, Routes.HELP, Routes.CODE, Routes.WATCH)
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
@@ -105,6 +108,13 @@ object Routes {
     const val POINTER = "pointer"
     const val DIAGNOSTICS = "diagnostics"
     const val HELP = "help"
+    const val CODE = "code"
+    const val WATCH = "watch"
+
+    fun code(address: Long?): String = CODE + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "")
+
+    fun watch(address: Long?, size: Int?, writes: Boolean?): String =
+        WATCH + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "") + "&size=" + (size ?: "") + "&writes=" + (writes ?: "")
 
     fun pointer(address: Long?, type: ValueType?): String =
         POINTER + "?address=" + (address?.let { java.lang.Long.toHexString(it) } ?: "") + "&type=" + (type?.name ?: "")
@@ -157,6 +167,9 @@ private fun AppRoot() {
                 actions = {
                     if (route != Routes.EDITOR && route != Routes.HEX) {
                         IconButton(onClick = { nav.navigate(Routes.editor(null, null)) }) { Icon(Icons.Filled.Edit, contentDescription = "Memory editor") }
+                    }
+                    if (route != Routes.CODE) {
+                        IconButton(onClick = { nav.navigate(Routes.code(null)) }) { Icon(Icons.Filled.Build, contentDescription = "Code") }
                     }
                     if (route != Routes.HELP) {
                         IconButton(onClick = { nav.navigate(Routes.HELP) }) { Icon(Icons.Filled.Info, contentDescription = "Guide") }
@@ -217,14 +230,39 @@ private fun AppRoot() {
                 arguments = listOf(navArgument("address") { type = NavType.StringType; nullable = true; defaultValue = null }),
             ) { entry ->
                 val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
-                HexViewerScreen(address, onOpenEditor = { a -> nav.navigate(Routes.editor(a, null)) })
+                HexViewerScreen(address, onOpenEditor = { a -> nav.navigate(Routes.editor(a, null)) }, onDisassemble = { a -> nav.navigate(Routes.code(a)) })
             }
             composable(Routes.ADDRESSES) {
                 AddressesScreen(
                     onEdit = { a, t -> nav.navigate(Routes.editor(a, t)) },
                     onViewMemory = { a -> nav.navigate(Routes.hex(a)) },
                     onPointerScan = { a, t -> nav.navigate(Routes.pointer(a, t)) },
+                    onWatch = { a, size, writes -> nav.navigate(Routes.watch(a, size, writes)) },
                 )
+            }
+            composable(
+                Routes.CODE + "?address={address}",
+                arguments = listOf(navArgument("address") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { entry ->
+                val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
+                CodeScreen(
+                    address,
+                    onViewMemory = { a -> nav.navigate(Routes.hex(a)) },
+                    onWatch = { a, size, writes -> nav.navigate(Routes.watch(a, size, writes)) },
+                )
+            }
+            composable(
+                Routes.WATCH + "?address={address}&size={size}&writes={writes}",
+                arguments = listOf(
+                    navArgument("address") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("size") { type = NavType.StringType; nullable = true; defaultValue = null },
+                    navArgument("writes") { type = NavType.StringType; nullable = true; defaultValue = null },
+                ),
+            ) { entry ->
+                val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
+                val size = entry.arguments?.getString("size")?.toIntOrNull()
+                val writes = entry.arguments?.getString("writes")?.toBooleanStrictOrNull()
+                WatchScreen(address, size, writes, onOpenCode = { a -> nav.navigate(Routes.code(a)) })
             }
             composable(
                 Routes.POINTER + "?address={address}&type={type}",
@@ -257,6 +295,8 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.POINTER -> "Pointer scan"
     Routes.DIAGNOSTICS -> "Diagnostics"
     Routes.HELP -> "Guide"
+    Routes.CODE -> "Code"
+    Routes.WATCH -> "What writes / accesses"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"
     Routes.SETTINGS -> "Settings"

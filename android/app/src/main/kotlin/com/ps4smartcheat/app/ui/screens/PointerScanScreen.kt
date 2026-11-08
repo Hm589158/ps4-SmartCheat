@@ -18,6 +18,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -71,6 +72,13 @@ class PointerScanViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun cancel() = c.pointerScan.cancel()
+    fun loadCandidates() = c.pointerScan.loadCandidates()
+    fun saveCandidates() = c.pointerScan.saveCandidates()
+    fun clearCandidates() = c.pointerScan.clearCandidates()
+    fun validateCandidates(confirmedText: String) {
+        val confirmed = confirmedText.trim().ifEmpty { null }?.let { Address.parse(it) ?: run { _message.value = "Enter a hexadecimal address or leave it empty"; return } }
+        c.pointerScan.validateCandidates(confirmed)
+    }
 
     fun estimateBytes(): Long? = c.pointerScan.estimateBytes()
 
@@ -108,6 +116,8 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
     val connected = connection is ConnectionState.Connected
     val alive = selected?.exited == false
     LaunchedEffect(initialAddress) { if (initialAddress != null) target = Address.format(initialAddress) }
+    LaunchedEffect(selected?.pid) { vm.loadCandidates() }
+    var confirmedAddress by remember { mutableStateOf("") }
 
     LazyColumn(Modifier.fillMaxSize().testTag("pointerList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -149,6 +159,38 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
                     )
                 }
                 ErrorText(st.error ?: message?.takeIf { it.startsWith("Enter") })
+            }
+        }
+        item {
+            SectionCard("Stability across restarts") {
+                Text(
+                    "Save the chains as candidates for this game. After every restart, validate them: a candidate passes when it leads " +
+                        "to the value's address (enter it if you found it with a scan) or, if left empty, to the address most candidates agree on. " +
+                        "Candidates that keep passing rise to the top.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedButton(onClick = vm::saveCandidates, enabled = st.chains.isNotEmpty() && !st.running, modifier = Modifier.testTag("saveCandidates")) { Text("Save ${st.chains.size} as candidates") }
+                    if (st.candidates.isNotEmpty()) TextButton(onClick = vm::clearCandidates) { Text("Clear") }
+                }
+                OutlinedTextField(confirmedAddress, { confirmedAddress = it.trim() }, label = { Text("Value's address now (optional, hex)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Button(onClick = { vm.validateCandidates(confirmedAddress) }, enabled = connected && alive && !st.running && st.candidates.isNotEmpty(), modifier = Modifier.testTag("validateCandidates")) {
+                    Text("Validate ${st.candidates.size} saved candidate(s)")
+                }
+                st.stabilityNote?.let { Text(it, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("stabilityNote")) }
+                st.candidates.take(30).forEach { cand ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(cand.chain.describe(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                            Text(
+                                if (cand.checks == 0) "not validated yet" else "passed ${cand.passes} of ${cand.checks} session(s)" + (cand.lastAddress?.let { " · now $it" } ?: ""),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (cand.checks > 0 && cand.passes == cand.checks) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        IconButton(onClick = { vm.add(cand.chain) }, enabled = connected && alive) { Icon(Icons.Filled.Add, contentDescription = "Add to address list") }
+                    }
+                }
             }
         }
         if (st.chains.isNotEmpty() || st.target != null && !st.running && st.error == null) {

@@ -505,6 +505,124 @@ class AppJourneyTest {
         shot("39_guide")
     }
 
+    private fun hexBytes(a: Long, n: Int) = server.peek(DemoGame.PID, a, n).joinToString(" ") { "%02X".format(it.toInt() and 0xFF) }
+
+    @Test fun assemblyOnOffPatchChangesTheGameAndIsSaved() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        // Code patches need editing + non-writable regions (both confirmed).
+        step("enable code patching")
+        openSettings()
+        waitTag("editingSwitch")
+        tag("editingSwitch").performClick()
+        confirmDialog()
+        waitNoSnackbar()
+        tag("nonWritableSwitch").performScrollTo().performClick()
+        confirmDialog()
+
+        step("disassemble")
+        compose.onNodeWithContentDescription("Code").performClick()
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.SUB_ONE))
+        press("codeGo")
+        waitText("sub eax, 1")
+        waitText("mov [0x500120], eax")
+        shot("41_disassembly")
+
+        step("preview nop")
+        tag("codeSource").performTextClearance()
+        tag("codeSource").performTextInput("nop")
+        press("codePreview")
+        waitText("OFF (original)")
+        waitText("ON   90 90 90")
+        shot("42_patch_preview")
+
+        step("switch ON")
+        press("codeOn")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 3) == "90 90 90" }
+        waitText("Patch ON")
+        // The game's routine no longer subtracts a coin.
+        DemoGame.spendCoin(server)
+        assertEquals(5000, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+        shot("43_patch_on")
+
+        step("save patch")
+        press("codeSave")
+        waitTag("cheatName")
+        press("saveConfirm")
+        waitText("Saved code patch")
+
+        step("switch OFF")
+        press("codeOff")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 3) == "83 E8 01" }
+        DemoGame.spendCoin(server)
+        assertEquals(4999, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+
+        step("library switches")
+        tab("Cheats")
+        waitText("code patch")
+        press("codeSwitches-MOCK00001")
+        waitTag("ghEnable-0")
+        press("ghEnable-0")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 3) == "90 90 90" }
+        shot("44_library_on_off")
+
+        step("session check")
+        press("checkSession-MOCK00001")
+        waitTag("sessionSummary")
+        waitText("patched code found (ON)")
+        shot("45_session_check")
+    }
+
+    @Test fun findWhatWritesListsTheInstructionAndDetaches() {
+        val port = java.net.ServerSocket(0).use { it.localPort }
+        server.faults.debugPort = port
+        (compose.activity.application as com.ps4smartcheat.app.SmartCheatApp).container.settings.update { it.copy(interruptPort = port) }
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+
+        step("open code at the store")
+        compose.onNodeWithContentDescription("Code").performClick()
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
+        press("codeGo")
+        waitText("What writes?")
+        compose.onAllNodesWithText("What writes?")[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+
+        step("start watching")
+        waitTag("wpStart")
+        waitText(Address.format(DemoGame.COINS_ADDRESS))
+        press("wpStart")
+        confirmDialog()
+        waitText("Watching")
+        val game = Thread {
+            val until = System.currentTimeMillis() + 15_000
+            while (server.watchpoints().getOrNull(0) == null && System.currentTimeMillis() < until) Thread.sleep(10)
+            repeat(3) { DemoGame.spendCoin(server); Thread.sleep(20) }
+        }.apply { isDaemon = true; start() }
+        waitText("3×", timeoutMs = 30_000)
+        waitText("mov [0x500120], eax")
+        shot("46_what_writes")
+        game.join(5_000)
+
+        step("stop")
+        press("wpStop")
+        waitText("detached")
+        waitMock { !server.debugAttached }
+
+        step("activity check")
+        openSettings()
+        waitTag("openDiagnostics")
+        press("openDiagnostics")
+        press("activityCheck")
+        waitTag("activityResult")
+        waitText("pid 77")
+        shot("47_activity_check")
+    }
+
     @Config(qualifiers = "w1280dp-h800dp-land-xhdpi")
     @Test fun tabletLayoutUsesNavigationRail() {
         connect()

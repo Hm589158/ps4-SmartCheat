@@ -306,6 +306,38 @@ class AppContainer(context: Context) {
         return if (res.alreadyPresent) "Already in the address list as \"${res.entry.label}\"" else "Added pointer ${chain.describe()} to the address list"
     }
 
+    // ------------------------------------------------------------ code tools, debugger, cross-session checks
+
+    /** ps4debug-NG assembler and reference search (server-side). */
+    val codeTools = com.ps4smartcheat.core.asm.CodeTools(client)
+    /** Framed access for the debugger session (ps4debug-NG only). */
+    val transport: com.ps4smartcheat.core.protocol.ServerScanTransport get() = client
+    /** Pointer-chain candidates per game, ranked by how often they survived restarts. */
+    val pointerCandidates = com.ps4smartcheat.core.pointer.PointerCandidateStore(File(context.filesDir, "pointer-candidates"))
+
+    /**
+     * Saves a code patch (ON/OFF) of the selected process. Patches are stored relative to the game executable so
+     * they can be toggled after restarts and exported to GoldHEN; absolute addresses are refused.
+     */
+    suspend fun saveCodePatch(
+        patch: com.ps4smartcheat.core.asm.CodePatch, name: String, group: String?,
+        profileId: String?, newProfileName: String, gameVersion: String,
+    ): String {
+        val sel = _selected.value ?: throw IllegalArgumentException("Select a process first")
+        require(name.isNotBlank()) { "Enter a cheat name" }
+        val module = ModuleResolver.refFor(patch.address, sel.regions)
+            ?: throw IllegalArgumentException("The patch is not inside a module image; only executable-relative patches can be saved")
+        val pid = profileId ?: cheats.createProfile(newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name).id
+        val entry = CheatEntry(
+            id = cheats.newId(), name = name.trim(), type = ValueType.INT8, address = patch.address, module = module,
+            originalBytes = Hex.encode(patch.off), discoveredPid = sel.pid, patchBytes = Hex.encode(patch.on),
+            assembly = patch.source, group = group?.trim()?.ifEmpty { null }, signature = patch.signature,
+        )
+        cheats.upsertCheat(pid, entry)
+        log.event(EventLevel.INFO, EventCategory.CHEAT, "code patch saved", "offset" to "${module.name}+0x${java.lang.Long.toHexString(module.offset)}", "bytes" to patch.length)
+        return "Saved code patch \"${entry.name}\" (${module.name}+0x${java.lang.Long.toHexString(module.offset).uppercase()})"
+    }
+
     fun updateRegions(regions: List<MemoryRegion>) {
         _selected.value = _selected.value?.copy(regions = regions)
     }

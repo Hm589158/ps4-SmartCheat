@@ -49,6 +49,19 @@ The mock is an independent implementation of the server side over real TCP, with
 * `PatternSearchTest` – hex/wildcard/text parsing, matches across chunk borders, none across regions, alignment,
   hit cap; results equal to brute force over mock memory.
 
+* `X86Test` – decoding of the demo game's routine (RIP-relative targets, read/write operands), branches and invalid
+  bytes, effective addresses from registers, the instruction that ends at a trap RIP, sync of a sweep before an
+  address, signatures with wildcarded displacements.
+* `CodePatchTest` – assembling on the mock (incl. Keystone-style errors and reconnect), reference search, missing
+  command on older payloads, whole-instruction planning with NOP padding and refusals, ON/OFF that really changes the
+  demo game's behaviour, library round trip, GoldHEN groups and running-title check, switching from the library.
+* `AccessMonitorTest` – find what writes/accesses with the mock debugger (instruction, count, registers, effective
+  address), stop and detach, busy debugger, dropped connection ends the session, failed connect-back, port in use,
+  watchpoint alignment/slot checks, SIGCONT, interrupt packet layout.
+* `SessionValidatorTest` – after a restart: module entries valid, absolute entries unverified, broken pointers
+  invalid; moved code found again by signature; patched state recognised; pointer candidates ranked over three
+  restarts by consensus and by a confirmed address; activity probe; error advice.
+
 Run: `cd android && ./gradlew :core:test` (works without an Android SDK).
 
 ## Android — end-to-end UI journey (automated, mock backend)
@@ -62,7 +75,10 @@ public addresses are blocked; address list survives a game restart (module-relat
 pattern search; "Value between" scan; undo/redo and memory-viewer byte patches inside the journey; address entry
 saved as a cheat; connection diagnostics latency test and guide; tablet layout (1280 dp landscape) with a navigation
 rail; pointer scan from an address-list entry finds the static chain, and the
-added pointer entry follows the object when the mock game moves it. This shows the app works end to end with a ps4debug-NG-compatible server; it is
+added pointer entry follows the object when the mock game moves it; an Assembly ON/OFF patch (disassemble, assemble
+`nop` on the mock, ON/OFF with confirmation, the demo routine stops/starts spending coins, save, switch from the
+library, session check); "What writes?" lists the store instruction with its hit count, stops and detaches; game
+activity check. This shows the app works end to end with a ps4debug-NG-compatible server; it is
 not a PS4 test.
 
 ## Android

@@ -30,6 +30,9 @@ data class PointerScanState(
     val pointerCount: Long = 0,
     val notes: List<String> = emptyList(),
     val error: String? = null,
+    /** Saved candidates of the selected game, ranked by how often they survived restarts. */
+    val candidates: List<com.ps4smartcheat.core.pointer.PointerCandidate> = emptyList(),
+    val stabilityNote: String? = null,
 )
 
 /**
@@ -121,6 +124,70 @@ class PointerScanService(private val c: AppContainer, private val spillDir: java
     }
 
     fun cancel() { job?.cancel() }
+
+    // ------------------------------------------------------------ stability across restarts
+
+    /** Loads the saved candidates of the selected game (no console access). */
+    fun loadCandidates() {
+        val sel = c.selectedProcess.value ?: return
+        val (_, list) = c.pointerCandidates.load(c.gameKey(sel))
+        _state.update { it.copy(candidates = list) }
+    }
+
+    /** Adds the current chains to the game's saved candidates (existing ones keep their history). */
+    fun saveCandidates() {
+        val sel = c.selectedProcess.value ?: return
+        val st = _state.value
+        if (st.chains.isEmpty()) return
+        val key = c.gameKey(sel)
+        val (label, existing) = c.pointerCandidates.load(key)
+        val merged = com.ps4smartcheat.core.pointer.PointerStability.merge(existing, st.chains)
+        c.pointerCandidates.save(key, label.ifEmpty { st.type.label }, merged)
+        _state.update { it.copy(candidates = merged, stabilityNote = "${merged.size} candidate(s) saved for this game. Validate them after each restart.") }
+    }
+
+    /**
+     * Follows every saved candidate in the current game session. With [confirmed] (the value's address found by a
+     * scan) a candidate passes when it leads there; otherwise when it agrees with the address most candidates reach.
+     */
+    fun validateCandidates(confirmed: Long?) {
+        val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: return
+        if (job?.isActive == true) return
+        val key = c.gameKey(sel)
+        val (label, list) = c.pointerCandidates.load(key)
+        if (list.isEmpty()) { _state.update { it.copy(stabilityNote = "No saved candidates for this game.") }; return }
+        _state.update { it.copy(running = true, stage = "Validating candidates", error = null) }
+        job = c.appScope.launch {
+            try {
+                val regions = c.backend.getMemoryRegions(sel.pid)
+                val size = (_state.value.type).size
+                val r = com.ps4smartcheat.core.pointer.PointerStability.validate(c.backend, sel.pid, list, regions, size, confirmed)
+                c.pointerCandidates.save(key, label, r.updated)
+                val ref = r.reference?.let { Address.format(it) }
+                _state.update {
+                    it.copy(
+                        running = false, stage = null, candidates = r.updated,
+                        stabilityNote = when {
+                            ref == null -> "No address to compare with: fewer than two candidates agree. Enter the value's address found by a scan."
+                            r.referenceIsConsensus -> "${r.passed} of ${list.size} lead to $ref (the address most candidates agree on) in pid ${sel.pid}."
+                            else -> "${r.passed} of ${list.size} lead to $ref in pid ${sel.pid}."
+                        },
+                    )
+                }
+            } catch (e: CancellationException) {
+                _state.update { it.copy(running = false, stage = null) }
+                throw e
+            } catch (e: BackendException) {
+                _state.update { it.copy(running = false, stage = null, error = "Validation failed: ${e.message}") }
+            }
+        }
+    }
+
+    fun clearCandidates() {
+        val sel = c.selectedProcess.value ?: return
+        c.pointerCandidates.clear(c.gameKey(sel))
+        _state.update { it.copy(candidates = emptyList(), stabilityNote = "Saved candidates removed.") }
+    }
 
     companion object {
         /** 32 M pointers ≈ 512 MiB of run files at most; RAM while building ≈ 16 B × [RUN_SIZE] = 32 MiB. */

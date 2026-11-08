@@ -11,7 +11,7 @@ Only the commands listed under "Used by PS4 SmartCheat" are sent by the app.
 | Source | What was used |
 |---|---|
 | `GoldHEN/ps4debug` | README only (repository ships `ps4debug.bin`, no source). Lists FW 11.00 as supported, v1.1.19. |
-| `Pharaoh2k/ps4debug-NG` | `debugger/include/protocol.h`, `proc.h`, `debugger/source/server.c`, `proc.c`, `fw.c`, `console.c`, `PROTOCOL.md` |
+| `Pharaoh2k/ps4debug-NG` | `debugger/include/protocol.h`, `proc.h`, `debug.h`, `debugger/source/server.c`, `proc.c`, `assemble.c`, `debug.c`, `fw.c`, `console.c`, `PROTOCOL.md` (v1.3.4, commit `8be828f`) |
 | `avan06/PS4CheaterNeo` | `common/ps4dbg/libdebug/PS4DBG*.cs` (client library derived from jogolden/ps4debug), `Process.cs`, `Main.cs`, `CheatJson.cs`, `SectionTool.cs` |
 | `GoldHEN/GoldHEN_Cheat_Repository` | 1881 JSON cheat files (schema survey) |
 | `GoldHEN/GoldHEN_Plugins_SDK` | headers listed; not needed for the MVP (no console-side component yet) |
@@ -25,7 +25,8 @@ Only the commands listed under "Used by PS4 SmartCheat" are sent by the app.
   `CMD_DATA_NULL 0xF0000003`, `CMD_ALREADY_DEBUG 0xF0000004`, `CMD_INVALID_INDEX 0xF0000005`.
 * **When a handler returns an error the server usually closes the connection** (`server.c`: `if (r) goto error`).
   The client therefore drops the socket after an error status and reconnects transparently on the next request.
-* UDP 1010 discovery (`0xFFFFAAAA` echo) and TCP 755 debug-interrupt channel exist but are **not used**.
+* UDP 1010 discovery (`0xFFFFAAAA` echo) exists but is **not used**. The TCP 755 debug-interrupt channel is used only
+  by "What writes / accesses" (see *Debugger*).
 
 ## Used by PS4 SmartCheat — verified layouts
 
@@ -131,10 +132,75 @@ re-reads the first page of each section, so results beyond the first page are wr
 mapping, sends one 8-byte packet per match, has no result cap and cannot be cancelled. GoldHEN's build is binary-only,
 so whether it is fixed cannot be verified. It is therefore not used.
 
+## Code tools (ps4debug-NG) — verified in source
+
+### Assemble `0xBDAA0024` (raw literal; `assemble.c` `proc_assemble_handle`, dispatched in `proc.c` `proc_handle`)
+
+* Request body: `u64 base_addr; u32 ks_opt_syntax;` (12 bytes) followed by the assembly text (no NUL needed).
+  `base_addr` is the address the code will run at (Keystone resolves RIP-relative operands and branches against it).
+  The app sends syntax `0` (Keystone default, Intel) and the text one statement per line.
+* Success: `CMD_SUCCESS`, `u32 byte_len; u32 insn_count;`, then `byte_len` machine-code bytes.
+* Error: `CMD_ERROR`, `u32 ks_errno; u32 msg_len;`, then the Keystone message; the handler returns 1, so the server
+  **closes the connection** (the client reconnects). A build without the command answers `CMD_ERROR` alone and
+  closes (`proc_handle` default) — reported as "update ps4debug-NG". Needs no attached process and no auth.
+
+### Find references `CMD_PROC_FIND_XREFS_TO = 0xBDAA0022` (`proc.c` `proc_find_xrefs_to_handle`)
+
+* Request body (24 bytes): `u32 pid; u64 scan_address; u32 scan_length; u64 target_address;`.
+* Reply as implemented: `CMD_SUCCESS`, then a stream of `u64` instruction addresses whose RIP-relative memory operand
+  resolves to `target_address`, ended by `0xFFFFFFFFFFFFFFFF`. **Upstream `PROTOCOL.md` describes a count-prefixed
+  `(u64, u8 kind)` list; the code sends the sentinel-terminated stream above, which is what the app reads.**
+  The server sweeps linearly with Zydis and skips one byte on undecodable data.
+
+### Disassembly `CMD_PROC_DISASM_REGION = 0xBDAA0020` — verified, not used
+
+Returns 32-byte metadata records per instruction (`addr, rip_rel_target, mem_disp, length, kind, mem_base_reg,
+mem_index_reg, mem_scale, mnemonic_lo`) ended by a 32-byte `0xFF` sentinel — **no mnemonic or operand text**.
+The app therefore decodes and formats instructions on the phone (iced-x86, MIT) from bytes read with
+`CMD_PROC_READ`; boundaries before an address are found by re-synchronising a linear sweep.
+
+## Debugger (ps4debug-NG) — verified in source
+
+Used only by "What writes / accesses this address". Only the commands below are sent; breakpoints, register
+writes, single-stepping and FS/GS writes are not used.
+
+| Command | Body | Reply | Source |
+|---|---|---|---|
+| `CMD_DEBUG_ATTACH 0xBDBB0001` | `u32 pid; u32 client_ip` (network byte order) | `CMD_SUCCESS` / `CMD_ALREADY_DEBUG` / `CMD_ERROR` (closes) | `debug.c` `debug_attach_handle_svc`, routed in `server.c` |
+| `CMD_DEBUG_DETACH 0xBDBB0002` | — | `CMD_SUCCESS` | `debug.c` `debug_detach_handle` → `debug_full_teardown` |
+| `CMD_DEBUG_SET_WATCHPOINT 0xBDBB0004` | `u32 index (0-3); u32 enabled; u32 length; u32 breaktype; u64 address` | `CMD_SUCCESS` / `CMD_INVALID_INDEX` | `debug.c` `debug_set_watchpoint_handle` |
+| `CMD_DEBUG_CONTINUE 0xBDBB0010` | `u32 stop` (0 = resume) | `CMD_SUCCESS` | `debug.c` `debug_continue_handle` |
+| `CMD_DEBUG_PROCESS_STOP 0xBDBB0500` | `u32 pid; u8 state` (0 resume) | `CMD_SUCCESS` | `debug.c` `debug_process_stop_handle` |
+
+* **Attach order.** The server ptrace-attaches, continues the process, then opens a TCP connection **from the PS4
+  to `client_ip:755`** (`connect_debugger`) and only then answers `CMD_SUCCESS`. The listener must therefore exist
+  before the request. If that connection fails the server answers `CMD_ERROR` but the process stays ptrace-attached
+  without a session (upstream behaviour) — the app only sends ATTACH after its listener is open and tells the user to
+  restart the game if attaching failed.
+* **Port 755 on Android.** Apps without root cannot listen on ports below 1024. The app listens on the configured
+  port (default 755) and can announce a relay's IPv4 address instead of its own; the relay forwards 755 to the app.
+* **Watchpoint encoding.** `length` is the DR7 LEN code (`1→0, 2→1, 8→2, 4→3`, `debug.h DBREG_DR7_LEN_*`) and
+  `breaktype` the DR7 R/W code (`EXEC 0, WRONLY 1, RDWR 3`); the server ORs `breaktype | 4*length` into DR7 for the
+  slot and applies DR0-3/DR7 to every thread. Addresses must be aligned to the length (x86 rule).
+* **Interrupt packet** (`debug.h struct debug_interrupt_packet`, packed, `0x4A0` bytes): `u32 lwpid; u32 status;
+  char tdname[40]; __reg64 (176 bytes); savefpu_ymm (832 bytes); __dbreg64 (16 × u64)`. `__reg64` is 176 bytes —
+  15 GPRs (r15…rax), `u32 trapno, u16 fs, u16 gs, u32 err, u16 es, u16 ds`, then `rip, cs, rflags, rsp, ss`;
+  `CMD_DEBUG_GETREGS` sends 176 bytes. (Upstream `PROTOCOL.md` says 184.) `status` is the wait4 status
+  (signal = `(status >> 8) & 0xFF`, SIGTRAP = 5); DR6 bits 0-3 tell which slot fired.
+* **Stops.** Events are produced by the attaching client's server thread while its socket is idle
+  (`dispatch_debug_events`). After an event the process stays stopped until `CMD_DEBUG_CONTINUE`; the app resumes
+  immediately and decodes the instruction afterwards. Data watchpoints trap **after** the access, so the reported
+  RIP is the next instruction; the app decodes the instruction that ends at RIP.
+* **Session end.** `DETACH`, or closing the command connection (`server.c free_client` → `debug_full_teardown`:
+  breakpoints restored, debug registers cleared, `PT_DETACH`). Only one session can exist (`CMD_ALREADY_DEBUG`).
+* **Resume a stopped process.** Without a session, `CMD_DEBUG_PROCESS_STOP` with state 0 sends `SIGCONT` (signal 19
+  on FreeBSD) to the pid — offered in Diagnostics when a game looks frozen.
+
 ## Not implemented on purpose
 
-Kernel read/write (`0xBDCC…`), RPC/ELF loading, debugger attach/breakpoints, console reboot, AOB scans, Turbo
-snapshot (Phase B) scans.
+Kernel read/write (`0xBDCC…`), RPC/ELF loading, memory allocation/protection changes, breakpoints, register
+writes, single-stepping, server-side AOB scans (`0xBDAA0501/0502`; pattern search runs on the phone), console
+reboot, Turbo snapshot (Phase B) scans.
 
 ## Limits applied by the client
 

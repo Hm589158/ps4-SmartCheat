@@ -173,7 +173,43 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    fun closeGoldHen() { _gh.value = null; _ghChecks.value = emptyMap(); _ghMismatch.value = null }
+    fun closeGoldHen() { _gh.value = null; _ghChecks.value = emptyMap(); _ghMismatch.value = null; _ghLibrary.value = false }
+
+    private val _ghLibrary = MutableStateFlow(false)
+    /** True when the ON/OFF card shows code patches of a saved profile (not an opened GoldHEN file). */
+    val ghLibrary = _ghLibrary.asStateFlow()
+
+    /** Shows the profile's code patches as ON/OFF switches (same checks and verified writes as GoldHEN mods). */
+    fun openCodePatches(p: CheatProfile) {
+        val f = com.ps4smartcheat.core.cheat.CodeCheats.asGoldHenFile(p) ?: run { _error.value = "This profile has no code patches"; return }
+        _gh.value = f
+        _ghLibrary.value = true
+        _ghChecks.value = emptyMap()
+        _error.value = null
+        checkGoldHen()
+    }
+
+    private val _report = MutableStateFlow<Pair<CheatProfile, com.ps4smartcheat.core.validate.ValidationReport>?>(null)
+    /** Result of the cross-session check (profile + the game's address list). */
+    val report = _report.asStateFlow()
+
+    /** Read-only check of what still holds in this game session (after a restart or update). */
+    fun checkSession(p: CheatProfile) {
+        val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: run { _error.value = "Select the running game first"; return }
+        viewModelScope.launch {
+            try {
+                val regions = c.backend.getMemoryRegions(sel.pid)
+                c.updateRegions(regions)
+                val addresses = c.addresses.entries(c.gameKey(sel))
+                _report.value = p to com.ps4smartcheat.core.validate.SessionValidator.validate(c.backend, sel.pid, regions, addresses, p, sel.name)
+                _error.value = null
+            } catch (e: BackendException) {
+                _error.value = com.ps4smartcheat.core.diag.ErrorAdvisor.diagnose(e).format()
+            }
+        }
+    }
+
+    fun closeReport() { _report.value = null }
 
     /** Reads the bytes of every applicable mod in the selected game (read-only). */
     fun checkGoldHen() {
@@ -283,7 +319,8 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
 
     /** Builds GoldHEN JSON; returns the suggested file name if export is possible. */
     fun prepareGoldHen(p: CheatProfile, gameName: String, credits: String): String? {
-        val r = GoldHenExporter.export(p, gameName, credits.split(',').map { it.trim() })
+        val running = c.selectedProcess.value?.takeIf { !it.exited && it.name == p.processName }?.titleId
+        val r = GoldHenExporter.export(p, gameName, credits.split(',').map { it.trim() }, runningTitleId = running)
         if (r.json == null) {
             _error.value = (r.errors + r.skipped).joinToString("\n")
             return null
@@ -325,6 +362,8 @@ fun CheatsScreen() {
     val ghChecks by vm.ghChecks.collectAsStateWithLifecycle()
     val ghMismatch by vm.ghMismatch.collectAsStateWithLifecycle()
     val ghToggle by vm.ghToggle.collectAsStateWithLifecycle()
+    val ghLibrary by vm.ghLibrary.collectAsStateWithLifecycle()
+    val report by vm.report.collectAsStateWithLifecycle()
     val ghOpen = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.openGoldHen(resolver, uri)
     }
@@ -352,7 +391,10 @@ fun CheatsScreen() {
             if (profiles.isEmpty()) Text("No cheats saved yet. Save one from the Memory Editor.", modifier = Modifier.padding(top = 8.dp))
         }
         gh?.let { f ->
-            item { GoldHenCard(f, ghChecks, ghMismatch, canWrite = selected?.exited == false, onCheck = vm::checkGoldHen, onClose = vm::closeGoldHen, onToggle = vm::prepareGoldHenToggle) }
+            item { GoldHenCard(f, ghChecks, ghMismatch, canWrite = selected?.exited == false, onCheck = vm::checkGoldHen, onClose = vm::closeGoldHen, onToggle = vm::prepareGoldHenToggle, library = ghLibrary) }
+        }
+        report?.let { (p, r) ->
+            item { ValidationCard(p, r, onClose = vm::closeReport) }
         }
         items(profiles, key = { it.id }) { p ->
             val check = checks[p.id]
@@ -390,6 +432,12 @@ fun CheatsScreen() {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { vm.validate(p) }, enabled = isCurrentGame) { Text("Validate") }
                     OutlinedButton(onClick = { goldHenProfile = p }, enabled = p.cheats.isNotEmpty()) { Text("GoldHEN export") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (p.cheats.any { it.isPatch }) {
+                        OutlinedButton(onClick = { vm.openCodePatches(p) }, enabled = isCurrentGame, modifier = Modifier.testTag("codeSwitches-${p.name}")) { Text("ON/OFF switches") }
+                    }
+                    TextButton(onClick = { vm.checkSession(p) }, enabled = isCurrentGame, modifier = Modifier.testTag("checkSession-${p.name}")) { Text("Check after restart") }
                 }
             }
         }
@@ -491,7 +539,13 @@ private fun CheatRow(entry: CheatEntry, check: CheatCheck?, canApply: Boolean, o
         Column(Modifier.weight(1f)) {
             Text(entry.name, style = MaterialTheme.typography.bodyLarge)
             val where = entry.module?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: Address.format(entry.address)
-            Text("$where · ${entry.type.label} → ${entry.replacementValue ?: "—"}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            if (entry.isPatch) {
+                Text("$where · code patch${entry.group?.let { " · group $it" } ?: ""}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                entry.assembly?.let { Text(it.replace('\n', ';'), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                Text("ON ${entry.patchBytes} / OFF ${entry.originalBytes}", fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else {
+                Text("$where · ${entry.type.label} → ${entry.replacementValue ?: "—"}" + (entry.group?.let { " · group $it" } ?: ""), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+            }
             if (check != null) {
                 Text(
                     check.status.label + (check.resolvedAddress?.let { " @ ${Address.format(it)}" } ?: ""),
@@ -500,7 +554,7 @@ private fun CheatRow(entry: CheatEntry, check: CheatCheck?, canApply: Boolean, o
                 )
             }
         }
-        TextButton(onClick = onApply, enabled = canApply) { Text(if (check == null) "Validate first" else "Apply") }
+        if (!entry.isPatch) TextButton(onClick = onApply, enabled = canApply) { Text(if (check == null) "Validate first" else "Apply") }
         IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, contentDescription = "Edit cheat") }
         IconButton(onClick = onDelete) { Icon(Icons.Filled.Delete, contentDescription = "Delete cheat") }
     }
@@ -516,11 +570,13 @@ private fun GoldHenCard(
     onCheck: () -> Unit,
     onClose: () -> Unit,
     onToggle: (Int, Boolean) -> Unit,
+    library: Boolean = false,
 ) {
-    SectionCard("GoldHEN file: ${f.name.ifBlank { "unnamed" }}") {
+    SectionCard(if (library) "Code patches: ${f.name}" else "GoldHEN file: ${f.name.ifBlank { "unnamed" }}") {
         Text("${f.titleId.ifBlank { "no title ID" }} · v${f.version.ifBlank { "?" }} · ${f.process} · ${f.mods.size} mod(s)", style = MaterialTheme.typography.bodySmall)
         Text(
-            "Offsets are read as relative to the start of ${f.process} (PS4CheaterNeo's interpretation; unverified on hardware). " +
+            if (library) "Each switch writes the saved ON or OFF bytes after confirmation and verifies them. It is only offered when the code holds exactly the other state, so another game version is refused."
+            else "Offsets are read as relative to the start of ${f.process} (PS4CheaterNeo's interpretation; unverified on hardware). " +
                 "A mod is only enabled when the memory holds exactly its \"off\" bytes, so files for another game version are refused.",
             style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -547,5 +603,23 @@ private fun GoldHenCard(
                 if (ck != null && ck.canDisable) OutlinedButton(onClick = { onToggle(i, false) }, enabled = canWrite, modifier = Modifier.testTag("ghDisable-$i")) { Text("Disable") }
             }
         }
+    }
+}
+
+
+@Composable
+private fun ValidationCard(p: CheatProfile, r: com.ps4smartcheat.core.validate.ValidationReport, onClose: () -> Unit) {
+    SectionCard("Session check: ${p.name}") {
+        Text("pid ${r.pid}: ${r.valid} OK · ${r.invalid} need attention. Read-only — nothing was changed.", style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("sessionSummary"))
+        r.items.forEach { i ->
+            HorizontalDivider()
+            Text("${i.name} (${i.kind.label})", style = MaterialTheme.typography.bodyMedium)
+            Text(
+                i.validity.label + " — " + i.detail,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (i.validity.ok) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.error,
+            )
+        }
+        TextButton(onClick = onClose) { Text("Close") }
     }
 }

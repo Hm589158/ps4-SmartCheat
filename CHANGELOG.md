@@ -3,6 +3,34 @@
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
 ## 1.0.0-beta
+
+### Code tools (new in this build — verified against the simulated server only)
+- **Disassembler** (Code, wrench icon; "Disassemble" in the memory viewer): x86-64 decoded on the phone (iced-x86,
+  MIT) with addresses, `module+offset`, bytes, W/R/branch markers, branch following and "Code using it" (server-side
+  reference search, `CMD_PROC_FIND_XREFS_TO`). ps4debug-NG's own disassembler sends no instruction text, so it is
+  not used for display.
+- **Assembly ON/OFF cheat builder**: new instructions are assembled **on the PS4** by ps4debug-NG's Keystone
+  (`0xBDAA0024`) at the exact address; whole instructions are replaced and NOP-padded; the preview shows the original
+  (OFF) and new (ON) bytes and warns about replaced control flow or several instructions. ON/OFF are only allowed
+  from the opposite state, need confirmation and are verified by a fresh read. Hex bytes work without the assembler.
+- Code patches are saved in the cheat library (assembly, ON/OFF bytes, optional group, AOB signature with wildcarded
+  constants), switched in Cheats → "ON/OFF switches", and exported to GoldHEN: entries sharing a group become one mod;
+  a group is skipped whole if any member cannot be exported; export is refused when the profile's title ID differs
+  from the running game.
+- **What writes / accesses this address** (address list, or from the disassembler): attaches ps4debug-NG's debugger,
+  sets a hardware watchpoint (DR0), lists every instruction with hit count, thread and registers, resumes the game
+  after every stop and detaches at the end (1000 hits / 2 minutes / Stop / leaving the screen). The PS4 connects back
+  on port 755: rooted phones listen directly, others use a relay ([docs/WATCHPOINTS.md](https://github.com/Hm589158/ps4-SmartCheat/blob/main/docs/WATCHPOINTS.md)).
+- **Check after restart** (Cheats): read-only check of the address list (module offsets, pointer chains), value cheats
+  and code patches; when a patch's bytes changed, its signature is searched and the new offset is shown.
+- **Pointer candidates**: save scan results per game and validate them after each restart against the confirmed
+  address or the address most candidates agree on; ranked by how many restarts they survived.
+- **Diagnostics**: game activity check (is the game running or stopped?), "Resume process" (SIGCONT), plain-text
+  diagnostic report export, and explanations with next steps for connection, assembler and debugger errors.
+- Mock server: assembler stand-in, reference search, debugger with watchpoints and interrupt channel, and a demo
+  game routine with real x86-64 code that honours patches.
+
+### Beta
 - **Beta.** Version 1.0.0-beta: feature-complete, every automated check green, hardware verification in progress.
   Builds are published as `v1.0.0-beta.<build>` ("PS4 SmartCheat v1.0.0 Beta · build N",
   `PS4-SmartCheat-v1.0.0-beta.<build>.apk`) and marked **Latest** (not pre-release), so the repository's Releases

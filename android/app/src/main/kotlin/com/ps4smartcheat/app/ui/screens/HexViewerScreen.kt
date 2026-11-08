@@ -200,7 +200,7 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
+fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit, onDisassemble: (Long) -> Unit = {}) {
     val vm = appViewModel { HexViewerViewModel(it) }
     LaunchedEffect(Unit) { vm.init(initialAddress) }
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -244,6 +244,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit) {
                 Button(onClick = vm::go, enabled = selected != null && connected) { Text("Go") }
                 OutlinedButton(onClick = { vm.page(1) }, enabled = rows.isNotEmpty()) { Text("+256 ›") }
             }
+            target?.let { t -> OutlinedButton(onClick = { onDisassemble(t) }, modifier = Modifier.testTag("hexDisassemble")) { Text("Disassemble at ${Address.format(t)}") } }
             LabeledSwitch("Live refresh", live, vm::setLive, "Re-reads every ${vm.intervalMs} ms and highlights bytes that changed.", enabled = connected)
             if (loading && !live) LinearProgressIndicator(Modifier.fillMaxWidth())
             targetInfo?.let { Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("targetInfo")) }

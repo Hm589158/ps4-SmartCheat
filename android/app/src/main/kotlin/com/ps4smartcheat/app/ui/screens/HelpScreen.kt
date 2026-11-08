@@ -54,11 +54,37 @@ private val sections = listOf(
         ),
     ),
     HelpSection(
-        "5. Troubleshooting",
+        "5. Code: Assembly ON/OFF cheats",
+        listOf(
+            "Open Code (wrench icon), or \"Disassemble\" in the memory viewer. Instructions are decoded on the phone; W marks writes, R reads.",
+            "Tap the instruction to change, type new instructions (e.g. nop, or mov eax, 999) → Preview. The PS4 assembles them at that address (ps4debug-NG). Whole instructions are replaced and padded with NOPs; the preview shows ON and OFF bytes and warnings.",
+            "Enable editing and \"Allow writes to non-writable regions\" in Settings, then ON (1) writes the new code and OFF (0) restores the original — each confirmed and verified.",
+            "Save… stores the patch (with an optional group) in the cheat library: Cheats → ON/OFF switches, and GoldHEN export, so GoldHEN can switch it from its menu without the phone.",
+        ),
+    ),
+    HelpSection(
+        "6. What writes / accesses this address",
+        listOf(
+            "Address list → open an entry → \"What writes?\" (or from Code). The PS4 debugger sets a hardware watchpoint; play until the value changes. Each instruction is listed with its hit count and registers; open it in Code to patch it.",
+            "The PS4 connects back to the phone on port 755. Android allows that only with root. Without root, run a relay on a PC in the same network, e.g. Linux: sudo socat TCP-LISTEN:755,fork,reuseaddr TCP:<phone-ip>:7550 — Windows: netsh interface portproxy add v4tov4 listenport=755 connectaddress=<phone-ip> connectport=7550 — then set Settings → Debugger: port 7550, relay = the PC's IP.",
+            "Every hit pauses the game briefly; monitoring stops after 1000 hits or 2 minutes and the debugger detaches. Only one debugger session can exist on the PS4.",
+        ),
+    ),
+    HelpSection(
+        "7. After a restart or update",
+        listOf(
+            "Cheats → \"Check after restart\" checks the address list and the profile: module offsets, pointer chains, writable values, and code patches (original or patched bytes). Read-only.",
+            "If a code patch's bytes changed (another game version), its saved signature is searched in the executable and the new offset is shown; nothing is changed automatically.",
+            "Pointer scan → Save as candidates, then after each restart Validate: chains that keep leading to the value rank first.",
+        ),
+    ),
+    HelpSection(
+        "8. Troubleshooting",
         listOf(
             "Connection refused: the payload is not running or the IP/port is wrong.",
             "Scans slow: use Turbo (ps4debug-NG) and 5 GHz Wi-Fi or Ethernet; Settings → Max region size skips huge regions.",
-            "Settings → Connection diagnostics: latency test, traffic, reconnects, recent errors. Export the log to report problems.",
+            "Settings → Connection diagnostics: latency test, traffic, reconnects, game activity check, recent errors. Export the diagnostic report or the log to report problems.",
+            "Game frozen after a debugger session? Diagnostics → Check game activity → Resume process.",
         ),
     ),
 )

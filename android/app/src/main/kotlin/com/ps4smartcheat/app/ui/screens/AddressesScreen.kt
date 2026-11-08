@@ -234,7 +234,10 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> Unit, onPointerScan: (Long, ValueType) -> Unit = { _, _ -> }) {
+fun AddressesScreen(
+    onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> Unit, onPointerScan: (Long, ValueType) -> Unit = { _, _ -> },
+    onWatch: (address: Long, size: Int, writes: Boolean) -> Unit = { _, _, _ -> },
+) {
     val vm = appViewModel { AddressesViewModel(it) }
     val connection by vm.connection.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -319,6 +322,7 @@ fun AddressesScreen(onEdit: (Long, ValueType) -> Unit, onViewMemory: (Long) -> U
                     onEdit = { onEdit(row.resolved.address, row.resolved.entry.type) },
                     onView = { onViewMemory(row.resolved.address) },
                     onPointerScan = { onPointerScan(row.resolved.address, row.resolved.entry.type) },
+                    onWatch = { writes -> onWatch(row.resolved.address, row.resolved.entry.type.size, writes) },
                     onFreeze = { vm.toggleFreeze(row) },
                     onRename = { vm.rename(row, it) },
                     onDelete = { vm.remove(row); expanded = null },
@@ -337,6 +341,7 @@ private fun WatchRowView(
     row: WatchRow, region: String, expanded: Boolean, canWrite: Boolean,
     onToggle: () -> Unit, onEdit: () -> Unit, onView: () -> Unit, onPointerScan: () -> Unit, onFreeze: () -> Unit,
     onRename: (String) -> Unit, onDelete: () -> Unit,
+    onWatch: (writes: Boolean) -> Unit = {},
     saveForm: @Composable () -> Unit = {},
 ) {
     val r = row.resolved
@@ -374,6 +379,10 @@ private fun WatchRowView(
                         Text(if (row.frozen) "Unfreeze" else "Freeze")
                     }
                     OutlinedButton(onClick = onView, enabled = r.status.readable) { Text("Memory") }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { onWatch(true) }, enabled = r.status.readable, modifier = Modifier.testTag("whatWrites-${e.label}")) { Text("What writes?") }
+                    TextButton(onClick = { onWatch(false) }, enabled = r.status.readable) { Text("What accesses?") }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(name, { name = it }, label = { Text("Name") }, singleLine = true, modifier = Modifier.weight(1f))

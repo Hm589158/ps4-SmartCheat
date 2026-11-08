@@ -18,6 +18,10 @@ independent mock ps4debug-NG server in CI only.
 | Address list, pointer scan, byte-pattern/text search, byte patches, undo/redo, session resume | mock |
 | GoldHEN cheat export / import | mock; schema from the official cheat repository, offset meaning from PS4CheaterNeo; not yet checked inside GoldHEN |
 | Turbo page-table aliasing | opt-in flag; never exercised |
+| Assembler (`0xBDAA0024`), reference search (`CMD_PROC_FIND_XREFS_TO`) | mock; layouts from the ps4debug-NG 1.3.4 source |
+| Code patches ON/OFF (writes to executable memory) and their GoldHEN export | mock; GoldHEN offset meaning as for value cheats (not yet checked inside GoldHEN) |
+| Debugger attach, hardware watchpoints, interrupt channel (What writes / accesses) | mock; needs port 755 reachable on the phone (root or relay) |
+| Session check, pointer candidates, game activity check, SIGCONT resume | mock |
 | ps4debug-NG 1.3.4 (current upstream) and other firmware listed by ps4debug-NG | expected compatible (same protocol); not yet reported |
 | Classic / GoldHEN ps4debug | not supported (compatibility mode untested; its server scans are never used) |
 | Android | min SDK 26 (Android 8.0), target SDK 36; used on the owner's phone for the hardware report above |

@@ -103,7 +103,7 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
             LabeledSwitch(
                 "Allow writes to non-writable regions", s.allowNonWritableRegions,
                 { on -> if (on) confirmNonWritable = true else vm.update { it.copy(allowNonWritableRegions = false) } },
-                "Code/read-only patches. Each write still needs confirmation.", enabled = s.editingEnabled,
+                "Code/read-only patches. Each write still needs confirmation.", enabled = s.editingEnabled, tag = "nonWritableSwitch",
             )
             LabeledSwitch(
                 "Allow writes to system processes", s.allowSystemProcesses,
@@ -153,6 +153,23 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
                 "Allow non-local addresses", s.allowNonLocalHosts,
                 { on -> if (on) confirmNonLocal = true else vm.update { it.copy(allowNonLocalHosts = false) } },
                 "ps4debug is unauthenticated. Keep this off.",
+            )
+        }
+        SectionCard("Debugger (What writes / accesses)") {
+            Text(
+                "ps4debug-NG reports watchpoint hits by connecting back to this device on port 755. Android allows listening " +
+                    "on ports below 1024 only with root. Without root, run a relay on a computer in the same network that " +
+                    "listens on 755 and forwards to this device's port below (see the Guide).",
+                style = MaterialTheme.typography.bodySmall,
+            )
+            NumberField("Interrupt listen port", s.interruptPort, 1..65_535) { v -> vm.update { it.copy(interruptPort = v) } }
+            var relay by remember(s.interruptRelay) { mutableStateOf(s.interruptRelay) }
+            OutlinedTextField(
+                value = relay,
+                onValueChange = { t -> relay = t.trim(); vm.update { it.copy(interruptRelay = relay) } },
+                label = { Text("Relay IPv4 address (empty = this device)") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth().testTag("relayHost"),
             )
         }
         SectionCard("Appearance") {

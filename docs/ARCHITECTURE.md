@@ -22,13 +22,20 @@ plain JVM (locally and in CI). `app` is a thin MVVM layer over `core`.
 | `live` | `FreezeManager` (client-side periodic writes while connected) |
 | `tools` | `MemoryViewer`/`HexDump` (mapped-only display reads, change diff), `ScanResultsCsv`, `BytePattern`/`PatternSearch` (AOB and text search) |
 | `watch` | Per-game address list: `WatchRepository` (atomic JSON keyed by title ID), `WatchResolver` (module-relative / same session / earlier session / unmapped), `WatchReader` (batched reads within one region) |
-| `pointer` | `PointerScanner` (pointer map as two sorted primitive arrays, bounded backward search to static module data, restart filter), `PointerResolver` (follows a chain reading mapped memory only), `PointerChain` |
+| `pointer` | `PointerScanner` (pointer map as two sorted primitive arrays, bounded backward search to static module data, restart filter), `PointerResolver` (follows a chain reading mapped memory only), `PointerChain`, `PointerStability`/`PointerCandidateStore` (candidates ranked by restarts survived) |
 | `process` | `GameDetector`, `ProcessWatcher` (exit/restart detection) |
+| `asm` | `X86` (iced-x86 decode/format, instruction before a trap RIP, signatures with wildcarded constants), `CodeTools` (ps4debug-NG assembler and reference search), `CodePatchPlanner`/`CodePatch` (whole-instruction ON/OFF patches) |
+| `debug` | `DebugSession` (attach with interrupt listener, watchpoints, continue, detach, SIGCONT), `InterruptListener`/`InterruptChannel` (port-755 connection from the PS4), `AccessMonitor` (what writes / accesses) |
+| `validate` | `SessionValidator` (after restart: address list, pointers, value cheats, code patches with signature search) |
+| `diag` | `LinkDiagnostics` (latency), `ErrorAdvisor` (cause + next steps), `ProcessActivity` (running vs stopped) |
 
 ## Key decisions
 
-* **Backend abstraction first, ps4debug adapter only.** ps4debug-NG is wire-compatible for the commands used,
-  so no separate NG adapter exists; NG-only commands are not used.
+* **Backend abstraction first, ps4debug adapter only.** ps4debug-NG is wire-compatible for the base commands, so
+  no separate NG adapter exists. NG-only commands (scans, assembler, reference search, debugger) run through
+  `ServerScanTransport.exclusive` and are only offered when the payload identifies as ps4debug-NG.
+* **Instruction text on the phone.** ps4debug-NG's disassembler returns metadata only, so x86-64 is decoded with
+  iced-x86 (MIT, pure Java); assembling stays on the PS4 (Keystone) so encodings match the target address.
 * **Three scan backends** (Turbo → server-side → Android) selected per step; see docs/PERFORMANCE.md.
   `ServerScanTransport.exclusive` gives strategies framed access to the single connection; Turbo CANCEL uses a
   short side connection.

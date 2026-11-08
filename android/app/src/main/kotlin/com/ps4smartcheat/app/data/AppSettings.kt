@@ -39,6 +39,10 @@ data class AppSettings(
     val maxRegionMiB: Int = 0,
     /** Select the running game automatically after connecting / when it restarts. */
     val autoSelectGame: Boolean = true,
+    /** Port this device listens on for the debugger's interrupt connection (ps4debug-NG connects to 755). */
+    val interruptPort: Int = 755,
+    /** Optional relay on the local network that listens on 755 and forwards to [interruptPort] here (IPv4). */
+    val interruptRelay: String = "",
 ) {
     fun connectOptions() = ConnectOptions(
         host = host, port = port, connectTimeoutMs = connectTimeoutMs, readTimeoutMs = readTimeoutMs,
@@ -101,6 +105,8 @@ class SettingsStore(context: Context) {
             monitorIntervalMs = prefs.getInt("monitorIntervalMs", d.monitorIntervalMs),
             maxRegionMiB = prefs.getInt("maxRegionMiB", d.maxRegionMiB),
             autoSelectGame = prefs.getBoolean("autoSelectGame", d.autoSelectGame),
+            interruptPort = prefs.getInt("interruptPort", d.interruptPort),
+            interruptRelay = prefs.getString("interruptRelay", d.interruptRelay) ?: d.interruptRelay,
         )
     }
 
@@ -126,6 +132,8 @@ class SettingsStore(context: Context) {
             .putInt("monitorIntervalMs", s.monitorIntervalMs)
             .putInt("maxRegionMiB", s.maxRegionMiB)
             .putBoolean("autoSelectGame", s.autoSelectGame)
+            .putInt("interruptPort", s.interruptPort)
+            .putString("interruptRelay", s.interruptRelay)
             .apply()
     }
 }
