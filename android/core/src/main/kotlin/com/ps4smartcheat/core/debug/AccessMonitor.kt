@@ -4,9 +4,15 @@ import com.ps4smartcheat.core.asm.AsmInstruction
 import com.ps4smartcheat.core.asm.X86
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.DebugBackend
+import com.ps4smartcheat.core.logging.EventCategory
+import com.ps4smartcheat.core.logging.EventLevel
+import com.ps4smartcheat.core.logging.EventSink
+import com.ps4smartcheat.core.logging.log
+import com.ps4smartcheat.core.model.MemoryRegion
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 
@@ -33,72 +39,126 @@ data class MonitorOptions(
     /** Stop after this many stops in total (each one pauses the game for a round trip). */
     val maxHits: Int = 500,
     val maxMillis: Long = 60_000,
+    /** Record the first hit with its registers, then end the session (the game pauses exactly once). */
+    val captureOnce: Boolean = false,
+    /**
+     * Flood guard: more stops than this within one second means the game spends most of its time paused (a value
+     * read every frame, several threads…); monitoring stops before the game stalls.
+     */
+    val maxHitsPerSecond: Int = 40,
 )
 
-data class MonitorResult(val records: List<AccessRecord>, val hits: Int, val stopReason: String)
+/** Why monitoring ended. */
+enum class StopKind { CAPTURED, HIT_LIMIT, TIME_LIMIT, FLOOD, USER, SESSION_LOST, RESUME_FAILED, SIGNAL, ERROR }
+
+data class MonitorResult(
+    val records: List<AccessRecord>,
+    val hits: Int,
+    val stopReason: String,
+    val stopKind: StopKind,
+    /** What the cleanup could confirm (watchpoint cleared, game resumed, session detached). */
+    val release: ReleaseReport,
+)
 
 /**
- * "Find out what writes / accesses this address": a hardware watchpoint (DR0) on the address; every stop is
- * recorded and the game is resumed immediately; the responsible instruction is decoded from the bytes before the
- * trap RIP (data watchpoints trap after the instruction executed). Memory is only read, never written.
+ * "Find out what writes / accesses this address": a hardware watchpoint (DR0) on the address.
+ *
+ * Every stop pauses the whole game until CMD_DEBUG_CONTINUE is confirmed, so the loop resumes **before** doing
+ * anything else (decoding needs memory reads), checks the server's answer, retries once and otherwise ends the
+ * session — DETACH also resumes the process. Whatever happens (limits, flood guard, errors, cancellation) the session
+ * is ended through [DebugSession.release], which verifies each step and can release a session left on the PS4 from
+ * a new connection. Memory is only read, never written.
  */
-class AccessMonitor(private val backend: DebugBackend, private val clock: () -> Long = System::currentTimeMillis) {
+class AccessMonitor(
+    private val backend: DebugBackend,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val events: EventSink = EventSink.NONE,
+) {
 
     suspend fun run(
         session: DebugSession,
         address: Long,
         size: Int,
         options: MonitorOptions,
+        /** Polled about every [POLL_MS]: true ends monitoring normally (results are returned). */
+        shouldStop: () -> Boolean = { false },
         onUpdate: (List<AccessRecord>, Int) -> Unit = { _, _ -> },
     ): MonitorResult {
         val records = LinkedHashMap<Long, AccessRecord>()
         val decoded = HashMap<Long, AsmInstruction?>()
         val accessed = address until address + size
+        val recentHits = ArrayDeque<Long>()
         var hits = 0
         val start = clock()
+        var kind = StopKind.USER
         var reason = "stopped"
         val regions = try { backend.getMemoryRegions(session.pid) } catch (e: BackendException) { emptyList() }
         try {
             session.setWatchpoint(0, address, size, options.type)
+            events.log(EventLevel.INFO, EventCategory.PROCESS, "watchpoint armed", "address" to "0x" + java.lang.Long.toHexString(address),
+                "size" to size, "type" to options.type.name, "captureOnce" to options.captureOnce)
             while (true) {
-                if (!currentCoroutineContext().isActive) { reason = "stopped"; break }
-                if (hits >= options.maxHits) { reason = "hit limit (${options.maxHits}) reached"; break }
-                if (clock() - start >= options.maxMillis) { reason = "time limit reached"; break }
-                if (!session.alive) { reason = "debug session ended (connection re-established)"; break }
-                val ev = session.nextEvent(250) ?: continue
+                if (!currentCoroutineContext().isActive || shouldStop()) { kind = StopKind.USER; reason = "stopped"; break }
+                if (hits >= options.maxHits) { kind = StopKind.HIT_LIMIT; reason = "hit limit (${options.maxHits}) reached"; break }
+                if (clock() - start >= options.maxMillis) { kind = StopKind.TIME_LIMIT; reason = "time limit reached"; break }
+                if (!session.alive) { kind = StopKind.SESSION_LOST; reason = "the debug session ended (connection re-established)"; break }
+                val ev = session.nextEvent(POLL_MS) ?: continue
                 if (ev.signal != DebugProtocol.SIGTRAP) {
-                    // Not our watchpoint (e.g. the game crashed or got a signal). Never swallow it: detach and let the
-                    // process handle it.
-                    reason = "the game stopped with signal ${ev.signal}; monitoring ended and the debugger detached"
+                    // Not a watchpoint (e.g. the game crashed or got a signal). Monitoring ends; release() resumes and detaches.
+                    kind = StopKind.SIGNAL; reason = "the game stopped with signal ${ev.signal}; monitoring ended"
                     break
                 }
-                session.resume() // keep the pause as short as possible
+                // The game is paused right now: resume first, verified.
+                if (!resumeVerified(session)) {
+                    kind = StopKind.RESUME_FAILED
+                    reason = "the PS4 refused to resume the game twice; the session was ended to release it"
+                    break
+                }
+                val now = clock()
+                recentHits.addLast(now)
+                while (recentHits.isNotEmpty() && now - recentHits.first() > 1000) recentHits.removeFirst()
                 if (ev.firedSlots.isNotEmpty() && 0 !in ev.firedSlots) continue
                 hits++
                 val rip = ev.registers.rip
                 val ins = if (decoded.containsKey(rip)) decoded[rip] else locate(session.pid, rip, accessed, ev.registers, regions).also { decoded[rip] = it }
                 val key = ins?.address ?: rip
-                val now = clock()
                 val ea = ins?.let { X86.effectiveAddress(it, ev.registers.values) }
                 records[key] = records[key]?.copy(count = records[key]!!.count + 1, registers = ev.registers, threadName = ev.threadName, effectiveAddress = ea, lastSeenMillis = now)
                     ?: AccessRecord(key, rip, ins, 1, ev.registers, ev.threadName, ea, now, now)
                 onUpdate(records.values.sortedByDescending { it.count }, hits)
+                if (options.captureOnce) { kind = StopKind.CAPTURED; reason = "first hit captured"; break }
+                if (recentHits.size > options.maxHitsPerSecond) {
+                    kind = StopKind.FLOOD
+                    reason = "too many hits (${recentHits.size} in one second) — stopped so the game does not stall. Use Capture once or watch writes only."
+                    events.log(EventLevel.WARN, EventCategory.PROCESS, "watchpoint flood guard", "hitsPerSecond" to recentHits.size)
+                    break
+                }
             }
         } catch (e: CancellationException) {
-            reason = "stopped"
+            kind = StopKind.USER; reason = "stopped"
             throw e
+        } catch (e: DebuggerSessionLostException) {
+            kind = StopKind.SESSION_LOST; reason = e.message ?: "the debug session ended"
         } catch (e: BackendException) {
-            reason = "error: ${e.message}"
+            kind = StopKind.ERROR; reason = "error: ${e.message}"
         } finally {
             withContext(NonCancellable) {
-                runCatching { if (session.alive) session.clearWatchpoint(0) }
-                session.detach()
+                events.log(EventLevel.INFO, EventCategory.PROCESS, "watchpoint monitoring ended", "kind" to kind.name, "hits" to hits, "reason" to reason)
+                session.release()
             }
         }
-        return MonitorResult(records.values.sortedByDescending { it.count }, hits, reason)
+        val report = session.release() // already done: returns the stored report
+        return MonitorResult(records.values.sortedByDescending { it.count }, hits, reason, kind, report)
     }
 
-    private suspend fun locate(pid: Int, rip: Long, accessed: LongRange, regs: Registers, regions: List<com.ps4smartcheat.core.model.MemoryRegion>): AsmInstruction? = try {
+    /** CONTINUE with the server's answer checked; one retry after a short pause. */
+    private suspend fun resumeVerified(session: DebugSession): Boolean {
+        if (session.resume()) return true
+        delay(DebugSession.RESUME_RETRY_DELAY_MS)
+        return session.resume()
+    }
+
+    private suspend fun locate(pid: Int, rip: Long, accessed: LongRange, regs: Registers, regions: List<MemoryRegion>): AsmInstruction? = try {
         // Only read inside the code region holding the trap RIP.
         val region = regions.firstOrNull { it.contains(rip - 1) && it.isReadable }
         val windowStart = maxOf(rip - 2 * X86.MAX_INSTRUCTION_LENGTH, region?.start ?: Long.MAX_VALUE)
@@ -108,5 +168,9 @@ class AccessMonitor(private val backend: DebugBackend, private val clock: () -> 
         }
     } catch (e: BackendException) {
         null
+    }
+
+    companion object {
+        const val POLL_MS = 250
     }
 }

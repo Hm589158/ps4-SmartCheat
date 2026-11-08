@@ -77,8 +77,16 @@ class MainActivity : ComponentActivity() {
         setContent {
             val container = appContainer()
             val settings by container.settings.settings.collectAsStateWithLifecycle()
-            SmartCheatTheme(settings.theme) { AppRoot() }
+            SmartCheatTheme(settings.theme) {
+                AppRoot()
+                NotificationPermissionOnConnect()
+            }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        (application as SmartCheatApp).container.onAppForeground()
     }
 }
 
@@ -308,5 +316,31 @@ private fun NavHostController.navigateTab(route: String) {
         popUpTo(graph.findStartDestination().id) { saveState = true }
         launchSingleTop = true
         restoreState = true
+    }
+}
+
+/**
+ * Android 13+: the "connected" notification of the background connection service needs the notification
+ * permission. Asked once, after the first successful connection (not at app start). Without it the connection is
+ * still kept alive; only the notification is hidden.
+ */
+@androidx.compose.runtime.Composable
+private fun NotificationPermissionOnConnect() {
+    if (android.os.Build.VERSION.SDK_INT < 33 || android.os.Build.FINGERPRINT == "robolectric") return
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val container = appContainer()
+    val state by container.backend.state.collectAsStateWithLifecycle()
+    val launcher = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { }
+    androidx.compose.runtime.LaunchedEffect(state is ConnectionState.Connected) {
+        if (state !is ConnectionState.Connected) return@LaunchedEffect
+        val prefs = context.getSharedPreferences("ui", android.content.Context.MODE_PRIVATE)
+        val granted = androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!granted && !prefs.getBoolean("askedNotifications", false)) {
+            prefs.edit().putBoolean("askedNotifications", true).apply()
+            launcher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 }

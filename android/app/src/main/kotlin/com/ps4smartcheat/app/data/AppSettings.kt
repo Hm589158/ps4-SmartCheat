@@ -43,6 +43,8 @@ data class AppSettings(
     fun connectOptions() = ConnectOptions(
         host = host, port = port, connectTimeoutMs = connectTimeoutMs, readTimeoutMs = readTimeoutMs,
         queryFirmware = queryFirmware, allowNonLocalHosts = allowNonLocalHosts, probeServerScan = probeServerScan,
+        // Wi-Fi waking up (phone screen off, app in the background) can take several seconds: 0.5+1+2+4+8 s.
+        reconnectAttempts = 5,
     )
 
     fun editPolicy() = EditPolicy(editingEnabled, allowNonWritableRegions, allowSystemProcesses)

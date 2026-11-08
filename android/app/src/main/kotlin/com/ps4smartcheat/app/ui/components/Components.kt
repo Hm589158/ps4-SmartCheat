@@ -1,6 +1,8 @@
 package com.ps4smartcheat.app.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.ui.semantics.Role
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -127,4 +129,40 @@ fun ConfirmDialog(
         confirmButton = { TextButton(onClick = onConfirm, modifier = Modifier.testTag("confirm")) { Text(confirmLabel) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
     )
+}
+
+/** Tone of a [StatusPill]. */
+enum class Tone { NEUTRAL, GOOD, WARN, BAD }
+
+/** Small rounded status label, e.g. "Watching", "Released". */
+@Composable
+fun StatusPill(text: String, tone: Tone = Tone.NEUTRAL, modifier: Modifier = Modifier) {
+    val cs = MaterialTheme.colorScheme
+    val (bg, fg) = when (tone) {
+        Tone.NEUTRAL -> cs.surfaceVariant to cs.onSurfaceVariant
+        Tone.GOOD -> cs.secondaryContainer to cs.onSecondaryContainer
+        Tone.WARN -> cs.tertiaryContainer to cs.onTertiaryContainer
+        Tone.BAD -> cs.errorContainer to cs.onErrorContainer
+    }
+    androidx.compose.material3.Surface(color = bg, contentColor = fg, shape = androidx.compose.foundation.shape.RoundedCornerShape(50), modifier = modifier) {
+        Text(text, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+    }
+}
+
+/** One option of a single-choice group: radio button, title and an explanation line. */
+@Composable
+fun ChoiceRow(title: String, description: String?, selected: Boolean, onClick: () -> Unit, enabled: Boolean = true, tag: String? = null) {
+    Row(
+        Modifier.fillMaxWidth()
+            .then(if (tag != null) Modifier.testTag(tag) else Modifier)
+            .selectable(selected = selected, enabled = enabled, role = Role.RadioButton, onClick = onClick)
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        androidx.compose.material3.RadioButton(selected = selected, onClick = null, enabled = enabled)
+        Column(Modifier.padding(start = 8.dp)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            if (description != null) Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+    }
 }

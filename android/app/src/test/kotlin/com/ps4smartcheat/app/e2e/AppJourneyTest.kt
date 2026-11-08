@@ -594,6 +594,7 @@ class AppJourneyTest {
         step("start watching")
         waitTag("wpStart")
         waitText(Address.format(DemoGame.COINS_ADDRESS))
+        press("wpModeContinuous") // list every writer (the default is Capture once)
         press("wpStart")
         confirmDialog()
         waitText("Watching")
@@ -609,8 +610,9 @@ class AppJourneyTest {
 
         step("stop")
         press("wpStop")
-        waitText("detached")
-        waitMock { !server.debugAttached }
+        waitTag("wpReleased")
+        waitText("debugger detached")
+        waitMock { !server.debugAttached && !server.gamePaused }
 
         step("activity check")
         openSettings()
@@ -621,6 +623,44 @@ class AppJourneyTest {
         waitText("pid 77")
         waitText("watchpoints ready") // capability level 1.2 shown in Diagnostics
         shot("47_activity_check")
+    }
+
+    @Test fun captureOnceSavesTheFirstWriterForLater() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        compose.onNodeWithContentDescription("Code").performClick()
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
+        press("codeGo")
+        waitText("What writes?")
+        compose.onAllNodesWithText("What writes?")[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+
+        step("capture once (default mode)")
+        waitTag("wpStart")
+        press("wpStart")
+        confirmDialog()
+        val game = Thread {
+            val until = System.currentTimeMillis() + 15_000
+            while (server.watchpoints().getOrNull(0) == null && System.currentTimeMillis() < until) Thread.sleep(10)
+            repeat(2) { DemoGame.spendCoin(server); Thread.sleep(20) }
+        }.apply { isDaemon = true; start() }
+        waitTag("wpReleased", timeoutMs = 30_000)
+        waitText("1×")
+        waitText("first hit captured")
+        game.join(5_000)
+        assertEquals(false, game.isAlive) // the second run of the routine was not paused any more
+        waitMock { !server.debugAttached && !server.gamePaused }
+        assertEquals(4998, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+        shot("49_capture_once")
+
+        step("open the saved result without the debugger")
+        waitText("Writes to " + Address.format(DemoGame.COINS_ADDRESS))
+        compose.onAllNodesWithText("Writes to " + Address.format(DemoGame.COINS_ADDRESS))[0].performScrollTo().performClick()
+        waitText("eboot.bin+0x2009")
+        shot("50_saved_results")
+        compose.onAllNodesWithText("Open")[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        waitTag("codeAddress")
+        waitText("mov [0x500120], eax")
     }
 
     @Test fun payloadBelowCapability12DisablesWatchpoints() {

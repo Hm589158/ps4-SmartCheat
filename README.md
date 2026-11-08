@@ -136,8 +136,10 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
 </td><td valign="top">
 
 **🔬 Find what writes / accesses**
-- Hardware **watchpoint** through ps4debug-NG's debugger: every instruction that writes (or reads) an address, with
-  hit count, thread and registers; open it in the disassembler
+- Hardware **watchpoint** through ps4debug-NG's debugger: **Capture once** (the game pauses a single time) or
+  monitor every instruction that writes/reads an address, with hit count, thread and registers. Every pause is
+  resumed with a verified CONTINUE and the session is always released; results are saved and open later in the
+  disassembler
 - **Check after restart**: address list, pointers, value cheats and code patches; moved code is found again by its
   signature. **Pointer candidates** ranked by how often they survive restarts
 - No root and no relay: the app picks a high port for the debugger automatically. Needs ps4debug-NG with

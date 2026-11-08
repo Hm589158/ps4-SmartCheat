@@ -61,7 +61,11 @@ data class SelectedProcess(
 
 /** Manual dependency container, created once per process by [com.ps4smartcheat.app.SmartCheatApp]. */
 class AppContainer(context: Context) {
+    private val appContext: Context = context.applicationContext
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /** Options of the last successful connection, for reconnecting when the app returns to the foreground. */
+    @Volatile private var lastOptions: com.ps4smartcheat.core.backend.ConnectOptions? = null
+    @Volatile private var userDisconnected = false
     val log = AppLog()
     val settings = SettingsStore(context)
     private val client = Ps4DebugClient(events = log)
@@ -106,6 +110,9 @@ class AppContainer(context: Context) {
                     when (st) {
                         is ConnectionState.Connected -> {
                             monitor.start()
+                            lastOptions = settings.value.connectOptions()
+                            userDisconnected = false
+                            com.ps4smartcheat.app.ConnectionService.start(appContext, "${st.info.host}:${st.info.port}")
                             // First connect (not a reconnect): pick the running game automatically.
                             if (last !is ConnectionState.Reconnecting && settings.value.autoSelectGame && _selected.value == null) {
                                 appScope.launch { autoSelectGame() }
@@ -115,10 +122,12 @@ class AppContainer(context: Context) {
                             log.error("Connection lost: ${st.message}", category = EventCategory.CONNECTION)
                             freezer.stopAll("connection lost")
                             monitor.stop()
+                            com.ps4smartcheat.app.ConnectionService.stop(appContext)
                         }
                         ConnectionState.Disconnected -> {
                             freezer.stopAll("disconnected")
                             monitor.stop()
+                            com.ps4smartcheat.app.ConnectionService.stop(appContext)
                         }
                         is ConnectionState.Reconnecting -> {
                             // Never keep re-applying writes across a reconnect.
@@ -314,6 +323,8 @@ class AppContainer(context: Context) {
     val transport: com.ps4smartcheat.core.protocol.ServerScanTransport get() = client
     /** Pointer-chain candidates per game, ranked by how often they survived restarts. */
     val pointerCandidates = com.ps4smartcheat.core.pointer.PointerCandidateStore(File(context.filesDir, "pointer-candidates"))
+    /** Results of finished "What writes / accesses" sessions, openable later without the debugger. */
+    val watchResults = com.ps4smartcheat.core.debug.WatchResultStore(File(context.filesDir, "watch-results.json"))
 
     /**
      * Saves a code patch (ON/OFF) of the selected process. Patches are stored relative to the game executable so
@@ -336,6 +347,30 @@ class AppContainer(context: Context) {
         cheats.upsertCheat(pid, entry)
         log.event(EventLevel.INFO, EventCategory.CHEAT, "code patch saved", "offset" to "${module.name}+0x${java.lang.Long.toHexString(module.offset)}", "bytes" to patch.length)
         return "Saved code patch \"${entry.name}\" (${module.name}+0x${java.lang.Long.toHexString(module.offset).uppercase()})"
+    }
+
+    /** Disconnect requested by the user (button or notification): no automatic reconnect afterwards. */
+    suspend fun userDisconnect() {
+        userDisconnected = true
+        backend.disconnect()
+        log.info("Disconnected by user", EventCategory.CONNECTION)
+    }
+
+    /**
+     * Called when the app comes back to the foreground. If the link was lost while it was in the background (Wi-Fi
+     * asleep, process restricted), reconnect once with the last options — unless the user disconnected.
+     */
+    fun onAppForeground() {
+        val opts = lastOptions ?: return
+        if (userDisconnected || backend.state.value !is ConnectionState.Failed) return
+        appScope.launch {
+            log.info("Reconnecting after returning to the app", EventCategory.CONNECTION)
+            try {
+                backend.connect(opts)
+            } catch (e: BackendException) {
+                log.warn("Reconnect after returning failed: ${e.message}", EventCategory.CONNECTION)
+            }
+        }
     }
 
     fun updateRegions(regions: List<MemoryRegion>) {

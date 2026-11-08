@@ -62,6 +62,12 @@ The mock is an independent implementation of the server side over real TCP, with
   fallback to a free port; capability level 1.2 gate: levels compared numerically, a level-1.1 payload gets no
   attach request at all (nothing left attached), a level-1.1 payload is served with the 8-byte request when the
   legacy port can be opened, a failed connect-back at level 1.2 is explained (leftover attachment emulated).
+* `WatchRobustnessTest` – the game is never left paused: Capture once records the first writer and releases;
+  a refused CONTINUE is retried; a CONTINUE that keeps failing ends the session and the game runs; a stalled
+  CONTINUE times out and the session is released from a new connection; a dropped connection the PS4 did not notice
+  is recovered; cancelling while the game is paused still resumes and detaches; the flood guard stops before a stall;
+  an unreachable PS4 is reported as unconfirmed (idempotent release); results saved, reloaded and resolved after a
+  restart.
 * `SessionValidatorTest` – after a restart: module entries valid, absolute entries unverified, broken pointers
   invalid; moved code found again by signature; patched state recognised; pointer candidates ranked over three
   restarts by consensus and by a confirmed address; activity probe; error advice.
@@ -82,7 +88,8 @@ rail; pointer scan from an address-list entry finds the static chain, and the
 added pointer entry follows the object when the mock game moves it; an Assembly ON/OFF patch (disassemble, assemble
 `nop` on the mock, ON/OFF with confirmation, the demo routine stops/starts spending coins, save, switch from the
 library, session check); "What writes?" lists the store instruction with its hit count, stops and detaches; game
-activity check and capability level in Diagnostics; a level-1.1 payload disables Start and sends nothing. This shows the app works end to end with a ps4debug-NG-compatible server; it is
+activity check and capability level in Diagnostics; a level-1.1 payload disables Start and sends nothing; Capture
+once records the first writer, the game keeps running, the saved result opens in the disassembler. This shows the app works end to end with a ps4debug-NG-compatible server; it is
 not a PS4 test.
 
 ## Android

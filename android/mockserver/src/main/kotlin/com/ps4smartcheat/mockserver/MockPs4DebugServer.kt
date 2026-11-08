@@ -106,6 +106,15 @@ class MockPs4DebugServer(
         @Volatile var debugger = true
         /** Port the mock connects back to when the attach request names none (the real default is 755). */
         @Volatile var debugPort = 755
+        /** CMD_DEBUG_CONTINUE answers CMD_ERROR (connection kept, like a failing PT_CONTINUE) this many times. */
+        @Volatile var continueFailures = 0
+        /** Delay before CMD_DEBUG_CONTINUE is processed (ms). */
+        @Volatile var continueDelayMs = 0L
+        /**
+         * The PS4 does not notice that the session's client went away (e.g. Wi-Fi lost without a TCP reset): the
+         * debug session and a paused game survive until DETACH arrives on another connection.
+         */
+        @Volatile var keepDebugOnDisconnect = false
         /**
          * Emulates ps4debug-NG with the configurable interrupt port (PR #1): a 12-byte attach body selects the
          * connect-back port. false = an unpatched build that ignores the field and always uses [debugPort].
@@ -461,7 +470,16 @@ class MockPs4DebugServer(
         val watch = arrayOfNulls<Watchpoint>(4)
         @Volatile var stoppedRegs: ByteArray = ByteArray(176)
         val resume = java.util.concurrent.Semaphore(0)
+        /** The "game" is in a ptrace stop (paused) until CONTINUE / DETACH. */
+        @Volatile var stopped = false
     }
+
+    /** True while the game is paused at a reported stop (for tests). */
+    val gamePaused: Boolean get() = debug?.stopped == true
+    /** Number of times a paused game was let go (CONTINUE or teardown). */
+    val gameResumes = AtomicInteger()
+    /** CMD_DEBUG_DETACH requests that found a session (any connection). */
+    val detaches = AtomicInteger()
 
     @Volatile private var debug: DebugState? = null
     /** Number of CMD_DEBUG_CONTINUE requests (for tests). */
@@ -495,7 +513,7 @@ class MockPs4DebugServer(
             if (cmd == CMD_DEBUG_ATTACH) return attach(body, out, conn)
             val d = debug ?: run { status(out, CMD_ERROR); return false } // handlers: not attached → CMD_ERROR, return 1
             when (cmd) {
-                CMD_DEBUG_DETACH -> { teardown(); status(out, CMD_SUCCESS); return true }
+                CMD_DEBUG_DETACH -> { detaches.incrementAndGet(); teardown(); status(out, CMD_SUCCESS); return true }
                 CMD_DEBUG_SET_WATCHPOINT -> {
                     if (body.capacity() < 24) { status(out, CMD_DATA_NULL); return false }
                     val index = body.int; val enabled = body.int; val len = body.int; val type = body.int; val addr = body.long
@@ -504,7 +522,13 @@ class MockPs4DebugServer(
                     status(out, CMD_SUCCESS); return true
                 }
                 CMD_DEBUG_CONTINUE -> {
+                    // debug.c debug_continue_handle: PT_CONTINUE; CMD_SUCCESS or CMD_ERROR, the handler returns 0 either way.
                     continues.incrementAndGet()
+                    if (faults.continueDelayMs > 0) Thread.sleep(faults.continueDelayMs)
+                    if (!d.stopped) { status(out, CMD_ERROR); return true } // PT_CONTINUE on a running process fails
+                    if (faults.continueFailures > 0) { faults.continueFailures--; status(out, CMD_ERROR); return true }
+                    d.stopped = false
+                    gameResumes.incrementAndGet()
                     d.resume.release()
                     status(out, CMD_SUCCESS); return true
                 }
@@ -543,10 +567,11 @@ class MockPs4DebugServer(
             val d = debug ?: return
             debug = null
             runCatching { d.events.close() }
+            if (d.stopped) { d.stopped = false; gameResumes.incrementAndGet() } // PT_DETACH resumes a stopped process
             d.resume.release(1000) // never leave the "game" blocked
         }
 
-        fun clientGone(conn: Conn?) { if (conn != null && debug?.owner === conn) teardown() }
+        fun clientGone(conn: Conn?) { if (conn != null && debug?.owner === conn && !faults.keepDebugOnDisconnect) teardown() }
     }
 
     /**
@@ -583,10 +608,13 @@ class MockPs4DebugServer(
             },
         )
         d.stoppedRegs = regs.array()
-        try {
-            synchronized(d.events) { d.events.getOutputStream().apply { write(pkt.array()); flush() } }
-        } catch (e: IOException) {
-            return false
+        synchronized(d) {
+            d.stopped = true
+            try {
+                synchronized(d.events) { d.events.getOutputStream().apply { write(pkt.array()); flush() } }
+            } catch (e: IOException) {
+                // The interrupt connection is gone; the game stays paused until CONTINUE / DETACH (as on the PS4).
+            }
         }
         d.resume.tryAcquire(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
         return true

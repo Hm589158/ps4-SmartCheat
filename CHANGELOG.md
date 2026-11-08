@@ -4,7 +4,30 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
-### Capability level 1.2 (new in this build — verified against the simulated server only)
+### Watchpoints without freezes (new in this build — verified against the simulated server only)
+- **Capture once** (now the default): records the first instruction that writes/accesses the address with all
+  registers, then removes the watchpoint and detaches — the game pauses exactly once. "Monitor" keeps the previous
+  continuous behaviour.
+- Freeze causes fixed in `DebugSession` / `AccessMonitor`: CONTINUE is checked (`CMD_ERROR` is retried once, then the
+  session is ended); a failed DETACH is no longer ignored; debugger commands are never sent over a re-established
+  connection; 3-second timeout per debugger command; attaching that is cancelled ends the session on the PS4.
+- One verified cleanup for every way out (`DebugSession.release()`): CONTINUE for an unconfirmed stop, clear the
+  watchpoint, drain and resume stops that arrived meanwhile, DETACH; if the connection was lost, DETACH again from a
+  new connection (the server's debug state is global). The result is shown ("Game resumed · watchpoint removed ·
+  debugger detached") and logged.
+- Flood guard: more than 40 hits per second ends monitoring before the game stalls.
+- Results are saved (newest 30) and open later in the disassembler without a debugger, also after a restart.
+- Cases that cannot be guaranteed are documented in docs/WATCHPOINTS.md.
+
+### Connection and interface
+- The connection stays open in the background: a foreground service ("Connected to the PS4" notification with a
+  Disconnect action) keeps Android from killing the app or cutting its network, and a Wi-Fi lock keeps the radio
+  awake. Reconnect attempts after a drop: 5 with backoff (about 15 s) instead of 3. When the app returns to the
+  foreground after the link was lost, it reconnects automatically (not after a manual Disconnect).
+- Watchpoint screen redesigned: target, mode and session cards, status pills, clear release result, saved results.
+  Connection screen shows a status pill and the capability level.
+
+### Capability level 1.2 (verified against the simulated server only)
 - The app reads ps4debug-NG's capability level from `CMD_BRANDING` (PR #1 commit `e5ce2bf` reports `1.2`, released
   builds `1.1`; compared numerically) and sends the 12-byte `CMD_DEBUG_ATTACH` only at level ≥ 1.2. Older payloads
   get no attach request at all — the watchpoint screen explains why and Start is disabled — so a failed

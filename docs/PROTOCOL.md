@@ -203,6 +203,11 @@ writes, single-stepping and FS/GS writes are not used.
   RIP is the next instruction; the app decodes the instruction that ends at RIP.
 * **Session end.** `DETACH`, or closing the command connection (`server.c free_client` → `debug_full_teardown`:
   breakpoints restored, debug registers cleared, `PT_DETACH`). Only one session can exist (`CMD_ALREADY_DEBUG`).
+* **Global debug state.** The handlers check the global `g_debug_ctx.attached`, not the calling client, so `DETACH`
+  (and `CONTINUE`) work from any connection; `debug_detach_handle` tears down `curdbgcli`'s session. The app uses
+  this to release a session the PS4 still holds after the app's connection was lost. `CONTINUE` answers `CMD_ERROR`
+  when `PT_CONTINUE` fails (e.g. the process is not stopped) and keeps the connection (handler returns 0); `DETACH`
+  without a session answers `CMD_ERROR` and closes it.
 * **Resume a stopped process.** Without a session, `CMD_DEBUG_PROCESS_STOP` with state 0 sends `SIGCONT` (signal 19
   on FreeBSD) to the pid — offered in Diagnostics when a game looks frozen.
 

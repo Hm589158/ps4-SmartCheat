@@ -69,10 +69,7 @@ class ConnectionViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun disconnect() {
-        viewModelScope.launch {
-            c.backend.disconnect()
-            c.log.info("Disconnected by user")
-        }
+        viewModelScope.launch { c.userDisconnect() }
     }
 }
 
@@ -114,6 +111,14 @@ fun ConnectionScreen(onConnected: () -> Unit) {
         }
 
         SectionCard("Status") {
+            val (pill, tone) = when (val s = state) {
+                ConnectionState.Disconnected -> "Not connected" to com.ps4smartcheat.app.ui.components.Tone.NEUTRAL
+                is ConnectionState.Connecting -> "Connecting…" to com.ps4smartcheat.app.ui.components.Tone.WARN
+                is ConnectionState.Reconnecting -> "Reconnecting ${s.attempt}/${s.maxAttempts}" to com.ps4smartcheat.app.ui.components.Tone.WARN
+                is ConnectionState.Failed -> "Connection lost" to com.ps4smartcheat.app.ui.components.Tone.BAD
+                is ConnectionState.Connected -> "Connected" to com.ps4smartcheat.app.ui.components.Tone.GOOD
+            }
+            com.ps4smartcheat.app.ui.components.StatusPill(pill, tone, Modifier.testTag("connectionPill"))
             when (val s = state) {
                 ConnectionState.Disconnected -> Text("Not connected")
                 is ConnectionState.Connecting -> Text("Connecting to ${s.host}:${s.port}…")
@@ -134,6 +139,10 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                             else -> "failed"
                         },
                     )
+                    if (caps.isNg) KeyValue(
+                        "Capability",
+                        (caps.capabilityLevel ?: "none") + if (caps.attachPort) " · watchpoints ready" else " · watchpoints need 1.2",
+                    )
                     KeyValue("Debugger ver.", s.info.debuggerVersion.ifBlank { "unknown" })
                     KeyValue("Branding", caps.brand ?: "not reported")
                     KeyValue("Firmware", s.info.firmwareText ?: "unknown (not reported by payload)")
@@ -148,6 +157,11 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                     if (!caps.isNg) WarningBanner(
                         "Classic ps4debug detected. Use ps4debug-NG for scanning and editing: it is the debugger this app is " +
                             "built and tested for (github.com/Pharaoh2k/ps4debug-NG). Classic ps4debug runs in an untested compatibility mode.",
+                    )
+                    Text(
+                        "The connection stays open while you switch to the game or another app (notification \"Connected to the PS4\"). " +
+                            "If it is lost anyway, the app reconnects when you come back.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (caps.isNg && !caps.scanAuthorized) Text("ps4debug-NG detected but the scan handshake failed; scans run on Android.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary)
                 }

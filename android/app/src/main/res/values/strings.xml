@@ -1,4 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">PS4 SmartCheat</string>
+    <string name="connection_channel">PS4 connection</string>
+    <string name="connection_channel_description">Shown while the app keeps its connection to the PS4 open in the background.</string>
+    <string name="connection_notification_title">Connected to the PS4</string>
+    <string name="connection_notification_text">The connection stays open while you play.</string>
+    <string name="connection_notification_host">%1$s · the connection stays open while you play</string>
+    <string name="disconnect">Disconnect</string>
 </resources>

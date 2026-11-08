@@ -5,7 +5,14 @@ import com.ps4smartcheat.core.backend.CommandFailedException
 import com.ps4smartcheat.core.protocol.Ps4DebugProtocol
 import com.ps4smartcheat.core.protocol.ServerScanTransport
 import com.ps4smartcheat.core.util.LE
+import com.ps4smartcheat.core.logging.EventCategory
+import com.ps4smartcheat.core.logging.EventLevel
+import com.ps4smartcheat.core.logging.EventSink
+import com.ps4smartcheat.core.logging.log
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.io.DataInputStream
@@ -26,6 +33,23 @@ open class DebuggerException(message: String, status: Long = Ps4DebugProtocol.CM
 
 /** The payload is below capability level 1.2 and port 755 cannot be opened here; checked before attaching. */
 class DebuggerUnsupportedException(message: String) : DebuggerException(message)
+
+/** The session's command connection is gone (dropped or re-established); commands are not sent elsewhere. */
+class DebuggerSessionLostException(message: String = "The debug session ended (connection re-established)") : DebuggerException(message)
+
+/**
+ * What [DebugSession.release] could confirm. `null` = step not needed. [confirmed] is true when the server
+ * answered the DETACH (on the session's connection or on a new one), i.e. no debug session of ours is left.
+ */
+data class ReleaseReport(
+    val watchpointCleared: Boolean?,
+    val continued: Boolean?,
+    val detached: Boolean,
+    val recoveredFromNewConnection: Boolean,
+    val notes: List<String>,
+) {
+    val confirmed: Boolean get() = detached
+}
 
 /**
  * Listens for the debugger's interrupt connection, which ps4debug-NG opens *from the PS4 to the client* while
@@ -145,44 +169,144 @@ class DebugSession private constructor(
     private val listener: InterruptListener,
     private val channel: InterruptChannel,
     private val epoch: Long,
+    private val events: EventSink,
 ) : Closeable {
     @Volatile private var closed = false
+    @Volatile private var released: ReleaseReport? = null
+    private val armedSlots = java.util.concurrent.ConcurrentHashMap.newKeySet<Int>()
 
-    /** False once detached or when the command connection was re-established (the server then detached). */
+    /**
+     * True from the moment a stop was read until a CONTINUE was **confirmed** by the server. While true the game is
+     * paused on the PS4 (a ptrace stop halts the whole process).
+     */
+    @Volatile var pendingStop: Boolean = false
+        private set
+
+    /** False once released or when the command connection was re-established (the server then detached). */
     val alive: Boolean get() = !closed && t.connectionEpoch == epoch
+
+    /** Port the PS4 connected back to (for diagnostics). */
+    val interruptPort: Int get() = listener.port
 
     suspend fun setWatchpoint(slot: Int, address: Long, size: Int, type: WatchType) {
         require(slot in 0 until DebugProtocol.MAX_WATCHPOINTS) { "slot must be 0..3" }
         require(address % size == 0L) { "A $size-byte watchpoint must be $size-byte aligned" }
         command("set watchpoint", DebugProtocol.CMD_DEBUG_SET_WATCHPOINT,
             LE.bytes32(slot.toLong()) + LE.bytes32(1) + LE.bytes32(DebugProtocol.lengthCode(size).toLong()) +
-                LE.bytes32(type.wire.toLong()) + LE.bytes64(address))
+                LE.bytes32(type.wire.toLong()) + LE.bytes64(address), closesOnError = true)
+        armedSlots += slot
     }
 
     suspend fun clearWatchpoint(slot: Int) {
         command("clear watchpoint", DebugProtocol.CMD_DEBUG_SET_WATCHPOINT,
-            LE.bytes32(slot.toLong()) + LE.bytes32(0) + LE.bytes32(0) + LE.bytes32(0) + LE.bytes64(0))
+            LE.bytes32(slot.toLong()) + LE.bytes32(0) + LE.bytes32(0) + LE.bytes32(0) + LE.bytes64(0), closesOnError = true)
+        armedSlots -= slot
     }
 
-    /** Lets the stopped process run again (CMD_DEBUG_CONTINUE with stop = 0). */
-    suspend fun resume() = command("continue", DebugProtocol.CMD_DEBUG_CONTINUE, LE.bytes32(0))
+    /**
+     * CMD_DEBUG_CONTINUE (stop = 0) with the server's answer checked. Returns true only for `CMD_SUCCESS`; the
+     * server answers `CMD_ERROR` without closing the connection when `PT_CONTINUE` fails, e.g. because the process
+     * is not stopped (debug.c `debug_continue_handle` returns 0). Throws [DebuggerException] when the request could
+     * not be completed (session lost, timeout, connection dropped) — the game may then still be paused.
+     */
+    suspend fun resume(): Boolean {
+        val st = command("continue", DebugProtocol.CMD_DEBUG_CONTINUE, LE.bytes32(0), closesOnError = false)
+        val ok = st == Ps4DebugProtocol.CMD_SUCCESS
+        if (ok) pendingStop = false
+        else events.log(EventLevel.WARN, EventCategory.PROCESS, "debugger continue refused", "pid" to pid, "status" to Ps4DebugProtocol.statusName(st))
+        return ok
+    }
 
-    /** Next stop within [timeoutMs], or null. */
+    /** Next stop within [timeoutMs], or null. A returned stop keeps the game paused until [resume] succeeds. */
     suspend fun nextEvent(timeoutMs: Int): InterruptEvent? {
-        check(alive) { "debug session ended" }
-        return withContext(Dispatchers.IO) { channel.read(timeoutMs) }
+        if (!alive) throw DebuggerSessionLostException()
+        val ev = try {
+            withContext(Dispatchers.IO) { channel.read(timeoutMs) }
+        } catch (e: IOException) {
+            throw DebuggerSessionLostException("The interrupt connection closed (${e.message}).")
+        }
+        if (ev != null) pendingStop = true
+        return ev
     }
 
-    /** Ends the session: the server clears watchpoints, detaches and resumes the process. Best effort, idempotent. */
-    suspend fun detach() {
-        if (closed) return
-        try {
-            if (t.connectionEpoch == epoch) command("detach", DebugProtocol.CMD_DEBUG_DETACH, ByteArray(0))
-        } catch (e: Exception) {
-            // The session also ends when the connection closes.
-        } finally {
-            close()
+    /** Same as [release], for callers that do not need the report. */
+    suspend fun detach() { release() }
+
+    /**
+     * Ends the session and makes sure the game runs again. Every step is checked; nothing is assumed:
+     *  1. a stop that was read but not confirmed resumed gets a verified CONTINUE (retried once);
+     *  2. armed watchpoints are cleared, then stops that arrived meanwhile are drained and resumed;
+     *  3. DETACH — the server clears all debug registers and breakpoints and `PT_DETACH`es, which also resumes a
+     *     stopped process (debug.c `debug_full_teardown`);
+     *  4. if the command connection was lost, the session may still exist on the PS4 (it only ends it when it
+     *     notices the closed socket). The debug state there is global, so DETACH is sent again on a new
+     *     connection: `CMD_SUCCESS` = released now, `CMD_ERROR` = no session left.
+     * Idempotent; never throws; bounded by [timeoutMs]. Runs even when the caller was cancelled.
+     */
+    suspend fun release(timeoutMs: Long = RELEASE_TIMEOUT_MS): ReleaseReport = withContext(NonCancellable) {
+        released?.let { return@withContext it }
+        val notes = ArrayList<String>()
+        var continued: Boolean? = null
+        var cleared: Boolean? = null
+        var detached = false
+        var recovered = false
+        val done = withTimeoutOrNull(timeoutMs) {
+            if (alive && pendingStop) continued = tryResume(notes)
+            if (alive && armedSlots.isNotEmpty()) {
+                cleared = try {
+                    for (slot in armedSlots.toList()) clearWatchpoint(slot)
+                    true
+                } catch (e: Exception) { notes += "clear watchpoint: ${e.message}"; false }
+            }
+            // A hit between the last CONTINUE and clearing the watchpoint leaves the game stopped: drain and resume.
+            if (alive) drainStops(notes)?.let { continued = it }
+            if (alive) {
+                try {
+                    val st = command("detach", DebugProtocol.CMD_DEBUG_DETACH, ByteArray(0), closesOnError = true, throwOnError = false)
+                    detached = true
+                    if (st != Ps4DebugProtocol.CMD_SUCCESS) notes += "no session left on the PS4 at detach (${Ps4DebugProtocol.statusName(st)})"
+                } catch (e: Exception) { notes += "detach: ${e.message}" }
+            }
+            if (!detached) {
+                // Connection lost or re-established: release from whatever connection the client has now.
+                try {
+                    val st = t.exclusive("debug recover", COMMAND_TIMEOUT_MS) { w ->
+                        w.send(w.header(DebugProtocol.CMD_DEBUG_DETACH, 0))
+                        w.readU32().also { if (it != Ps4DebugProtocol.CMD_SUCCESS) w.invalidate() }
+                    }
+                    detached = true
+                    recovered = st == Ps4DebugProtocol.CMD_SUCCESS
+                    notes += if (recovered) "session released from a new connection" else "the PS4 had already ended the session"
+                } catch (e: Exception) { notes += "could not reach the PS4 to release the session: ${e.message}" }
+            }
+            true
         }
+        if (done == null) notes += "release did not finish within ${timeoutMs / 1000} s"
+        close()
+        val report = ReleaseReport(cleared, continued, detached, recovered, notes)
+        released = report
+        events.log(
+            if (report.confirmed) EventLevel.INFO else EventLevel.WARN, EventCategory.PROCESS, "debugger released",
+            "pid" to pid, "detached" to detached, "recovered" to recovered, "continued" to continued, "cleared" to cleared,
+            "notes" to notes.joinToString(" | "),
+        )
+        report
+    }
+
+    private suspend fun tryResume(notes: MutableList<String>): Boolean = try {
+        resume() || run { delay(RESUME_RETRY_DELAY_MS); resume() }.also { if (!it) notes += "CONTINUE refused twice" }
+    } catch (e: Exception) { notes += "continue: ${e.message}"; false }
+
+    /** Reads stops that are already queued and resumes each one. Returns null when there was none. */
+    private suspend fun drainStops(notes: MutableList<String>): Boolean? {
+        var result: Boolean? = null
+        repeat(MAX_DRAIN) {
+            val ev = try { nextEvent(DRAIN_POLL_MS) } catch (e: Exception) { return result }
+            if (ev == null) return result
+            result = tryResume(notes)
+            if (result == false) return result
+        }
+        return result
     }
 
     override fun close() {
@@ -191,17 +315,32 @@ class DebugSession private constructor(
         listener.close()
     }
 
-    private suspend fun command(what: String, cmd: Int, body: ByteArray) {
-        if (!alive) throw DebuggerException("The debug session ended (connection re-established)")
-        t.exclusive(what) { w ->
-            w.send(w.header(cmd, body.size), body)
-            val st = w.readU32()
-            if (st != Ps4DebugProtocol.CMD_SUCCESS) {
-                w.invalidate()
-                throw DebuggerException("PS4 rejected $what: ${Ps4DebugProtocol.statusName(st)}", st)
+    /**
+     * One debugger command on the connection that owns the session. Never sent on a re-established connection
+     * (that one has no session; a reconnect happens inside the client before the block runs, so the epoch is
+     * checked inside). [closesOnError]: the server's handler returns 1 for this command's errors and closes the
+     * connection. Returns the status word.
+     */
+    private suspend fun command(what: String, cmd: Int, body: ByteArray, closesOnError: Boolean, throwOnError: Boolean = true): Long {
+        if (!alive) throw DebuggerSessionLostException()
+        val st = try {
+            t.exclusive(what, COMMAND_TIMEOUT_MS) { w ->
+                if (t.connectionEpoch != epoch) throw SessionMovedAbort()
+                w.send(w.header(cmd, body.size), body)
+                w.readU32().also { if (it != Ps4DebugProtocol.CMD_SUCCESS && closesOnError) w.invalidate() }
             }
+        } catch (e: SessionMovedAbort) {
+            throw DebuggerSessionLostException()
+        } catch (e: com.ps4smartcheat.core.backend.ConnectionInterruptedException) {
+            throw DebuggerSessionLostException("The connection dropped during $what; the PS4 ends the debug session when it notices.")
         }
+        if (st != Ps4DebugProtocol.CMD_SUCCESS && throwOnError && cmd != DebugProtocol.CMD_DEBUG_CONTINUE) {
+            throw DebuggerException("PS4 rejected $what: ${Ps4DebugProtocol.statusName(st)}", st)
+        }
+        return st
     }
+
+    private class SessionMovedAbort : com.ps4smartcheat.core.protocol.InSyncAbort("connection re-established")
 
     companion object {
         /**
@@ -219,6 +358,7 @@ class DebugSession private constructor(
             listener: InterruptListener,
             announce: InetAddress? = null,
             acceptTimeoutMs: Int = 5000,
+            events: EventSink = EventSink.NONE,
         ): DebugSession {
             if (!t.capabilities.isNg) { listener.close(); throw DebuggerException("Watchpoints need ps4debug-NG.") }
             val ip = (announce ?: t.localAddress) as? Inet4Address
@@ -252,14 +392,26 @@ class DebugSession private constructor(
             }
             val channel = try {
                 withContext(Dispatchers.IO) { listener.accept(acceptTimeoutMs) }
-            } catch (e: IOException) {
-                // Attached on the PS4 but no event channel here: end the session right away.
-                runCatching { t.exclusive("detach") { w -> w.send(w.header(DebugProtocol.CMD_DEBUG_DETACH, 0)); w.readU32() } }
+            } catch (e: Throwable) {
+                // Attached on the PS4 but no event channel here (or the caller was cancelled): end the session right
+                // away, even when cancelled, so it does not stay on the PS4.
+                withContext(NonCancellable) {
+                    runCatching { t.exclusive("detach", COMMAND_TIMEOUT_MS) { w -> w.send(w.header(DebugProtocol.CMD_DEBUG_DETACH, 0)); w.readU32() } }
+                }
                 listener.close()
-                throw BackendException("Attached, but the interrupt connection did not arrive: ${e.message}. Detached again.", e)
+                if (e is IOException) throw BackendException("Attached, but the interrupt connection did not arrive: ${e.message}. Detached again.", e)
+                throw e
             }
-            return DebugSession(t, pid, listener, channel, epoch)
+            events.log(EventLevel.INFO, EventCategory.PROCESS, "debugger attached", "pid" to pid, "interruptPort" to connectPort, "extended" to extended)
+            return DebugSession(t, pid, listener, channel, epoch, events)
         }
+
+        /** Read timeout for one debugger command: the game is paused while CONTINUE is outstanding. */
+        const val COMMAND_TIMEOUT_MS = 3000
+        const val RELEASE_TIMEOUT_MS = 15_000L
+        const val RESUME_RETRY_DELAY_MS = 50L
+        private const val DRAIN_POLL_MS = 100
+        private const val MAX_DRAIN = 16
 
         /** Explains a refused or failed attach (after the payload may already have attached to the game). */
         internal fun attachFailure(ip: String, port: Int, status: String): String =
