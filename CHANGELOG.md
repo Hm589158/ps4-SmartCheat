@@ -31,6 +31,7 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
   game routine with real x86-64 code that honours patches.
 
 ### Beta
+- License: PS4 SmartCheat is now released under GPL-3.0 (README badge and credits updated; iced-x86 is MIT).
 - **Beta.** Version 1.0.0-beta: feature-complete, every automated check green, hardware verification in progress.
   Builds are published as `v1.0.0-beta.<build>` ("PS4 SmartCheat v1.0.0 Beta · build N",
   `PS4-SmartCheat-v1.0.0-beta.<build>.apk`) and marked **Latest** (not pre-release), so the repository's Releases

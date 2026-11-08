@@ -11,7 +11,7 @@
 [![CI](https://github.com/Hm589158/ps4-SmartCheat/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Hm589158/ps4-SmartCheat/actions/workflows/ci.yml)
 [![Requires ps4debug-NG](https://img.shields.io/badge/requires-ps4debug--NG-003791?logo=playstation&logoColor=white)](https://github.com/Pharaoh2k/ps4debug-NG)
 [![Android 8.0+](https://img.shields.io/badge/Android-8.0%2B-3DDC84?logo=android&logoColor=white)](#required-downloads)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 
 [Downloads](#required-downloads) · [Setup](#setup-in-5-steps) · [Features](#features) · [Status](#status) · [Build](#building-from-source) · [Credits](#credits-and-licenses)
 
@@ -226,11 +226,12 @@ docs/                protocol, architecture, testing, performance, compatibility
   **jogolden**'s original [ps4debug](https://github.com/jogolden/ps4debug) and on **Ctn & SiSTRo**'s ps4debug v1.1.19.
 - [PS4CheaterNeo](https://github.com/avan06/PS4CheaterNeo) by **avan06**: client reference and GoldHEN cheat format.
 - [GoldHEN](https://github.com/GoldHEN/GoldHEN) and its [cheat repository](https://github.com/GoldHEN/GoldHEN_Cheat_Repository).
+- [iced-x86](https://github.com/icedland/iced) (MIT) — x86-64 decoder used by the disassembler.
 
 **This repository does not bundle or redistribute ps4debug-NG.** Download it from its official releases. If you
 redistribute it, follow its GPL-3.0 terms:
 - keep the license and attribution, including the credit to the original authors;
 - provide the complete corresponding source for any binary you distribute, modified or not.
 
-PS4 SmartCheat itself is released under the [MIT License](LICENSE). PlayStation and PS4 are trademarks of Sony Interactive
+PS4 SmartCheat itself is released under the [GNU General Public License v3.0](LICENSE) (GPL-3.0). PlayStation and PS4 are trademarks of Sony Interactive
 Entertainment. This project is not affiliated with or endorsed by Sony.
