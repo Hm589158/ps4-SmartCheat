@@ -22,6 +22,10 @@ object LE {
         return r
     }
 
+    /** Little-endian encoding of the low 32 bits of [v]. */
+    fun bytes32(v: Long): ByteArray = buffer(4).putInt(v.toInt()).array()
+    fun bytes64(v: Long): ByteArray = buffer(8).putLong(v).array()
+
     fun buffer(size: Int): ByteBuffer = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
 
     fun wrap(b: ByteArray): ByteBuffer = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN)

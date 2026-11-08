@@ -100,4 +100,4 @@ class ConnectionInterruptedException(message: String, cause: Throwable? = null) 
 class ProtocolException(message: String, cause: Throwable? = null) : BackendException(message, cause)
 
 /** The debugger answered a command with a non-success status (e.g. 0xF0000001). */
-class CommandFailedException(val command: Long, val status: Long, message: String) : BackendException(message)
+open class CommandFailedException(val command: Long, val status: Long, message: String) : BackendException(message)

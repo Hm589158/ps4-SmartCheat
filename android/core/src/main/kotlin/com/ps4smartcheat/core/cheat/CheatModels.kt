@@ -46,7 +46,20 @@ data class CheatEntry(
     val notes: String = "",
     /** pid of the process when discovered: used to warn about stale absolute addresses. */
     val discoveredPid: Int? = null,
-)
+    /**
+     * Code/byte patch: the "on" bytes (hex). For a patch, [originalBytes] holds the "off" bytes and [type] /
+     * [replacementValue] are not used. Toggled like a GoldHEN checkbox mod; never applied automatically.
+     */
+    val patchBytes: String? = null,
+    /** Assembly source a code patch was built from (for display and editing). */
+    val assembly: String? = null,
+    /** Entries with the same group are toggled together and exported as one GoldHEN mod named after the group. */
+    val group: String? = null,
+    /** AOB signature of the original code (`??` = wildcard), used to find the patch again after a game update. */
+    val signature: String? = null,
+) {
+    val isPatch: Boolean get() = !patchBytes.isNullOrBlank()
+}
 
 @Serializable
 data class CheatProfile(

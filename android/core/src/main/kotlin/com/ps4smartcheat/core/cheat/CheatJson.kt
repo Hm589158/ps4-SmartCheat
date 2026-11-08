@@ -71,11 +71,19 @@ object CheatJson {
                         throw CheatFormatException("Cheat \"${c.name}\": ${e.message}")
                     }
                 }
-                c.originalBytes?.let {
-                    val b = try { Hex.decode(it) } catch (e: IllegalArgumentException) {
+                val original = c.originalBytes?.let {
+                    try { Hex.decode(it) } catch (e: IllegalArgumentException) {
                         throw CheatFormatException("Cheat \"${c.name}\": invalid originalBytes")
                     }
-                    if (b.size != c.type.size) throw CheatFormatException("Cheat \"${c.name}\": originalBytes length does not match ${c.type.label}")
+                }
+                if (c.isPatch) {
+                    val on = try { Hex.decode(c.patchBytes!!) } catch (e: IllegalArgumentException) {
+                        throw CheatFormatException("Cheat \"${c.name}\": invalid patchBytes")
+                    }
+                    if (on.isEmpty() || on.size > com.ps4smartcheat.core.edit.MAX_PATCH_BYTES) throw CheatFormatException("Cheat \"${c.name}\": patch must be 1..${com.ps4smartcheat.core.edit.MAX_PATCH_BYTES} bytes")
+                    if (original == null || original.size != on.size) throw CheatFormatException("Cheat \"${c.name}\": a patch needs originalBytes of the same length")
+                } else if (original != null && original.size != c.type.size) {
+                    throw CheatFormatException("Cheat \"${c.name}\": originalBytes length does not match ${c.type.label}")
                 }
             }
         }

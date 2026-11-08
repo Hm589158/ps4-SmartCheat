@@ -100,6 +100,13 @@ class MockPs4DebugServer(
         /** Simulated request round-trip latency in ms, applied once per received command. */
         @Volatile var linkLatencyMs = 0L
 
+        /** ps4debug-NG code commands: assemble (0xBDAA0024) and FIND_XREFS_TO (0xBDAA0022). */
+        @Volatile var codeTools = true
+        /** Debugger commands (0xBDBBxxxx). */
+        @Volatile var debugger = true
+        /** Port the mock connects back to on CMD_DEBUG_ATTACH (the real server always uses 755). */
+        @Volatile var debugPort = 755
+
         fun enableNg(turbo: Boolean = true) {
             brand = "ps4debug-NG by OSR v1.3.3 (MOCK)"
             ngScan = true
@@ -138,6 +145,7 @@ class MockPs4DebugServer(
     val faults = Faults()
     val processes = CopyOnWriteArrayList<Process>()
     private val clients = CopyOnWriteArrayList<Socket>()
+    private val connOf = java.util.concurrent.ConcurrentHashMap<Socket, Conn>()
     private val lock = Any()
     @Volatile private var running = true
 
@@ -208,6 +216,7 @@ class MockPs4DebugServer(
             val inp = DataInputStream(s.getInputStream().buffered())
             val out = ThrottledOutput(s.getOutputStream()).buffered(64 * 1024)
             val conn = Conn()
+            connOf[s] = conn
             while (running && !s.isClosed) {
                 val hdr = ByteArray(12)
                 try { inp.readFully(hdr) } catch (e: EOFException) { break }
@@ -238,6 +247,8 @@ class MockPs4DebugServer(
         } finally {
             runCatching { s.close() }
             clients -= s
+            dbg.clientGone(connOf[s])
+            connOf.remove(s)
         }
     }
 
@@ -366,6 +377,10 @@ class MockPs4DebugServer(
                 turboCancelPid = pid
                 status(out, CMD_SUCCESS); return true
             }
+            CMD_PROC_ASSEMBLE -> return if (faults.brand != null && faults.codeTools) code.assemble(body, out) else unknownProc(out)
+            CMD_PROC_FIND_XREFS_TO -> return if (faults.brand != null && faults.codeTools) code.xrefsTo(body, out) else unknownProc(out)
+            in 0xBDBB0001.toInt()..0xBDBB0013.toInt(), CMD_DEBUG_PROCESS_STOP ->
+                return if (faults.brand != null && faults.debugger) dbg.handle(cmd, body, out, conn) else !faults.closeOnUnknownCommand
             else -> return !faults.closeOnUnknownCommand // unknown commands: ignored (NG) or connection closed (classic)
         }
     }
@@ -373,6 +388,172 @@ class MockPs4DebugServer(
     // ------------------------------------------------------------------ ps4debug-NG scan emulation
 
     private val ng = NgScan()
+    private val code = CodeEmulation()
+    private val dbg = DebugEmulation()
+
+    /** proc_handle's default branch: CMD_ERROR and the handler returns 1 (connection closed). */
+    private fun unknownProc(out: OutputStream): Boolean { status(out, CMD_ERROR); return false }
+
+    // ------------------------------------------------------------------ code commands (assemble / xrefs)
+
+    private inner class CodeEmulation {
+        /** assemble.c: CMD_SUCCESS + {u32 byte_len, u32 insn_count} + bytes, or CMD_ERROR + {u32 errno, u32 len} + message (closes). */
+        fun assemble(body: ByteBuffer, out: OutputStream): Boolean {
+            if (body.capacity() < 12) { status(out, CMD_DATA_NULL); return false }
+            val base = body.long
+            body.int // syntax
+            val text = ByteArray(body.remaining()).also { body.get(it) }.toString(Charsets.US_ASCII)
+            return try {
+                val (bytes, count) = MiniAssembler.assemble(text, base)
+                status(out, CMD_SUCCESS)
+                out.write(le(8).putInt(bytes.size).putInt(count).array())
+                out.write(bytes)
+                true
+            } catch (e: MiniAssembler.AsmError) {
+                val m = e.message!!.toByteArray(Charsets.US_ASCII)
+                status(out, CMD_ERROR)
+                out.write(le(8).putInt(e.errno).putInt(m.size).array())
+                out.write(m)
+                false
+            }
+        }
+
+        /** proc.c proc_find_xrefs_to_handle: CMD_SUCCESS, u64 addresses, u64 0xFFFFFFFFFFFFFFFF. */
+        fun xrefsTo(body: ByteBuffer, out: OutputStream): Boolean {
+            if (body.capacity() < 24) { status(out, CMD_DATA_NULL); return false }
+            val pid = body.int; val start = body.long; val len = body.int.toLong() and 0xFFFFFFFFL; val target = body.long
+            status(out, CMD_SUCCESS)
+            val p = process(pid)
+            if (p != null) {
+                val mem = ByteArray(len.toInt())
+                synchronized(lock) { copyOut(p, start, mem) }
+                for (a in MiniAssembler.ripTargets(mem, start)) if (a.second == target) out.write(le(8).putLong(a.first).array())
+            }
+            out.write(le(8).putLong(-1L).array())
+            return true
+        }
+    }
+
+    // ------------------------------------------------------------------ debugger (attach / watchpoints / interrupts)
+
+    /** One watchpoint slot as set by CMD_DEBUG_SET_WATCHPOINT. [lenCode] is the DR7 LEN encoding. */
+    class Watchpoint(val enabled: Boolean, val lenCode: Int, val breakType: Int, val address: Long) {
+        val size: Int get() = when (lenCode) { 0 -> 1; 1 -> 2; 3 -> 4; else -> 8 }
+    }
+
+    private class DebugState(val pid: Int, val owner: Conn?, val events: Socket) {
+        val watch = arrayOfNulls<Watchpoint>(4)
+        @Volatile var stoppedRegs: ByteArray = ByteArray(176)
+        val resume = java.util.concurrent.Semaphore(0)
+    }
+
+    @Volatile private var debug: DebugState? = null
+    /** Number of CMD_DEBUG_CONTINUE requests (for tests). */
+    val continues = AtomicInteger()
+    /** Last CMD_DEBUG_PROCESS_STOP (pid, state) for tests. */
+    @Volatile var lastProcessStop: Pair<Int, Int>? = null
+        private set
+    val debugAttached: Boolean get() = debug != null
+    fun watchpoints(): List<Watchpoint?> = debug?.watch?.toList() ?: emptyList()
+
+    private inner class DebugEmulation {
+        fun handle(cmd: Int, body: ByteBuffer, out: OutputStream, conn: Conn): Boolean {
+            if (cmd == CMD_DEBUG_PROCESS_STOP) {
+                if (body.capacity() < 5) { status(out, CMD_DATA_NULL); return false }
+                val pid = body.int; val state = body.get().toInt()
+                if (state > 2 || pid == 0) { status(out, CMD_ERROR); return false }
+                lastProcessStop = pid to state
+                status(out, CMD_SUCCESS); return true
+            }
+            if (cmd == CMD_DEBUG_ATTACH) return attach(body, out, conn)
+            val d = debug ?: run { status(out, CMD_ERROR); return false } // handlers: not attached → CMD_ERROR, return 1
+            when (cmd) {
+                CMD_DEBUG_DETACH -> { teardown(); status(out, CMD_SUCCESS); return true }
+                CMD_DEBUG_SET_WATCHPOINT -> {
+                    if (body.capacity() < 24) { status(out, CMD_DATA_NULL); return false }
+                    val index = body.int; val enabled = body.int; val len = body.int; val type = body.int; val addr = body.long
+                    if (index !in 0..3) { status(out, CMD_INVALID_INDEX); return false }
+                    d.watch[index] = if (enabled != 0) Watchpoint(true, len, type, addr) else null
+                    status(out, CMD_SUCCESS); return true
+                }
+                CMD_DEBUG_CONTINUE -> {
+                    continues.incrementAndGet()
+                    d.resume.release()
+                    status(out, CMD_SUCCESS); return true
+                }
+                CMD_DEBUG_GETREGS -> { status(out, CMD_SUCCESS); out.write(d.stoppedRegs); return true }
+                else -> { status(out, CMD_ERROR); return false }
+            }
+        }
+
+        private fun attach(body: ByteBuffer, out: OutputStream, conn: Conn): Boolean {
+            if (debug != null) { status(out, CMD_ALREADY_DEBUG); return false }
+            if (body.capacity() < 4) { status(out, CMD_DATA_NULL); return false }
+            val pid = body.int
+            if (process(pid) == null) { status(out, CMD_ERROR); return false }
+            val ip = if (body.capacity() >= 8) ByteArray(4).also { body.get(it) } else InetAddress.getLoopbackAddress().address
+            val events = try {
+                Socket().apply { tcpNoDelay = true; connect(InetSocketAddress(InetAddress.getByAddress(ip), faults.debugPort), 2000) }
+            } catch (e: IOException) {
+                status(out, CMD_ERROR); return false
+            }
+            debug = DebugState(pid, conn, events)
+            status(out, CMD_SUCCESS)
+            return true
+        }
+
+        fun teardown() {
+            val d = debug ?: return
+            debug = null
+            runCatching { d.events.close() }
+            d.resume.release(1000) // never leave the "game" blocked
+        }
+
+        fun clientGone(conn: Conn?) { if (conn != null && debug?.owner === conn) teardown() }
+    }
+
+    /**
+     * Test hook: the game executes the instruction at [rip] ([length] bytes) that accesses `[address, address+size)`.
+     * If an enabled watchpoint of the attached debugger matches, the mock reports a SIGTRAP stop with RIP after the
+     * instruction (data watchpoints trap after execution) and blocks this caller until CMD_DEBUG_CONTINUE / detach.
+     * @return true if the access was trapped.
+     */
+    fun gameAccess(
+        pid: Int, rip: Long, length: Int, address: Long, size: Int, write: Boolean,
+        registers: Map<String, Long> = emptyMap(), threadName: String = "GameMain", timeoutMs: Long = 5000,
+    ): Boolean {
+        val d = debug?.takeIf { it.pid == pid } ?: return false
+        val slot = d.watch.indices.firstOrNull { i ->
+            val w = d.watch[i] ?: return@firstOrNull false
+            val typeOk = when (w.breakType) { 1 -> write; 3 -> true; else -> false }
+            typeOk && address < w.address + w.size && w.address < address + size
+        } ?: return false
+        val regs = le(176)
+        val gpr = listOf("r15", "r14", "r13", "r12", "r11", "r10", "r9", "r8", "rdi", "rsi", "rbp", "rbx", "rdx", "rcx", "rax")
+        for (n in gpr) regs.putLong(registers[n] ?: 0L)
+        regs.putInt(1).putShort(0).putShort(0).putInt(0).putShort(0).putShort(0)
+        regs.putLong(rip + length).putLong(0x43).putLong(0x202).putLong(registers["rsp"] ?: 0x7EFF000L).putLong(0x3B)
+        val pkt = le(0x4A0)
+        pkt.putInt(100001).putInt((5 shl 8) or 0x7F)
+        pkt.put(fixed(threadName, 40))
+        pkt.put(regs.array())
+        pkt.position(48 + 176 + 832)
+        for (i in 0 until 16) pkt.putLong(
+            when (i) {
+                in 0..3 -> d.watch[i]?.address ?: 0L
+                6 -> 1L shl slot
+                else -> 0L
+            },
+        )
+        d.stoppedRegs = regs.array()
+        try {
+            synchronized(d.events) { d.events.getOutputStream().apply { write(pkt.array()); flush() } }
+        } catch (e: IOException) {
+            return false
+        }
+        d.resume.tryAcquire(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+        return true
+    }
 
     private inner class NgScan {
         fun auth(body: ByteBuffer, inp: DataInputStream, out: OutputStream): Boolean {
@@ -693,6 +874,16 @@ class MockPs4DebugServer(
         const val TURBO_END = 0xBDAACC14.toInt()
         const val TURBO_CANCEL = 0xBDAACC17.toInt()
         const val AUTH_MAGIC = 0xBB40E64D.toInt()
+        const val CMD_PROC_FIND_XREFS_TO = 0xBDAA0022.toInt()
+        const val CMD_PROC_ASSEMBLE = 0xBDAA0024.toInt()
+        const val CMD_DEBUG_ATTACH = 0xBDBB0001.toInt()
+        const val CMD_DEBUG_DETACH = 0xBDBB0002.toInt()
+        const val CMD_DEBUG_SET_WATCHPOINT = 0xBDBB0004.toInt()
+        const val CMD_DEBUG_GETREGS = 0xBDBB0008.toInt()
+        const val CMD_DEBUG_CONTINUE = 0xBDBB0010.toInt()
+        const val CMD_DEBUG_PROCESS_STOP = 0xBDBB0500.toInt()
+        const val CMD_ALREADY_DEBUG = 0xF0000004.toInt()
+        const val CMD_INVALID_INDEX = 0xF0000005.toInt()
         const val TS_SERVER_RESIDENT = 0x2
         const val TS_SNAPSHOT_SEGMENTS = 0x10
 

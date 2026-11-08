@@ -229,6 +229,8 @@ class Ps4DebugClient(
 
     override val serverScanTimeoutMs: Int get() = options?.serverScanTimeoutMs ?: 600_000
 
+    override val localAddress: InetAddress? get() = socket?.takeIf { it.isConnected && !it.isClosed }?.localAddress
+
     /**
      * Sends one command on a separate, short-lived connection (e.g. Turbo CANCEL while the main
      * connection is busy). ps4debug-NG's scan authorisation is server-global, so no handshake is needed.

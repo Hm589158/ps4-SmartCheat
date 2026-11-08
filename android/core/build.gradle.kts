@@ -17,6 +17,8 @@ kotlin {
 dependencies {
     api(libs.coroutines.core)
     api(libs.serialization.json)
+    // x86-64 decoder/formatter (MIT). Text is rendered on the phone; ps4debug-NG's disassembler sends no mnemonics.
+    implementation(libs.iced.x86)
     testImplementation(project(":mockserver"))
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)

@@ -14,6 +14,11 @@ kotlin {
     }
 }
 
+dependencies {
+    // Used by the mock to emulate the server-side assembler and cross-reference search.
+    implementation(libs.iced.x86)
+}
+
 application {
     mainClass.set("com.ps4smartcheat.mockserver.MainKt")
 }

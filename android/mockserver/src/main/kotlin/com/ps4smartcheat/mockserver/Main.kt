@@ -11,6 +11,7 @@ import kotlin.random.Random
  * Then connect the app to this computer's LAN IP on port 7440. Commands on stdin:
  *   coins <value>   set the simulated currency (int32 at DEMO_COINS_ADDRESS)
  *   spend <n>       subtract n coins
+ *   buy             run the demo game's "spend one coin" routine (honours code patches; trips watchpoints)
  *   show            print the simulated values
  *   quit
  *
@@ -31,10 +32,11 @@ fun main(args: Array<String>) {
             "spend" -> parts.getOrNull(1)?.toIntOrNull()?.let {
                 server.pokeInt32(game.pid, DemoGame.COINS_ADDRESS, server.peekInt32(game.pid, DemoGame.COINS_ADDRESS) - it)
             }
+            "buy" -> DemoGame.spendCoin(server)
             "show" -> println("coins=${server.peekInt32(game.pid, DemoGame.COINS_ADDRESS)}")
             "quit", "exit" -> break
             "" -> {}
-            else -> println("commands: coins <v> | spend <n> | show | quit")
+            else -> println("commands: coins <v> | spend <n> | buy | show | quit")
         }
     }
     server.close()
@@ -61,6 +63,40 @@ object DemoGame {
         Random(seed).nextBytes(text.data)
         Random(seed + 1).nextBytes(heap.data)
         server.pokeInt32(PID, COINS_ADDRESS, 5000)
+        server.poke(PID, SPEND_ROUTINE, SPEND_CODE)
         return p
+    }
+
+    /**
+     * Real x86-64 code of the demo game's "spend one coin" routine:
+     *
+     *     0x402000  8B 05 1A E1 0F 00   mov eax, dword ptr [rip+0xFE11A]   ; load coins (0x500120)
+     *     0x402006  83 E8 01            sub eax, 1
+     *     0x402009  89 05 11 E1 0F 00   mov dword ptr [rip+0xFE111], eax   ; store coins
+     *     0x40200F  C3                  ret
+     */
+    const val SPEND_ROUTINE = TEXT_START + 0x2000
+    const val LOAD_COINS = SPEND_ROUTINE
+    const val SUB_ONE = SPEND_ROUTINE + 6
+    const val STORE_COINS = SPEND_ROUTINE + 9
+    val SPEND_CODE = byteArrayOf(
+        0x8B.toByte(), 0x05, 0x1A, 0xE1.toByte(), 0x0F, 0x00,
+        0x83.toByte(), 0xE8.toByte(), 0x01,
+        0x89.toByte(), 0x05, 0x11, 0xE1.toByte(), 0x0F, 0x00,
+        0xC3.toByte(),
+    )
+
+    /**
+     * Runs the routine against the mock's memory: the load and the store are reported to the debugger emulation
+     * (they trip watchpoints), and the `sub` only happens if its bytes are still `83 E8 01` — so a NOP patch made by
+     * the app really stops the coins from decreasing.
+     */
+    fun spendCoin(server: MockPs4DebugServer, pid: Int = PID) {
+        server.gameAccess(pid, LOAD_COINS, 6, COINS_ADDRESS, 4, write = false)
+        var eax = server.peekInt32(pid, COINS_ADDRESS)
+        val sub = server.peek(pid, SUB_ONE, 3)
+        if (sub.contentEquals(byteArrayOf(0x83.toByte(), 0xE8.toByte(), 0x01))) eax -= 1
+        server.pokeInt32(pid, COINS_ADDRESS, eax)
+        server.gameAccess(pid, STORE_COINS, 6, COINS_ADDRESS, 4, write = true, registers = mapOf("rax" to (eax.toLong() and 0xFFFFFFFFL)))
     }
 }

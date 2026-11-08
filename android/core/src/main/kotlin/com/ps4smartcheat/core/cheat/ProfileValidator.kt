@@ -45,8 +45,8 @@ object ProfileValidator {
     }
 
     fun checkEntry(e: CheatEntry, pid: Int, regions: List<MemoryRegion>): CheatCheck {
-        if (e.replacementValue.isNullOrBlank()) return CheatCheck(e, CheatStatus.NO_VALUE, null)
-        val size = e.type.size
+        if (!e.isPatch && e.replacementValue.isNullOrBlank()) return CheatCheck(e, CheatStatus.NO_VALUE, null)
+        val size = if (e.isPatch) e.patchBytes!!.filterNot { it.isWhitespace() }.length / 2 else e.type.size
         val (address, relocated) = if (e.module != null) {
             val resolved = ModuleResolver.resolve(e.module, regions)
                 ?: return CheatCheck(e, CheatStatus.MODULE_MISSING, null)
@@ -55,7 +55,8 @@ object ProfileValidator {
             e.address to false
         }
         val region = regions.regionFor(address, size) ?: return CheatCheck(e, CheatStatus.NOT_MAPPED, address)
-        if (!region.isWritable) return CheatCheck(e, CheatStatus.NOT_WRITABLE, address)
+        // Code patches live in read-only executable memory; they are toggled through the code-patch policy.
+        if (!region.isWritable && !(e.isPatch && region.isReadable)) return CheatCheck(e, CheatStatus.NOT_WRITABLE, address)
         val status = when {
             relocated -> CheatStatus.RELOCATED
             e.module == null && e.discoveredPid != pid -> CheatStatus.ABSOLUTE_UNVERIFIED

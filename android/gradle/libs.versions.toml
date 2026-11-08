@@ -11,8 +11,10 @@ robolectric = "4.16.1"
 roborazzi = "1.46.1"
 androidxTestCore = "1.6.1"
 androidxTestJunit = "1.2.1"
+iced = "1.21.0"
 
 [libraries]
+iced-x86 = { module = "io.github.icedland.iced:iced-x86", version.ref = "iced" }
 coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }

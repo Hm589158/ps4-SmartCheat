@@ -22,6 +22,8 @@ interface ServerScanTransport {
     val serverScanTimeoutMs: Int
     suspend fun <T> exclusive(what: String, readTimeoutMs: Int? = null, block: (Wire) -> T): T
     fun sendSideChannel(cmd: Int, body: ByteArray): Long?
+    /** This device's address on the command connection (what the PS4 sees); null when not connected. */
+    val localAddress: java.net.InetAddress? get() = null
 }
 
 /**
