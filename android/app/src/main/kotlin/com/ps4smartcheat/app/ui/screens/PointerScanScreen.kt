@@ -161,6 +161,36 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
                 ErrorText(st.error ?: message?.takeIf { it.startsWith("Enter") })
             }
         }
+        if (st.chains.isNotEmpty() || st.target != null && !st.running && st.error == null) {
+            item {
+                SectionCard("2. After restarting the game") {
+                    Text("Find the value again with a normal scan, then enter its new address.", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(newTarget, { newTarget = it.trim() }, label = { Text("New address (hex)") }, singleLine = true, enabled = !st.running, modifier = Modifier.fillMaxWidth().testTag("pointerNewTarget"))
+                    Button(onClick = { vm.filter(newTarget) }, enabled = connected && alive && !st.running && st.chains.isNotEmpty(), modifier = Modifier.testTag("pointerFilter")) { Text("Keep chains that lead there") }
+                }
+            }
+            item {
+                Text(
+                    "${st.chains.size} chain(s)" + (st.target?.let { " to ${Address.format(it)}" } ?: "") + if (st.pointerCount > 0L) " · ${st.pointerCount} pointers in map" else "",
+                    style = MaterialTheme.typography.titleSmall, modifier = Modifier.testTag("pointerSummary"),
+                )
+                st.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
+                message?.takeIf { !it.startsWith("Enter") }?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
+            }
+            itemsIndexed(st.chains.take(300), key = { i, ch -> "$i:${ch.describe()}" }) { i, chain ->
+                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("chain-${chain.describe()}"), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(chain.describe(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
+                        Text("depth ${chain.depth}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    IconButton(onClick = { vm.add(chain) }, enabled = connected && alive, modifier = Modifier.testTag("addChain-${chain.describe()}")) {
+                        Icon(Icons.Filled.Add, contentDescription = "Add to address list")
+                    }
+                }
+                HorizontalDivider()
+            }
+            if (st.chains.size > 300) item { Text("… ${st.chains.size - 300} more. Filter after a restart to narrow them down.") }
+        }
         item {
             SectionCard("Stability across restarts") {
                 Text(
@@ -192,36 +222,6 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
                     }
                 }
             }
-        }
-        if (st.chains.isNotEmpty() || st.target != null && !st.running && st.error == null) {
-            item {
-                SectionCard("2. After restarting the game") {
-                    Text("Find the value again with a normal scan, then enter its new address.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(newTarget, { newTarget = it.trim() }, label = { Text("New address (hex)") }, singleLine = true, enabled = !st.running, modifier = Modifier.fillMaxWidth().testTag("pointerNewTarget"))
-                    Button(onClick = { vm.filter(newTarget) }, enabled = connected && alive && !st.running && st.chains.isNotEmpty(), modifier = Modifier.testTag("pointerFilter")) { Text("Keep chains that lead there") }
-                }
-            }
-            item {
-                Text(
-                    "${st.chains.size} chain(s)" + (st.target?.let { " to ${Address.format(it)}" } ?: "") + if (st.pointerCount > 0L) " · ${st.pointerCount} pointers in map" else "",
-                    style = MaterialTheme.typography.titleSmall, modifier = Modifier.testTag("pointerSummary"),
-                )
-                st.notes.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
-                message?.takeIf { !it.startsWith("Enter") }?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
-            }
-            itemsIndexed(st.chains.take(300), key = { i, ch -> "$i:${ch.describe()}" }) { i, chain ->
-                Row(Modifier.fillMaxWidth().padding(vertical = 4.dp).testTag("chain-${chain.describe()}"), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(chain.describe(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodyMedium)
-                        Text("depth ${chain.depth}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    IconButton(onClick = { vm.add(chain) }, enabled = connected && alive, modifier = Modifier.testTag("addChain-${chain.describe()}")) {
-                        Icon(Icons.Filled.Add, contentDescription = "Add to address list")
-                    }
-                }
-                HorizontalDivider()
-            }
-            if (st.chains.size > 300) item { Text("… ${st.chains.size - 300} more. Filter after a restart to narrow them down.") }
         }
     }
 }

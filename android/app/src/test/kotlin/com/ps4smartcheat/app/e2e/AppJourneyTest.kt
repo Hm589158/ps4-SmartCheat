@@ -516,8 +516,8 @@ class AppJourneyTest {
         waitTag("editingSwitch")
         tag("editingSwitch").performClick()
         confirmDialog()
-        waitNoSnackbar()
-        tag("nonWritableSwitch").performScrollTo().performClick()
+        waitText("Allow writes to non-writable regions")
+        press("nonWritableSwitch")
         confirmDialog()
 
         step("disassemble")
