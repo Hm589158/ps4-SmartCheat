@@ -261,7 +261,7 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("watchList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (selected == null) WarningBanner("No process selected.")
@@ -277,40 +277,13 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                 )
             }
         }
-        item {
-            SectionCard("Target") {
-                OutlinedTextField(
-                    value = address, onValueChange = vm::setAddress, label = { Text("Address (hex)") }, singleLine = true, enabled = !running,
-                    modifier = Modifier.fillMaxWidth().testTag("wpAddress"),
-                )
-                ChoiceRow("Writes", "Instructions that change the value", type == WatchType.WRITES, { vm.setType(WatchType.WRITES) }, enabled = !running)
-                ChoiceRow("Reads or writes", "Also instructions that only read it (usually many more hits)", type == WatchType.ACCESSES, { vm.setType(WatchType.ACCESSES) }, enabled = !running)
-                Selector("Size", WatchViewModel.SIZES, size, { "$it bytes" }, vm::setSize, enabled = !running)
-                vm.target()?.let { (a, s) -> if (s != size) Text("${Address.format(a)} is only $s-byte aligned: watching $s byte(s).", style = MaterialTheme.typography.bodySmall, color = dim) }
-            }
-        }
-        item {
-            SectionCard("Mode") {
-                ChoiceRow(
-                    "Capture once (recommended)", "Stops at the first hit with its registers. The game pauses only once.",
-                    once, { vm.setCaptureOnce(true) }, enabled = !running, tag = "wpModeOnce",
-                )
-                ChoiceRow(
-                    "Monitor", "Lists every instruction for up to ${WatchViewModel.MAX_MILLIS / 1000} s or ${WatchViewModel.MAX_HITS} hits; stops by itself if hits come too fast.",
-                    !once, { vm.setCaptureOnce(false) }, enabled = !running, tag = "wpModeContinuous",
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Button(onClick = { confirm = true }, enabled = !running && selected != null && ng && portOk && selected?.exited == false, modifier = Modifier.testTag("wpStart")) { Text("Start") }
-                    OutlinedButton(onClick = vm::stop, enabled = phase == WatchPhase.WATCHING || phase == WatchPhase.ATTACHING, modifier = Modifier.testTag("wpStop")) { Text("Stop") }
-                }
-            }
-        }
         if (phase != WatchPhase.IDLE || error != null) item {
             SectionCard("Session") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     StatusPill(phase.label, phase.tone)
                     if (hits > 0 || running) StatusPill("$hits hit(s) · ${records.size} instruction(s)", modifier = Modifier.testTag("wpHits"))
                 }
+                if (running) OutlinedButton(onClick = vm::stop, enabled = phase == WatchPhase.WATCHING || phase == WatchPhase.ATTACHING, modifier = Modifier.testTag("wpStop")) { Text("Stop") }
                 if (running) LinearProgressIndicator(Modifier.fillMaxWidth())
                 status?.let { Text(it, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("wpStatus")) }
                 release?.let { r ->
@@ -342,6 +315,33 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                         }
                     }
                     OutlinedButton(onClick = { onOpenCode(r.instructionAddress) }) { Text("Open in disassembler") }
+                }
+            }
+        }
+        item {
+            SectionCard("Target") {
+                OutlinedTextField(
+                    value = address, onValueChange = vm::setAddress, label = { Text("Address (hex)") }, singleLine = true, enabled = !running,
+                    modifier = Modifier.fillMaxWidth().testTag("wpAddress"),
+                )
+                ChoiceRow("Writes", "Instructions that change the value", type == WatchType.WRITES, { vm.setType(WatchType.WRITES) }, enabled = !running)
+                ChoiceRow("Reads or writes", "Also instructions that only read it (usually many more hits)", type == WatchType.ACCESSES, { vm.setType(WatchType.ACCESSES) }, enabled = !running)
+                Selector("Size", WatchViewModel.SIZES, size, { "$it bytes" }, vm::setSize, enabled = !running)
+                vm.target()?.let { (a, s) -> if (s != size) Text("${Address.format(a)} is only $s-byte aligned: watching $s byte(s).", style = MaterialTheme.typography.bodySmall, color = dim) }
+            }
+        }
+        item {
+            SectionCard("Mode") {
+                ChoiceRow(
+                    "Capture once (recommended)", "Stops at the first hit with its registers. The game pauses only once.",
+                    once, { vm.setCaptureOnce(true) }, enabled = !running, tag = "wpModeOnce",
+                )
+                ChoiceRow(
+                    "Monitor", "Lists every instruction for up to ${WatchViewModel.MAX_MILLIS / 1000} s or ${WatchViewModel.MAX_HITS} hits; stops by itself if hits come too fast.",
+                    !once, { vm.setCaptureOnce(false) }, enabled = !running, tag = "wpModeContinuous",
+                )
+                Button(onClick = { confirm = true }, enabled = !running && selected != null && ng && portOk && selected?.exited == false, modifier = Modifier.testTag("wpStart")) {
+                    Text(if (phase == WatchPhase.IDLE) "Start" else "Start again")
                 }
             }
         }

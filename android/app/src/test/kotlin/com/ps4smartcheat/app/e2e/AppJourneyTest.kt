@@ -60,6 +60,7 @@ class AppJourneyTest {
                 println("E2E journal: " + c.editor.journal.value.map { "pid ${it.pid} ${Address.format(it.address)} len ${it.original.size}" })
                 println("E2E undo: " + c.editor.undoStack.value.map { "${it.label} ${Address.format(it.target.address)}" })
                 println("E2E selected: " + c.selectedProcess.value?.let { "${it.name} ${it.pid} exited=${it.exited}" } + " state=" + c.backend.state.value)
+                println("E2E pointer scan: " + c.pointerScan.state.value.let { "running=${it.running} chains=${it.chains.size} target=${it.target} error=${it.error}" })
             }.onFailure { println("E2E diagnostics failed: $it") }
             runCatching { File(OUT).mkdirs(); captureScreenRoboImage("$OUT/FAILED_${d.methodName}.png") }
                 .onFailure { println("E2E failure screenshot failed: $it") }
@@ -67,6 +68,8 @@ class AppJourneyTest {
     }
 
     private var lastStep = "start"
+
+    private fun c() = (compose.activity.application as com.ps4smartcheat.app.SmartCheatApp).container
 
     private fun step(name: String) {
         lastStep = name
@@ -473,6 +476,8 @@ class AppJourneyTest {
         waitTag("pointerStart")
         tag("pointerStart").performClick()
         val chain = "[eboot.bin+0x100200]+0x48"
+        compose.waitUntil(30_000) { c().pointerScan.state.value.let { !it.running && it.chains.isNotEmpty() } }
+        compose.onNodeWithTag("pointerList").performScrollToNode(hasTestTag("chain-$chain"))
         waitTag("chain-$chain", timeoutMs = 30_000)
         shot("36_pointer_scan")
         waitNoSnackbar()
@@ -654,11 +659,15 @@ class AppJourneyTest {
         shot("49_capture_once")
 
         step("open the saved result without the debugger")
-        waitText("Writes to " + Address.format(DemoGame.COINS_ADDRESS))
-        compose.onAllNodesWithText("Writes to " + Address.format(DemoGame.COINS_ADDRESS))[0].performScrollTo().performClick()
+        val savedTitle = "Writes to " + Address.format(DemoGame.COINS_ADDRESS)
+        compose.onNodeWithTag("watchList").performScrollToNode(hasText(savedTitle))
+        waitText(savedTitle)
+        compose.onAllNodesWithText(savedTitle)[0].performClick()
+        compose.onNodeWithTag("watchList").performScrollToNode(hasText("eboot.bin+0x2009", substring = true))
         waitText("eboot.bin+0x2009")
         shot("50_saved_results")
-        compose.onAllNodesWithText("Open")[0].performScrollTo().performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithTag("watchList").performScrollToNode(hasText("Open"))
+        compose.onAllNodesWithText("Open")[0].performSemanticsAction(SemanticsActions.OnClick)
         waitTag("codeAddress")
         waitText("mov [0x500120], eax")
     }
