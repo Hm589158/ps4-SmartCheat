@@ -296,7 +296,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.DIAGNOSTICS -> "Diagnostics"
     Routes.HELP -> "Guide"
     Routes.CODE -> "Code"
-    Routes.WATCH -> "What writes / accesses"
+    Routes.WATCH -> "Watchpoint"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"
     Routes.SETTINGS -> "Settings"
