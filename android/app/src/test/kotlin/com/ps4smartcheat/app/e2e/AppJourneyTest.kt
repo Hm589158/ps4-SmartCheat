@@ -821,6 +821,19 @@ class AppJourneyTest {
         compose.onNodeWithTag("codeList").performScrollToNode(hasTestTag("asm_" + java.lang.Long.toHexString(DemoGame.STORE_COINS)))
         waitTag(hitRow)
         waitText("◆ hit")
+
+        step("call stack")
+        compose.onNodeWithTag("codeList").performScrollToNode(hasTestTag("callStack"))
+        waitText("call 0x402000") // UPDATE called the spend routine (direct call, verified)
+        waitText("call verified")
+        waitText("call rax") // GAME_LOOP called UPDATE indirectly; found through the frame pointer chain
+        waitText("frame pointer chain")
+        shot("59_call_stack")
+        press("callStack-copy")
+        val clip = compose.activity.getSystemService(android.content.ClipboardManager::class.java).primaryClip!!.getItemAt(0).text.toString()
+        assertEquals(true, clip.lines().any { it.startsWith("#1  " + Address.format(DemoGame.UPDATE + 4)) && it.contains("call 0x402000") })
+        press("callStack-1") // open the caller
+        waitText("Patch at " + Address.format(DemoGame.UPDATE + 4))
     }
 
     @Test fun payloadBelowCapability12DisablesWatchpoints() {

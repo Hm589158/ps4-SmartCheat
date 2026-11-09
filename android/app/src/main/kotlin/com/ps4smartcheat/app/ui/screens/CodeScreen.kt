@@ -196,6 +196,17 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
         return com.ps4smartcheat.core.asm.Listing.format(list, style, ::relative)
     }
 
+    /** Where a call-stack frame's call instruction is now (module offset after a restart). */
+    fun frameAddress(f: com.ps4smartcheat.core.debug.StackFrame): Long =
+        c.selectedProcess.value?.regions?.let { regs -> f.module?.let { m -> ModuleResolver.resolve(m, regs) } } ?: f.callAddress
+
+    /** The call stack as text for the clipboard. */
+    fun callStackText(snap: com.ps4smartcheat.core.debug.RegisterSnapshot, hitText: String?): String? {
+        _message.value = "Copied the call stack (${snap.callStack.size + 1} line(s))"
+        val moved = snap.callStack.map { it.copy(callAddress = frameAddress(it)) }
+        return com.ps4smartcheat.core.debug.CallStack.format(snap.instructionAddress, hitText, moved, ::relative)
+    }
+
     fun relative(a: Long): String = c.selectedProcess.value?.regions?.let { ModuleResolver.refFor(a, it) }
         ?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: ""
 
@@ -405,6 +416,13 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                                     Text(pair.joinToString("   ") { (n, v) -> n.padEnd(6) + "%016X".format(v) }, style = mono)
                                 }
                             }
+                            androidx.compose.material3.HorizontalDivider()
+                            val hitText = rows.firstOrNull { it.address == snap.instructionAddress }?.text
+                            CallStackView(
+                                snap.instructionAddress, hitText, snap.callStack, vm::relative,
+                                onOpen = { a -> vm.follow(a) }, address = vm::frameAddress,
+                                onCopy = { vm.callStackText(snap, hitText)?.let { com.ps4smartcheat.app.ui.components.copyText(context, "Call stack", it) } },
+                            )
                         }
                     }
                 }

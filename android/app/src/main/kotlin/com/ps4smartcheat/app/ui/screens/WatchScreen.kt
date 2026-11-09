@@ -44,6 +44,7 @@ import com.ps4smartcheat.app.ui.components.Tone
 import com.ps4smartcheat.app.ui.components.WarningBanner
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.ConnectionState
+import com.ps4smartcheat.core.debug.resolve
 import com.ps4smartcheat.core.debug.AccessMonitor
 import com.ps4smartcheat.core.debug.AccessRecord
 import com.ps4smartcheat.core.debug.DebugSession
@@ -226,6 +227,19 @@ class WatchViewModel(private val c: AppContainer) : ViewModel() {
         return r.instructionAddress
     }
 
+    /** Like [openRecord], but shows [at] (a caller from the call stack) with the hit's registers and call stack. */
+    fun openRecordAt(r: AccessRecord, at: Long): Long { openRecord(r); return at }
+
+    /** Like [openSaved], but shows [at] (a caller from the saved call stack). */
+    fun openSavedAt(a: com.ps4smartcheat.core.debug.SavedAccess, s: SavedWatchSession, at: Long): Long { openSaved(a, s); return at }
+
+    /** Where a call-stack frame's call instruction is now (module offset after a restart). */
+    fun frameAddress(f: com.ps4smartcheat.core.debug.StackFrame): Long =
+        c.selectedProcess.value?.regions?.let { f.resolve(it) } ?: f.callAddress
+
+    fun relativeOf(a: Long): String = c.selectedProcess.value?.regions?.let { com.ps4smartcheat.core.cheat.ModuleResolver.refFor(a, it) }
+        ?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: ""
+
     /** Opens a saved hit in the disassembler with the registers stored with it. Returns the address to show. */
     fun openSaved(a: com.ps4smartcheat.core.debug.SavedAccess, s: SavedWatchSession): Long {
         val at = resolve(a)
@@ -328,6 +342,12 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                         }
                     }
                     OutlinedButton(onClick = { onOpenCode(vm.openRecord(r)) }, modifier = Modifier.testTag("openRecord")) { Text("Open in disassembler") }
+                    r.callStack?.let { frames ->
+                        CallStackView(
+                            r.instructionAddress, r.instruction?.text, frames, vm::relativeOf,
+                            onOpen = { at -> onOpenCode(vm.openRecordAt(r, at)) }, address = vm::frameAddress, tag = "wpStack",
+                        )
+                    }
                 }
             }
         }
@@ -382,6 +402,12 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                                         Text(a.text ?: "(not decoded)", style = mono, color = dim)
                                     }
                                     TextButton(onClick = { onOpenCode(vm.openSaved(a, s)) }, modifier = Modifier.testTag("openSaved-${s.id}")) { Text("Open") }
+                                }
+                                if (a.callStack.isNotEmpty()) {
+                                    CallStackView(
+                                        vm.resolve(a), a.text, a.callStack, vm::relativeOf,
+                                        onOpen = { at -> onOpenCode(vm.openSavedAt(a, s, at)) }, address = vm::frameAddress, tag = "savedStack-${s.id}",
+                                    )
                                 }
                             }
                             TextButton(onClick = { vm.deleteSaved(s.id) }) { Text("Delete", color = MaterialTheme.colorScheme.error) }

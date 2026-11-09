@@ -4,6 +4,21 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
+### Call stack at watchpoint hits (new — verified against the simulated server only)
+- "What writes / accesses" now records the **call stack** of the first hit of each instruction: who called the
+  function that wrote the value, and who called that. ps4debug has no unwinder, so up to 1 KiB of the thread's stack
+  is read **while the game is still paused** (one extra read before CONTINUE, once per instruction, never delaying
+  the resume when it fails) and walked on the phone.
+- A stack value counts as a return address only if a `call` instruction ends right before it (decoded from the code).
+  Direct calls into the function of the frame below are marked **call verified**, slots on the saved `rbp` chain
+  **frame pointer chain**, indirect calls (`call rax`, `call [rip+…]`) **indirect call**; direct calls elsewhere are
+  usually stale values and hidden behind "Show possibly stale entries".
+- Shown in the results (live and saved), and in the disassembler's "Registers at the hit" card: tap a frame to open
+  the caller, **Copy** puts the stack on the clipboard. Saved stacks keep module offsets, so they open at the right
+  place after a game restart.
+- Simulated server: the demo game runs on a real stack in its memory and reaches the spend routine through two
+  callers (a direct call with a frame pointer and an indirect `call rax`).
+
 ### GoldHEN export: file names and versions (fix)
 - **File name by target process**, as the official GoldHEN_Cheat_Repository README specifies:
   `{titleid}_{version}.json` for eboot.bin and `{titleid}_{version}_{process}.json` for any other process — e.g.

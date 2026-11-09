@@ -86,6 +86,34 @@ watchpoint screen and open in the disassembler later — no debugger session nee
 address computed from them and the value in memory there now; each row shows its registers' values and the hit is
 marked ◆. The values are those right after the hit instruction ran; other instructions may have seen different ones.
 
+## Call stack
+
+At the first hit of each instruction the app also records **who called it**:
+
+1. While the game is still paused, it reads up to 1 KiB of the thread's stack from `rsp`. This is one `CMD_PROC_READ`
+   before CONTINUE, bounded by the stack mapping. If the read fails, no stack is recorded and the resume goes ahead
+   as usual.
+2. On the phone, every 8-byte value on that stack that points into executable memory is checked. It counts as a
+   return address only if the code right before it decodes as a `call` instruction (`E8 rel32` or the `FF /2`
+   forms).
+3. Each frame gets a confidence:
+
+| Shown as | Meaning |
+|---|---|
+| call verified | a direct call whose target is the start of the function the frame below is in |
+| frame pointer chain | the slot is on the saved `rbp` chain (`[rbp]` → caller's rbp, `[rbp+8]` → return address) |
+| indirect call | `call rax`, `call [rip+…]`: the target cannot be checked |
+| possibly stale | a direct call to some other function, usually left on the stack by an earlier call; hidden by default |
+
+PS4 games have no unwind information the app can use, so the stack can contain stale entries or miss frames, such as
+tail calls that leave no return address behind. This is the same heuristic as Cheat Engine's stack view. Tap a frame
+to open the caller in the disassembler; **Copy** puts the stack on the clipboard. Saved sessions keep each frame's
+module offset.
+
+An execute breakpoint ("capture the call stack when this instruction runs") is possible with ps4debug-NG's watchpoint
+command (`breaktype` 0 = `DBREG_DR7_EXEC`). It is **not** offered yet: resuming from an instruction breakpoint needs
+the x86 resume flag, and without hardware tests that could make the game stop on the same instruction forever.
+
 ## Reading the results
 
 * Each row is one instruction with how often it hit, the thread name and — when the instruction's operands could be

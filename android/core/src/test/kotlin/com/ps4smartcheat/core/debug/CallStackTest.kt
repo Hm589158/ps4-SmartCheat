@@ -62,6 +62,17 @@ class CallStackTest {
         assertNull(frames[1].callTarget)
     }
 
+    @Test fun formatsForTheClipboardAndResolvesAfterARestart() {
+        val f = StackFrame(0x403009, 0x403004, "call 0x402000", 0x402000, 0, FrameConfidence.CONFIRMED, com.ps4smartcheat.core.cheat.ModuleRef("eboot.bin", 0x3004))
+        assertEquals(
+            "#0  0x000402009  mov [0x500120], eax  (watchpoint hit)\n#1  0x000403004  call 0x402000  (call verified)",
+            CallStack.format(0x402009, "mov [0x500120], eax", listOf(f)),
+        )
+        val moved = listOf(MemoryRegion("eboot.bin", 0x800000, 0x810000, 0, MemoryRegion.PROT_READ or MemoryRegion.PROT_EXEC))
+        assertEquals(0x803004L, f.resolve(moved))
+        assertEquals(0x403004L, f.copy(module = null).resolve(moved))
+    }
+
     @Test fun framePointerChainMarksItsSlots() = runBlocking {
         // rbp = rsp+8: [rbp] = next frame pointer (higher), [rbp+8] = return address
         val s = stack(0x0, 0x9020, 0x1305, 0x0, 0x0)

@@ -158,5 +158,24 @@ object CallStack {
         })
     }
 
+    /**
+     * Plain text for the clipboard: the hit instruction (#0), then each caller with its confidence, e.g.
+     * `#1  0x000403004  eboot.bin+0x3004  call 0x402000  (call verified)`.
+     */
+    fun format(hitAddress: Long, hitText: String?, frames: List<StackFrame>, relative: (Long) -> String = { "" }): String = buildString {
+        fun line(n: Int, a: Long, text: String, note: String) {
+            append('#').append(n).append("  ").append(com.ps4smartcheat.core.util.Address.format(a))
+            relative(a).takeIf { it.isNotBlank() }?.let { append("  ").append(it) }
+            append("  ").append(text)
+            if (note.isNotEmpty()) append("  (").append(note).append(')')
+            append('\n')
+        }
+        line(0, hitAddress, hitText ?: "?", "watchpoint hit")
+        frames.forEachIndexed { i, f -> line(i + 1, f.callAddress, f.callText, f.confidence.label) }
+    }.trimEnd()
+
     private const val BLOCK = 256L
 }
+
+/** Where the frame's call instruction is now: through its module offset when the game was restarted. */
+fun StackFrame.resolve(regions: List<MemoryRegion>): Long = module?.let { ModuleResolver.resolve(it, regions) } ?: callAddress
