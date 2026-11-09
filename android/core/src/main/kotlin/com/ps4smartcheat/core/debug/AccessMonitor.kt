@@ -32,6 +32,8 @@ data class AccessRecord(
     val effectiveAddress: Long?,
     val firstSeenMillis: Long,
     val lastSeenMillis: Long,
+    /** Callers at the first hit of this instruction (stack read while the game was paused); null when not captured. */
+    val callStack: List<StackFrame>? = null,
 )
 
 data class MonitorOptions(
@@ -41,6 +43,11 @@ data class MonitorOptions(
     val maxMillis: Long = 60_000,
     /** Record the first hit with its registers, then end the session (the game pauses exactly once). */
     val captureOnce: Boolean = false,
+    /**
+     * Stack bytes read at the first hit of each instruction for its call stack, while the game is still paused
+     * (one extra read of at most this many bytes before CONTINUE). 0 = no call stacks.
+     */
+    val stackBytes: Int = CallStack.DEFAULT_STACK_BYTES,
     /**
      * Flood guard: more stops than this within one second means the game spends most of its time paused (a value
      * read every frame, several threads…); monitoring stops before the game stalls.
@@ -88,6 +95,7 @@ class AccessMonitor(
         val decoded = HashMap<Long, AsmInstruction?>()
         val accessed = address until address + size
         val recentHits = ArrayDeque<Long>()
+        val stackTaken = HashSet<Long>()
         var hits = 0
         val start = clock()
         var kind = StopKind.USER
@@ -108,6 +116,9 @@ class AccessMonitor(
                     kind = StopKind.SIGNAL; reason = "the game stopped with signal ${ev.signal}; monitoring ended"
                     break
                 }
+                // Call stack: the stack is only valid while the game is paused, so it is read now — once per instruction,
+                // bounded, and never blocking the resume below (a failed read just means no call stack).
+                val stack = if (options.stackBytes > 0 && ev.registers.rip !in stackTaken) readStack(session.pid, ev.registers, regions, options.stackBytes) else null
                 // The game is paused right now: resume first, verified.
                 if (!resumeVerified(session)) {
                     kind = StopKind.RESUME_FAILED
@@ -123,8 +134,19 @@ class AccessMonitor(
                 val ins = if (decoded.containsKey(rip)) decoded[rip] else locate(session.pid, rip, accessed, ev.registers, regions).also { decoded[rip] = it }
                 val key = ins?.address ?: rip
                 val ea = ins?.let { X86.effectiveAddress(it, ev.registers.values) }
-                records[key] = records[key]?.copy(count = records[key]!!.count + 1, registers = ev.registers, threadName = ev.threadName, effectiveAddress = ea, lastSeenMillis = now)
-                    ?: AccessRecord(key, rip, ins, 1, ev.registers, ev.threadName, ea, now, now)
+                val frames = stack?.let { bytes ->
+                    stackTaken += rip
+                    try {
+                        CallStack.unwindWithReader(rip, ev.registers.rsp, ev.registers.values["rbp"] ?: 0L, bytes, regions) { a, n -> backend.readMemory(session.pid, a, n) }
+                    } catch (e: BackendException) {
+                        null
+                    }
+                }
+                val old = records[key]
+                records[key] = old?.copy(
+                    count = old.count + 1, registers = ev.registers, threadName = ev.threadName, effectiveAddress = ea, lastSeenMillis = now,
+                    callStack = old.callStack ?: frames,
+                ) ?: AccessRecord(key, rip, ins, 1, ev.registers, ev.threadName, ea, now, now, frames)
                 onUpdate(records.values.sortedByDescending { it.count }, hits)
                 if (options.captureOnce) { kind = StopKind.CAPTURED; reason = "first hit captured"; break }
                 if (recentHits.size > options.maxHitsPerSecond) {
@@ -156,6 +178,14 @@ class AccessMonitor(
         if (session.resume()) return true
         delay(DebugSession.RESUME_RETRY_DELAY_MS)
         return session.resume()
+    }
+
+    /** Stack bytes at rsp while the thread is stopped; null when rsp is not in readable memory or the read fails. */
+    private suspend fun readStack(pid: Int, regs: Registers, regions: List<MemoryRegion>, want: Int): ByteArray? {
+        val rsp = regs.values["rsp"] ?: return null
+        val n = CallStack.readableLength(rsp, regions, want)
+        if (n < 8) return null
+        return try { backend.readMemory(pid, rsp, n) } catch (e: BackendException) { null }
     }
 
     private suspend fun locate(pid: Int, rip: Long, accessed: LongRange, regs: Registers, regions: List<MemoryRegion>): AsmInstruction? = try {

@@ -85,7 +85,7 @@ class Ps4DebugClientTest {
     @Test fun parsesMemoryMaps() = runBlocking {
         client.connect(opts())
         val maps = client.getMemoryRegions(DemoGame.PID)
-        assertEquals(3, maps.size)
+        assertEquals(4, maps.size) // code, data, heap, stack
         val data = maps[1]
         assertEquals("eboot.bin", data.name)
         assertEquals(DemoGame.DATA_START, data.start)
@@ -104,7 +104,7 @@ class Ps4DebugClientTest {
             assertEquals(Ps4DebugProtocol.CMD_ERROR, e.status)
         }
         assertTrue(client.state.value is ConnectionState.Connected)
-        assertEquals(3, client.getMemoryRegions(DemoGame.PID).size)
+        assertEquals(4, client.getMemoryRegions(DemoGame.PID).size)
     }
 
     @Test fun readsMemoryAcrossChunks() = runBlocking {

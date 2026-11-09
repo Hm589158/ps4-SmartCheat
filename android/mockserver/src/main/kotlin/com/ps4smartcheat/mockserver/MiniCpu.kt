@@ -10,16 +10,17 @@ import com.github.icedland.iced.x86.dec.Decoder
  * A very small x86-64 interpreter for the mock "game": it runs a routine from the mock's memory so that code patches
  * and code-cave injections made by the app have a real, observable effect in tests. Supports only what the demo
  * routine and simple injected code need — 32-bit `mov`/`add`/`sub`/`xor`/`inc`/`dec` on registers and
- * RIP-relative or `[reg+disp]` memory, `mov r32, imm`, NOPs, `jmp rel8/rel32`, `jmp qword ptr [rip+0]`
- * (absolute jump), `call rel32` and `ret`. Anything else throws [Unsupported], so a test never silently passes on
+ * RIP-relative or `[reg+disp]` memory, `mov r32, imm`, `mov r64, r64`, `push`/`pop r64`, NOPs, `jmp rel8/rel32`,
+ * `jmp qword ptr [rip+0]` (absolute jump), `call rel32`, `call r64` and `ret`. The stack lives in the mock's memory
+ * ([stackTop] must be in a writable region), so a watchpoint hit sees real return addresses on it. Anything else throws [Unsupported], so a test never silently passes on
  * code the mock did not execute.
  */
-class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int) {
+class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int, stackTop: Long = DemoGame.STACK_TOP) {
     class Unsupported(message: String) : RuntimeException(message)
 
     /** rax..r15 by index (0 = rax). */
     val regs = LongArray(16)
-    var rsp = 0x7EFF_0000L
+    var rsp = stackTop
     /** Executed instruction addresses, in order. */
     val trace = ArrayList<Long>()
 
@@ -33,8 +34,11 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int) {
         else -> null
     }
 
-    /** General-purpose registers for the debugger emulation (rsp is left to its default). */
-    private fun named(): Map<String, Long> = NAMES.withIndex().filter { it.index != 4 }.associate { (i, n) -> n to regs[i] }
+    /** General-purpose registers for the debugger emulation. */
+    private fun named(): Map<String, Long> = NAMES.withIndex().associate { (i, n) -> n to if (i == 4) rsp else regs[i] }
+
+    private fun get64(r: Int): Long { val i = idx64(r) ?: throw Unsupported("register $r"); return if (i == 4) rsp else regs[i] }
+    private fun set64(r: Int, v: Long) { val i = idx64(r) ?: throw Unsupported("register $r"); if (i == 4) rsp = v else regs[i] = v }
 
     /** Runs from [entry] until the routine's own `ret` (call depth 0). */
     fun run(entry: Long, maxSteps: Int = 500) {
@@ -51,6 +55,16 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int) {
                 Code.NOPD, Code.NOPW, Code.NOPQ, Code.NOP_RM32, Code.NOP_RM16, Code.NOP_RM64 -> rip = next
                 Code.RETNQ -> { if (depth == 0) return; depth--; rip = pop() }
                 Code.CALL_REL32_64 -> { push(next); depth++; rip = ins.nearBranchTarget }
+                Code.CALL_RM64 -> {
+                    if (ins.getOpKind(0) != OpKind.REGISTER) throw Unsupported("call through memory at 0x%X".format(rip))
+                    push(next); depth++; rip = get64(ins.op0Register)
+                }
+                Code.PUSH_R64 -> { push(get64(ins.op0Register)); rip = next }
+                Code.POP_R64 -> { set64(ins.op0Register, pop()); rip = next }
+                Code.MOV_RM64_R64, Code.MOV_R64_RM64 -> {
+                    if (ins.getOpKind(0) != OpKind.REGISTER || ins.getOpKind(1) != OpKind.REGISTER) throw Unsupported("64-bit memory move at 0x%X".format(rip))
+                    set64(ins.op0Register, get64(ins.op1Register)); rip = next
+                }
                 Code.JMP_REL32_64, Code.JMP_REL8_64 -> rip = ins.nearBranchTarget
                 Code.JMP_RM64 -> {
                     if (ins.getOpKind(0) != OpKind.MEMORY || !ins.isIPRelativeMemoryOperand) throw Unsupported("indirect jmp at 0x%X".format(rip))
@@ -118,9 +132,18 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int) {
         return v
     }
 
-    private val stack = ArrayDeque<Long>()
-    private fun push(v: Long) { stack.addLast(v); rsp -= 8 }
-    private fun pop(): Long { rsp += 8; return stack.removeLast() }
+    private fun push(v: Long) {
+        rsp -= 8
+        server.poke(pid, rsp, ByteArray(8) { i -> (v shr (8 * i)).toByte() })
+    }
+
+    private fun pop(): Long {
+        val b = server.peek(pid, rsp, 8)
+        rsp += 8
+        var v = 0L
+        for (i in 7 downTo 0) v = (v shl 8) or (b[i].toLong() and 0xFF)
+        return v
+    }
 
     companion object {
         val NAMES = listOf("rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15")

@@ -207,7 +207,8 @@ class CodeInjectionTest {
         val trace = DemoGame.spendCoin(server)
         assertEquals(999, coins) // mov eax, 1000 then the original sub 1 and store
         assertTrue(trace.any { it in inj.caveRange })
-        assertEquals(DemoGame.SPEND_ROUTINE + 15, trace.last()) // returned to the routine's ret
+        assertTrue(DemoGame.SPEND_ROUTINE + 15 in trace) // returned to the routine's ret
+        assertEquals(DemoGame.GAME_LOOP + 7, trace.last()) // and on up to its callers
 
         // ON twice is refused; OFF restores the jump first, then the padding.
         try { writer.prepare(pid, "eboot.bin", inj, true); fail() } catch (_: EditDeniedException) {}

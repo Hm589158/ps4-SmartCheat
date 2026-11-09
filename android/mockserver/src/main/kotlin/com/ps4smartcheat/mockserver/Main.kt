@@ -54,6 +54,10 @@ object DemoGame {
     const val INT3_PADDING = 0x50
     /** Zero bytes at the end of the code mapping (0x40F000..0x40FFFF). */
     const val TAIL_PADDING = 0x1000
+    /** Main thread stack (grows down from [STACK_TOP]). */
+    const val STACK_START = 0x0000_0007_EFF0_0000L
+    const val STACK_SIZE = 0x10000
+    const val STACK_TOP = STACK_START + STACK_SIZE - 0x100
 
     fun install(server: MockPs4DebugServer, seed: Int = 1234): MockPs4DebugServer.Process {
         server.addProcess(MockPs4DebugServer.Process(1, "SceSysCore.elf"))
@@ -64,6 +68,7 @@ object DemoGame {
         val text = p.region("eboot.bin", TEXT_START, 0x10000, MockPs4DebugServer.PROT_R or MockPs4DebugServer.PROT_X)
         p.region("eboot.bin", DATA_START, 0x10000, MockPs4DebugServer.PROT_R or MockPs4DebugServer.PROT_W)
         val heap = p.region("anon:heap", HEAP_START, HEAP_SIZE, MockPs4DebugServer.PROT_R or MockPs4DebugServer.PROT_W)
+        p.region("stack", STACK_START, STACK_SIZE, MockPs4DebugServer.PROT_R or MockPs4DebugServer.PROT_W)
         Random(seed).nextBytes(text.data)
         Random(seed + 1).nextBytes(heap.data)
         server.pokeInt32(PID, COINS_ADDRESS, 5000)
@@ -71,6 +76,8 @@ object DemoGame {
         // Compiler-style padding: int3 between functions and zeros after the end of the code (code caves).
         server.poke(PID, SPEND_ROUTINE + SPEND_CODE.size, ByteArray(INT3_PADDING) { 0xCC.toByte() })
         server.poke(PID, TEXT_START + 0x10000 - TAIL_PADDING, ByteArray(TAIL_PADDING))
+        server.poke(PID, UPDATE, UPDATE_CODE)
+        server.poke(PID, GAME_LOOP, GAME_LOOP_CODE)
         return p
     }
 
@@ -94,10 +101,30 @@ object DemoGame {
     )
 
     /**
+     * The callers of the spend routine, so a watchpoint hit has a real call stack:
+     *
+     *     0x403000  55               push rbp                 ; UPDATE (keeps a frame pointer)
+     *     0x403001  48 89 E5         mov rbp, rsp
+     *     0x403004  E8 F7 EF FF FF   call 0x402000            ; direct call → return address 0x403009
+     *     0x403009  5D               pop rbp
+     *     0x40300A  C3               ret
+     *
+     *     0x403100  B8 00 30 40 00   mov eax, 0x403000        ; GAME_LOOP
+     *     0x403105  FF D0            call rax                 ; indirect call → return address 0x403107
+     *     0x403107  C3               ret
+     */
+    const val UPDATE = TEXT_START + 0x3000
+    const val UPDATE_RETURN = UPDATE + 9
+    const val GAME_LOOP = TEXT_START + 0x3100
+    const val GAME_LOOP_RETURN = GAME_LOOP + 7
+    val UPDATE_CODE = byteArrayOf(0x55, 0x48, 0x89.toByte(), 0xE5.toByte(), 0xE8.toByte(), 0xF7.toByte(), 0xEF.toByte(), 0xFF.toByte(), 0xFF.toByte(), 0x5D, 0xC3.toByte())
+    val GAME_LOOP_CODE = byteArrayOf(0xB8.toByte(), 0x00, 0x30, 0x40, 0x00, 0xFF.toByte(), 0xD0.toByte(), 0xC3.toByte())
+
+    /**
      * Runs the routine from the mock's memory with [MiniCpu]: the load and the store are reported to the debugger
      * emulation (they trip watchpoints), and whatever code the app patched or injected really runs — a NOP patch
      * stops the coins from decreasing, an injected `jmp` into a code cave executes the cave.
      * @return the executed instruction addresses
      */
-    fun spendCoin(server: MockPs4DebugServer, pid: Int = PID): List<Long> = MiniCpu(server, pid).also { it.run(SPEND_ROUTINE) }.trace
+    fun spendCoin(server: MockPs4DebugServer, pid: Int = PID): List<Long> = MiniCpu(server, pid).also { it.run(GAME_LOOP) }.trace
 }

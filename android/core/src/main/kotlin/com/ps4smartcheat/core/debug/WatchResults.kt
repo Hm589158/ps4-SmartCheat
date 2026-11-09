@@ -24,6 +24,8 @@ data class SavedAccess(
     /** Register name → value (hex) at the most recent hit. */
     val registers: Map<String, String> = emptyMap(),
     @Serializable(with = HexAddressSerializer::class) val effectiveAddress: Long? = null,
+    /** Callers at the first hit (see [CallStack]); empty when none was captured. */
+    val callStack: List<StackFrame> = emptyList(),
 ) {
     /** Address in the current session: via the module when known, else the address from capture time. */
     fun resolve(regions: List<MemoryRegion>): Long = module?.let { ModuleResolver.resolve(it, regions) } ?: instructionAddress
@@ -58,6 +60,7 @@ object WatchResults {
         thread = r.threadName,
         registers = r.registers.general.associate { (n, v) -> n to "0x" + java.lang.Long.toHexString(v).uppercase() },
         effectiveAddress = r.effectiveAddress,
+        callStack = r.callStack.orEmpty(),
     )
 }
 

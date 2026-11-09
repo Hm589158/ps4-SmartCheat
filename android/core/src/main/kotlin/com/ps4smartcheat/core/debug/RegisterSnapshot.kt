@@ -17,6 +17,8 @@ data class RegisterSnapshot(
     val capturedAtMillis: Long,
     /** True when read back from a saved session (not the live debugger). */
     val fromSaved: Boolean,
+    /** Callers at the hit (empty when not captured). */
+    val callStack: List<StackFrame> = emptyList(),
 ) {
     /** One register an instruction uses: its name as written and its value (masked to the register's width). */
     data class Use(val name: String, val value: Long, val bits: Int)
@@ -31,12 +33,12 @@ data class RegisterSnapshot(
 
     companion object {
         fun of(r: AccessRecord): RegisterSnapshot =
-            RegisterSnapshot(r.registers.values, r.instructionAddress, r.threadName, r.lastSeenMillis, fromSaved = false)
+            RegisterSnapshot(r.registers.values, r.instructionAddress, r.threadName, r.lastSeenMillis, fromSaved = false, callStack = r.callStack.orEmpty())
 
         /** From a saved session; [instructionAddress] is where the instruction is now (it may have moved after a restart). */
         fun of(a: SavedAccess, instructionAddress: Long, capturedAtMillis: Long): RegisterSnapshot = RegisterSnapshot(
             a.registers.mapNotNull { (k, v) -> v.removePrefix("0x").removePrefix("0X").toULongOrNull(16)?.let { k.lowercase() to it.toLong() } }.toMap(),
-            instructionAddress, a.thread, capturedAtMillis, fromSaved = true,
+            instructionAddress, a.thread, capturedAtMillis, fromSaved = true, callStack = a.callStack,
         )
     }
 }
