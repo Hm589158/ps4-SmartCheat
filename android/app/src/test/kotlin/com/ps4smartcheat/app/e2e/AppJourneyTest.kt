@@ -651,21 +651,22 @@ class AppJourneyTest {
         tag("injSource").performTextClearance()
         tag("injSource").performTextInput("mov eax, 1000")
         injPress("injBuild")
-        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injPreview"))
+        // Building is asynchronous (assembled on the "PS4"): wait until the preview card exists, then show it.
+        compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injPreview")) }.isSuccess }
         waitText("off (original code)")
         waitText("mov eax, 0x3E8")
         waitText("mov [0x500120], eax") // the moved store still targets the coins
-        shot("51_injection_preview")
+        shot("55_injection_preview")
 
         step("inject")
         injPress("injOn")
         confirmDialog()
         waitMock { hexBytes(DemoGame.SUB_ONE, 1) == "E9" }
-        waitText("Injection ON")
+        compose.waitUntil(20_000) { c().injections.value.any { it.state == com.ps4smartcheat.core.asm.InjectionState.ON } }
         val trace = DemoGame.spendCoin(server)
         assertEquals(999, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS)) // the cave code really ran
         assertEquals(true, trace.any { it >= DemoGame.TEXT_START + 0xF000 })
-        shot("52_injection_on")
+        shot("56_injection_on")
 
         step("save to cheats")
         injPress("injSave")
@@ -698,7 +699,7 @@ class AppJourneyTest {
         waitMock { hexBytes(DemoGame.SUB_ONE, 1) == "E9" }
         DemoGame.spendCoin(server)
         assertEquals(999, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
-        shot("53_injection_library")
+        shot("57_injection_library")
         waitTag("ghDisable-0")
         press("ghDisable-0")
         confirmDialog()

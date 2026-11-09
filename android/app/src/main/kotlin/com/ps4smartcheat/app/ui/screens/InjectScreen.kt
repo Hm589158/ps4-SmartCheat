@@ -362,6 +362,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                 _error.value = e.message
             } finally {
                 _busy.value = false
+                _error.value?.let { c.log.warn("Code injection: $it") }
             }
         }
     }
