@@ -66,8 +66,9 @@ object InjectionEntries {
         out += CheatEntry(
             newId(), "${name.trim()} · jump", com.ps4smartcheat.core.scan.ValueType.INT8, inj.hookAddress, hookRef,
             originalBytes = Hex.encode(inj.hookOff), patchBytes = Hex.encode(inj.hookOn),
-            notes = "Jump to the code cave at ${com.ps4smartcheat.core.util.Address.format(inj.caveAddress)}; original code ${inj.original.label}",
-            assembly = inj.source.takeIf { inj.sourceIsAssembly }, group = g, signature = inj.signature,
+            notes = "Jump to the code cave at ${com.ps4smartcheat.core.util.Address.format(inj.caveAddress)}; " +
+                (if (inj.replaced.isEmpty()) "original code kept" else "replaces: " + inj.replaced.joinToString("; ") { it.text }),
+            assembly = inj.source, group = g, signature = inj.signature,
         )
         return out
     }

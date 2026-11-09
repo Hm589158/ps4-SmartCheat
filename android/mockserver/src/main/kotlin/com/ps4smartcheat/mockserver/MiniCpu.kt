@@ -11,6 +11,7 @@ import com.github.icedland.iced.x86.dec.Decoder
  * and code-cave injections made by the app have a real, observable effect in tests. Supports only what the demo
  * routine and simple injected code need — 32-bit `mov`/`add`/`sub`/`xor`/`inc`/`dec` on registers and
  * RIP-relative or `[reg+disp]` memory, `mov r32, imm`, `mov r64, r64`, `push`/`pop r64`, NOPs, `jmp rel8/rel32`,
+ * `cmp r/m32, imm` followed by a signed or unsigned `jcc rel8/rel32`,
  * `jmp qword ptr [rip+0]` (absolute jump), `call rel32`, `call r64` and `ret`. The stack lives in the mock's memory
  * ([stackTop] must be in a writable region), so a watchpoint hit sees real return addresses on it. Anything else throws [Unsupported], so a test never silently passes on
  * code the mock did not execute.
@@ -23,6 +24,9 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int, stac
     var rsp = stackTop
     /** Executed instruction addresses, in order. */
     val trace = ArrayList<Long>()
+    /** Operands of the last `cmp` (32-bit), for the conditional jumps. */
+    private var cmpA = 0L
+    private var cmpB = 0L
 
     private fun idx64(r: Int): Int? = when (r) {
         in Register.RAX..Register.R15 -> r - Register.RAX
@@ -66,6 +70,28 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int, stac
                     set64(ins.op0Register, get64(ins.op1Register)); rip = next
                 }
                 Code.JMP_REL32_64, Code.JMP_REL8_64 -> rip = ins.nearBranchTarget
+                Code.CMP_RM32_IMM8, Code.CMP_RM32_IMM32, Code.CMP_EAX_IMM32 -> {
+                    cmpA = if (ins.getOpKind(0) == OpKind.REGISTER) get32(ins.op0Register) else src32(ins, 0, rip)
+                    cmpB = (if (ins.code == Code.CMP_RM32_IMM8) ins.immediate8to32.toLong() else ins.immediate32.toLong()) and 0xFFFF_FFFFL
+                    rip = next
+                }
+                in JCC -> {
+                    val sa = cmpA.toInt()
+                    val sb = cmpB.toInt()
+                    val taken = when (JCC.getValue(ins.code)) {
+                        "e" -> cmpA == cmpB
+                        "ne" -> cmpA != cmpB
+                        "l" -> sa < sb
+                        "ge" -> sa >= sb
+                        "le" -> sa <= sb
+                        "g" -> sa > sb
+                        "b" -> cmpA < cmpB
+                        "ae" -> cmpA >= cmpB
+                        "be" -> cmpA <= cmpB
+                        else -> cmpA > cmpB
+                    }
+                    rip = if (taken) ins.nearBranchTarget else next
+                }
                 Code.JMP_RM64 -> {
                     if (ins.getOpKind(0) != OpKind.MEMORY || !ins.isIPRelativeMemoryOperand) throw Unsupported("indirect jmp at 0x%X".format(rip))
                     rip = read(ins.ipRelativeMemoryAddress(), 8, rip, ins.length)
@@ -146,6 +172,13 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int, stac
     }
 
     companion object {
+        private val JCC: Map<Int, String> = mapOf(
+            Code.JE_REL8_64 to "e", Code.JE_REL32_64 to "e", Code.JNE_REL8_64 to "ne", Code.JNE_REL32_64 to "ne",
+            Code.JL_REL8_64 to "l", Code.JL_REL32_64 to "l", Code.JGE_REL8_64 to "ge", Code.JGE_REL32_64 to "ge",
+            Code.JLE_REL8_64 to "le", Code.JLE_REL32_64 to "le", Code.JG_REL8_64 to "g", Code.JG_REL32_64 to "g",
+            Code.JB_REL8_64 to "b", Code.JB_REL32_64 to "b", Code.JAE_REL8_64 to "ae", Code.JAE_REL32_64 to "ae",
+            Code.JBE_REL8_64 to "be", Code.JBE_REL32_64 to "be", Code.JA_REL8_64 to "a", Code.JA_REL32_64 to "a",
+        )
         val NAMES = listOf("rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15")
     }
 }

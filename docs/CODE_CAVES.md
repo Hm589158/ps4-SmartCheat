@@ -12,33 +12,73 @@ your code, the instructions the jump overwrote, and a jump back into the game. I
 ## Using it
 
 1. **Code** → disassemble → tap the instruction to hook → **Inject code…**
-2. Type your code (Intel syntax, assembled on the PS4 by ps4debug-NG's Keystone at its final address), or hex bytes.
-   The template lists the instructions the jump will overwrite as comments.
-3. Choose when the original instructions run: **after my code** (default), **before my code**, or **not** (your code
-   replaces them).
-4. Choose the cave:
+2. **Hook.** The instructions the jump overwrites are highlighted (whole instructions covering 5 bytes, or 14 when the
+   cave is more than 2 GiB away). Tap a later instruction to replace more of them; tap the first one to go back to the
+   minimum. The highlighted instructions are the **Source Code**.
+3. **Source Code** (read-only) shows those original instructions with their addresses and bytes.
+4. **Target Code** (editable) is what runs in the cave instead. It starts as a copy of the Source Code followed by
+   `jmp return`, so an unchanged injection behaves exactly like the game. Edit it freely:
+   * write your code **before** or **after** the original instructions, or **between** them;
+   * change or delete original lines to **replace** them (the preview lists what no longer runs);
+   * use `jmp return` (back to the game, right after the hooked instructions) **as often as you need and wherever you
+     need it** — also conditionally, e.g. `cmp eax, 100` / `jl return`;
+   * define labels (`skip:`) and branch to them; write raw bytes with `db 90 90`.
+5. Choose the cave:
    * **Unused padding in the game executable.** The app searches for it automatically. The address is the same every
      run, so the injection can be saved, switched from Cheats, and exported to GoldHEN.
    * **Allocated memory near the hook.** ps4debug-NG maps 16 KiB of `rwx` memory for this game session only. This
      injection cannot be saved.
-5. **Build preview.** This shows the hook's bytes OFF and ON, the cave listing with each part labelled (new code,
-   moved original, jump back), and the warnings. Nothing has been written at this point.
-6. **Inject (ON)** / **Remove (OFF)** each ask for confirmation. Every write is verified by reading it back.
-7. **Save to Cheats…** (executable caves only) stores the injection as one group.
+6. **Build preview.** This shows the hook's bytes OFF and ON, the cave listing with each part labelled (`new` your
+   code, `orig` moved original instruction, `ret` jump back, `db` raw bytes), the labels, and the warnings. Nothing
+   has been written at this point.
+7. **Inject (ON)** / **Remove (OFF)** each ask for confirmation. Every write is verified by reading it back.
+8. **Save to Cheats…** (executable caves only) stores the injection as one group; the Target Code is kept with it.
 
 Memory editing and "Allow writes to non-writable regions" must both be enabled in Settings, as for code patches.
 
-## How it is built
+### Target Code example
+
+Hooking `sub eax, 1` in a routine that spends coins (`mov eax, [coins]` / `sub eax, 1` / `mov [coins], eax`):
+
+```
+cmp eax, 100
+jl return                 // fewer than 100 coins: skip the original code, nothing is spent
+cmp eax, 1000
+jge spend
+mov eax, 1000             // top up to 1000 first
+spend:
+sub eax, 1                // original instruction (kept, moved into the cave)
+mov [0x500120], eax       // original instruction (kept, moved into the cave)
+jmp return                // back to the game
+```
+
+## How the Target Code is turned into bytes
 
 ```
 hook:   jmp cave            ; 5 bytes (jmp rel32), or 14 (jmp [rip] + address) if the cave is > 2 GiB away
         nop …               ; rest of the overwritten whole instructions (never executed)
-        …                   ; game continues here = return address
+return: …                   ; game continues here
 
-cave:   <your code>         ; assembled for this address
-        <moved original>    ; the overwritten instructions, re-encoded for the cave (iced BlockEncoder)
-        jmp return address
+cave:   <Target Code>       ; laid out line by line from the cave address
 ```
+
+Each line of the Target Code is one of:
+
+| Line | Encoded by | Notes |
+|---|---|---|
+| identical to an instruction at the hook (spacing and case ignored) | the phone (iced BlockEncoder) | the original instruction is **moved**, not re-assembled: the listing shows RIP-relative operands as absolute addresses, which the assembler would encode differently |
+| `jmp return` | the phone | `jmp rel32`, or `jmp [rip]` + 8-byte address when the cave is more than 2 GiB from the hook |
+| `name:` | — | a label; its address is resolved on the phone |
+| `db 90 90` / `db 0x90, 0x90` | the phone | raw bytes |
+| anything else | ps4debug-NG's Keystone, at its final address | `return` and labels used as branch/call targets are replaced by their address first (`jl return` → `jl 0x…`) |
+
+Consecutive assembler lines are assembled together. Because a label's address depends on the size of the code before
+it (the assembler may choose a short or a near branch), the layout is repeated until every label stays where it was
+in the previous pass (at most 10 passes). The Target Code must end with `jmp return` (or another `jmp`/`ret`),
+otherwise the CPU would run into the bytes after the cave; labels and `return` cannot be used inside memory operands;
+with a cave more than 2 GiB away only a plain `jmp return` can go back (use `jne go` / `jmp return` / `go:` for a
+condition). Without ps4debug-NG nothing can be assembled, but Target Code made only of original instructions, `db`
+lines and `jmp return` still works.
 
 * **Moving instructions.** iced re-encodes RIP-relative operands so they reach the same data from the new place, and
   turns short branches into near ones. An instruction that cannot reach its target from the cave makes the planner

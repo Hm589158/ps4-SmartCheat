@@ -628,18 +628,30 @@ class AppJourneyTest {
         assertEquals(true, full.lines().any { it.startsWith(Address.format(DemoGame.SUB_ONE)) && it.contains("eboot.bin+0x2006") && it.endsWith("sub eax, 1") })
 
         press("codeInject")
-        waitText("1 · Hook at")
-        // Lazy list: later cards are composed only once scrolled into view.
         waitTag("injectList")
-        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injSource"))
-        waitText("//   sub eax, 1") // template lists the instructions the jump moves
+        waitText("Source Code")
+        // Lazy list: later cards are composed only once scrolled into view.
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injSourceCode"))
+        waitText("mov [0x500120], eax") // Source Code: the instructions the jump overwrites
+        shot("53_injection_source_code")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injTarget"))
+        // Target Code starts as the Source Code + jmp return: nothing replaced, one return.
+        waitText("original 2/2")
+        waitText("return ×1")
         compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injBuild"))
         waitText("end of code (page padding)") // caves were searched automatically, the safest one first
 
+        step("write the Target Code")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injTarget"))
+        tag("injTarget").performTextClearance()
+        // Your code before the kept original instructions, a conditional return and the final one.
+        tag("injTarget").performTextInput("cmp eax, 100\njl return\nmov eax, 1000\nsub eax, 1\nmov [0x500120], eax")
+        injPress("injInsertReturn")
+        waitText("return ×2")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injTarget"))
+        shot("54_injection_target_code")
+
         step("build preview")
-        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injSource"))
-        tag("injSource").performTextClearance()
-        tag("injSource").performTextInput("mov eax, 1000")
         injPress("injBuild")
         // Building is asynchronous (assembled on the "PS4"): wait until the preview card exists, then show it.
         compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injPreview")) }.isSuccess }

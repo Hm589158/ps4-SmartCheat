@@ -1,23 +1,8 @@
 package com.ps4smartcheat.core.asm
 
-import com.github.icedland.iced.x86.CodeWriter
-import com.github.icedland.iced.x86.Instruction
-import com.github.icedland.iced.x86.dec.Decoder
-import com.github.icedland.iced.x86.enc.BlockEncoder
-import com.github.icedland.iced.x86.enc.InstructionBlock
 import com.ps4smartcheat.core.model.MemoryRegion
 import com.ps4smartcheat.core.util.Address
 import com.ps4smartcheat.core.util.Hex
-import java.io.ByteArrayOutputStream
-
-/** Where the instructions overwritten by the jump run. */
-enum class OriginalCode(val label: String) {
-    /** After the new code (Cheat Engine's default template). */
-    AFTER("after my code"),
-    BEFORE("before my code"),
-    /** Not at all: the new code replaces them. */
-    SKIP("not (replace them)"),
-}
 
 /** The jump written at the hook. */
 enum class HookJump(val size: Int, val label: String) {
@@ -46,15 +31,16 @@ class CaveSpace(
 )
 
 /**
- * A planned code-cave injection ("Assembly injection"): the instructions at [hookAddress] are replaced by a jump into
- * the cave; the cave holds the new code, the moved original instructions ([original]) and a jump back to
- * [returnAddress]. Enable = write [caveOn] then [hookOn]; disable = write [hookOff] first, then [caveOff].
+ * A planned code-cave injection ("Assembly injection"): the instructions at [hookAddress] (the Source Code, [stolen])
+ * are replaced by a jump into the cave; the cave holds the Target Code ([source], see [CaveScript]) — the user's code
+ * with the original instructions wherever the user kept them and `jmp return` back to [returnAddress] wherever the
+ * user wants to go back. Enable = write [caveOn] then [hookOn]; disable = write [hookOff] first, then [caveOff].
  */
 class CodeInjection(
     val hookAddress: Long,
     val hookOff: ByteArray,
     val hookOn: ByteArray,
-    /** Original instructions overwritten by the jump (and moved to the cave unless [original] is SKIP). */
+    /** The Source Code: original instructions overwritten by the jump. */
     val stolen: List<AsmInstruction>,
     val returnAddress: Long,
     val jump: HookJump,
@@ -66,19 +52,22 @@ class CodeInjection(
     val caveListing: List<AsmInstruction>,
     /** [hookOn] decoded. */
     val hookListing: List<AsmInstruction>,
-    /** Addresses of the parts in the cave. */
-    val userCode: LongRange,
-    val movedOriginal: LongRange?,
-    val exitJump: LongRange,
-    val original: OriginalCode,
-    /** The new code as typed (assembly or hex). */
+    /** The cave code by origin (typed code, moved original instruction, `jmp return`, `db` bytes). */
+    val parts: List<CavePart>,
+    /** Labels of the Target Code by address (for the listing). */
+    val labels: Map<Long, List<String>>,
+    /** Source instructions that no longer run (the Target Code left them out). */
+    val replaced: List<AsmInstruction>,
+    /** The Target Code as typed. */
     val source: String,
-    val sourceIsAssembly: Boolean,
     val warnings: List<String>,
     /** AOB signature of the original code at the hook (constants wildcarded). */
     val signature: String,
 ) {
     val caveRange: LongRange get() = caveAddress until caveAddress + caveOn.size
+
+    /** The part of the cave code that holds [address]. */
+    fun partAt(address: Long): CavePart? = parts.firstOrNull { address in it.range }
 
     fun state(hookNow: ByteArray, caveNow: ByteArray): InjectionState {
         val hookOn = hookNow.contentEquals(this.hookOn)
@@ -100,7 +89,10 @@ class CodeInjection(
         stolen.forEach { append("      ").append(it.text).append('\n') }
         append("  ON  ").append(Hex.encode(hookOn, " ")).append('\n')
         append("Cave ").append(Address.format(caveAddress)).append(" (").append(caveOn.size).append(" bytes)\n")
-        caveListing.forEach { append("  ").append(Address.format(it.address)).append("  ").append(it.text).append('\n') }
+        caveListing.forEach { ins ->
+            labels[ins.address]?.forEach { append(it).append(":\n") }
+            append("  ").append(Address.format(ins.address)).append("  ").append(ins.text).append('\n')
+        }
         append("Returns to ").append(Address.format(returnAddress))
     }
 }
@@ -116,6 +108,18 @@ object InjectionPlanner {
     private fun fitsRel32(from: Long, to: Long): Boolean {
         val d = to - from
         return d in -REL32_LIMIT..REL32_LIMIT
+    }
+
+    /** A rel32 branch at [from] reaches [to] (with room for the code in between). */
+    fun reaches(from: Long, to: Long): Boolean = fitsRel32(from + MAX_CAVE_CODE, to) && fitsRel32(from, to)
+
+    /**
+     * The Source Code: the whole instructions at [hook] that a jump to a cave at [cave] overwrites — at least
+     * [replaceBytes] bytes when the user chose to replace more than the jump needs.
+     */
+    fun sourceFor(hook: Long, window: ByteArray, cave: Long?, capacity: Int, replaceBytes: Int = 0): List<AsmInstruction> {
+        val jump = if (cave == null) HookJump.REL32 else jumpFor(hook, cave, capacity)
+        return steal(hook, window, maxOf(jump.size, replaceBytes))
     }
 
     /** The smallest jump that reaches a cave at [cave] (of [capacity] bytes) from [hook] and back. */
@@ -141,33 +145,8 @@ object InjectionPlanner {
         return out
     }
 
-    /** Assembly template shown when an injection is started: the moved instructions as comments. */
-    fun template(stolen: List<AsmInstruction>, original: OriginalCode): String = buildString {
-        when (original) {
-            OriginalCode.AFTER -> append("// Your code. The original instructions run after it:\n")
-            OriginalCode.BEFORE -> append("// Your code. The original instructions ran just before it:\n")
-            OriginalCode.SKIP -> append("// Your code replaces these instructions:\n")
-        }
-        stolen.forEach { append("//   ").append(it.text).append('\n') }
-        append("// Keep registers and flags the game needs (push/pop what you change).\n")
-    }
-
-    /**
-     * Moves [stolen] (decoded from [window] at its address) to [to], re-encoding RIP-relative operands and branches
-     * for the new location with iced's BlockEncoder (a short branch becomes a near one when needed).
-     */
-    fun relocate(stolen: List<AsmInstruction>, window: ByteArray, to: Long): ByteArray {
-        if (stolen.isEmpty()) return ByteArray(0)
-        val from = stolen.first().address
-        val len = stolen.sumOf { it.length }
-        val decoder = Decoder(64, window.copyOf(len), from, 0)
-        val list = ArrayList<Instruction>()
-        repeat(stolen.size) { list += decoder.decode() }
-        val out = ByteArrayOutputStream()
-        val r = BlockEncoder.tryEncode(64, InstructionBlock(CodeWriter { b -> out.write(b.toInt()) }, list, to))
-        if (r is String) throw CodePatchException("The original instructions cannot be moved to ${Address.format(to)}: $r")
-        return out.toByteArray()
-    }
+    /** Target Code a new injection starts with: the Source instructions, then `jmp return`. */
+    fun template(stolen: List<AsmInstruction>): String = CaveScript.template(stolen)
 
     /** `jmp` from [at] to [target]: rel32 when it reaches, else `jmp qword ptr [rip+0]` + target. */
     fun jumpBytes(at: Long, target: Long, kind: HookJump? = null): ByteArray {
@@ -194,18 +173,20 @@ object InjectionPlanner {
      * Plans an injection. Nothing is written.
      *
      * @param window bytes read at [hook] ([HOOK_WINDOW], fewer only at the end of the mapping)
-     * @param code produces the new code for the address it will run at (Keystone on the PS4, or fixed hex bytes)
+     * @param target the Target Code (see [CaveScript])
+     * @param replaceBytes overwrite at least this many bytes at the hook (whole instructions; the jump's size is the minimum)
+     * @param assemble assembles typed instructions for the address they will run at (Keystone on the PS4)
      */
     suspend fun plan(
-        hook: Long, window: ByteArray, hookRegion: MemoryRegion?, cave: CaveSpace, original: OriginalCode,
-        source: String, sourceIsAssembly: Boolean, code: suspend (address: Long) -> ByteArray,
+        hook: Long, window: ByteArray, hookRegion: MemoryRegion?, cave: CaveSpace, target: String,
+        replaceBytes: Int = 0, assemble: suspend (text: String, address: Long) -> ByteArray,
     ): CodeInjection {
         if (hookRegion != null && !hookRegion.isExecutable) {
             throw CodePatchException("${Address.format(hook)} is not in executable memory (${hookRegion.name.ifBlank { "anon" }} ${hookRegion.protString()}).")
         }
         if (cave.capacity <= 0 || cave.current.size < cave.capacity) throw CodePatchException("The cave's current bytes were not read.")
         val jump = jumpFor(hook, cave.address, cave.capacity)
-        val stolen = steal(hook, window, jump.size)
+        val stolen = steal(hook, window, maxOf(jump.size, replaceBytes))
         val stolenLen = stolen.sumOf { it.length }
         if (hookRegion != null && !hookRegion.contains(hook, stolenLen)) throw CodePatchException("The jump would cross the end of the code region.")
         val returnAddress = hook + stolenLen
@@ -221,33 +202,9 @@ object InjectionPlanner {
             )
         }
 
-        // Layout: [new code][moved original][jmp back] (AFTER), [moved original][new code][jmp back] (BEFORE) or
-        // [new code][jmp back] (SKIP). Each part is encoded for its final address.
-        val parts = ByteArrayOutputStream()
-        var at = cave.address
-        var userRange: LongRange
-        var movedRange: LongRange? = null
-        suspend fun user() {
-            val b = code(at)
-            if (b.isEmpty()) throw CodePatchException("The new code is empty.")
-            userRange = at until at + b.size
-            parts.write(b); at += b.size
-        }
-        fun moved() {
-            val b = relocate(stolen, window, at)
-            movedRange = at until at + b.size
-            parts.write(b); at += b.size
-        }
-        userRange = LongRange.EMPTY
-        when (original) {
-            OriginalCode.AFTER -> { user(); moved() }
-            OriginalCode.BEFORE -> { moved(); user() }
-            OriginalCode.SKIP -> user()
-        }
-        val exit = jumpBytes(at, returnAddress)
-        val exitRange = at until at + exit.size
-        parts.write(exit)
-        val caveOn = parts.toByteArray()
+        val stmts = CaveScript.parse(target, stolen + following.drop(stolen.size))
+        val linked = CaveScript.link(stmts, cave.address, returnAddress, assemble)
+        val caveOn = linked.bytes
         if (caveOn.size > MAX_CAVE_CODE) throw CodePatchException("The cave code is ${caveOn.size} bytes (max $MAX_CAVE_CODE).")
         if (caveOn.size > cave.capacity) throw CodePatchException("The cave code needs ${caveOn.size} bytes but the cave has ${cave.capacity}. Pick a larger cave.")
         val caveOff = cave.current.copyOf(caveOn.size)
@@ -256,8 +213,13 @@ object InjectionPlanner {
         }
         val hookOff = window.copyOf(stolenLen)
         val hookOn = jumpBytes(hook, cave.address, jump) + X86.nops(stolenLen - jump.size)
-        val listing = X86.decode(caveOn.copyOf(exitRange.first.minus(cave.address).toInt()), cave.address) + jumpRow(exitRange.first, exit, returnAddress)
+        // Each part is decoded on its own: an absolute jump's 8-byte target is data, and `db` bytes need not decode.
+        val listing = linked.parts.flatMap { p ->
+            if (p.kind == CavePartKind.RETURN) listOf(jumpRow(p.address, p.bytes, returnAddress)) else X86.decode(p.bytes, p.address)
+        }
         val hookListing = listOf(jumpRow(hook, hookOn.copyOf(jump.size), cave.address)) + X86.decode(hookOn.copyOfRange(jump.size, hookOn.size), hook + jump.size)
+        val labels = linked.labels.filterKeys { it != CaveScript.RETURN }.entries.groupBy({ it.value }, { it.key })
+        val replaced = stolen.filter { it.address !in linked.keptOriginals }
 
         val warnings = ArrayList<String>()
         if (listing.any { !it.valid }) warnings += "The cave code does not all decode as valid instructions."
@@ -265,8 +227,11 @@ object InjectionPlanner {
             warnings += "The jump overwrites ${stolen.size} instructions ($stolenLen bytes). Code elsewhere that jumps to " +
                 stolen.drop(1).joinToString { Address.format(it.address) } + " would crash the game."
         }
-        stolen.filter { it.flow != Flow.NEXT }.forEach { warnings += "A control-flow instruction is moved into the cave: ${it.text}." }
-        if (original == OriginalCode.SKIP) warnings += "The original instructions do not run any more; your code must do what the game needs from them."
+        stolen.filter { it.flow != Flow.NEXT && it.address in linked.keptOriginals }.forEach { warnings += "A control-flow instruction is moved into the cave: ${it.text}." }
+        if (replaced.isNotEmpty()) {
+            warnings += "Not in the Target Code, so no longer run: " + replaced.joinToString("; ") { it.text } + ". Your code must do what the game needs from them."
+        }
+        if (linked.returns == 0) warnings += "The Target Code never jumps back with \"jmp return\"; make sure its own jmp/ret leads somewhere valid."
         if (jump == HookJump.ABS64) warnings += "The cave is more than 2 GiB away: a 14-byte jump is used."
         if (cave.kind == CaveKind.ALLOCATED) warnings += "Allocated memory: this injection lasts only while the game runs and cannot be saved or exported."
         if (cave.kind == CaveKind.MODULE_PADDING && caveOff[0] == 0.toByte() && !cave.atSegmentEnd) {
@@ -277,7 +242,7 @@ object InjectionPlanner {
         val signature = CodePatchPlanner.signatureOf(window, hook, stolenLen)
         return CodeInjection(
             hook, hookOff, hookOn, stolen, returnAddress, jump, cave.kind, cave.address, caveOff, caveOn, listing,
-            hookListing, userRange, movedRange, exitRange, original, source.trim(), sourceIsAssembly, warnings, signature,
+            hookListing, linked.parts, labels, replaced, target.trim(), warnings, signature,
         )
     }
 }

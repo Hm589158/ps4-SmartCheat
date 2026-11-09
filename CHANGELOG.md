@@ -2,6 +2,30 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.2
+
+### Code caves: Source Code → Target Code (new — verified against the simulated server only)
+- The "Original instructions run before / after my code / not" choice is gone. The injection screen now shows the
+  hooked instructions as **Source Code** (read-only) and copies them into an editable **Target Code** followed by
+  `jmp return`. Write your code before, after or between the original instructions, or change/delete them to replace
+  them — no options needed.
+- `jmp return` can be written **any number of times, anywhere** — also conditionally (`jl return`, `je return`) — to
+  go back to the game right after the hook. Labels (`skip:`) work across the original instructions; `db 90 90` adds
+  raw bytes.
+- Lines identical to an original instruction are moved and re-encoded for the cave on the phone (RIP-relative
+  operands and branches keep their targets), never re-assembled from the listing text. Original lines, `db` and
+  `jmp return` need no assembler, so they also work without ps4debug-NG.
+- **Choose what to replace:** tap a later instruction at the hook to overwrite more than the jump needs.
+- A live summary under the editor shows how many original instructions are kept and how often the code returns;
+  the preview labels every cave row (`new` / `orig` / `ret` / `db`) and shows the labels.
+- Refused before anything is written: Target Code that does not end with `jmp return` (or another jmp/ret), labels
+  named `return` or after a register, labels used as memory operands, conditional `return` from a cave more than
+  2 GiB away.
+
+### Look
+- Cards have numbered steps, subtitles and a calmer, consistent colour scheme (neutral blue-grey containers instead
+  of Material's purple-tinted defaults, in dark and light theme). Code is shown in tinted, side-scrolling code panels.
+
 ## 1.0.1
 
 ### Editing on by default

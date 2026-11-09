@@ -1,5 +1,6 @@
 package com.ps4smartcheat.app.ui.components
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.ui.semantics.Role
@@ -9,7 +10,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Warning
@@ -36,11 +40,45 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 
+/**
+ * A titled card. [step] shows a numbered badge (for screens that are worked through in order), [subtitle] a dim line
+ * under the title and [trailing] something at the end of the title row (a status pill, a button).
+ */
 @Composable
-fun SectionCard(title: String?, modifier: Modifier = Modifier, content: @Composable () -> Unit) {
-    Card(modifier = modifier.fillMaxWidth()) {
+fun SectionCard(
+    title: String?,
+    modifier: Modifier = Modifier,
+    step: Int? = null,
+    subtitle: String? = null,
+    trailing: (@Composable () -> Unit)? = null,
+    content: @Composable () -> Unit,
+) {
+    val cs = MaterialTheme.colorScheme
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = cs.surfaceContainerLow),
+        border = BorderStroke(1.dp, cs.outlineVariant.copy(alpha = 0.6f)),
+    ) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (title != null) Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (title != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (step != null) {
+                        androidx.compose.material3.Surface(color = cs.primary, contentColor = cs.onPrimary, shape = CircleShape, modifier = Modifier.size(26.dp)) {
+                            Box(contentAlignment = Alignment.Center) { Text(step.toString(), style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold) }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                    }
+                    Column(Modifier.weight(1f)) {
+                        Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        if (subtitle != null) Text(subtitle, style = MaterialTheme.typography.bodySmall, color = cs.onSurfaceVariant)
+                    }
+                    if (trailing != null) {
+                        Spacer(Modifier.width(8.dp))
+                        trailing()
+                    }
+                }
+            }
             content()
         }
     }

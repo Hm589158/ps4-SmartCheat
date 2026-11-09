@@ -14,10 +14,22 @@ private val Dark = darkColorScheme(
     primaryContainer = Color(0xFF0B3D91),
     onPrimaryContainer = Color(0xFFD8E2FF),
     secondary = Color(0xFF7FD6C2),
+    secondaryContainer = Color(0xFF1C4A42),
+    onSecondaryContainer = Color(0xFFA6F2DE),
     tertiary = Color(0xFFFFB86B),
+    tertiaryContainer = Color(0xFF5A3A0E),
+    onTertiaryContainer = Color(0xFFFFDDB8),
     background = Color(0xFF111318),
     surface = Color(0xFF111318),
     surfaceVariant = Color(0xFF2A2F3A),
+    // Neutral blue-grey containers to match the background (Material's defaults are tinted purple).
+    surfaceContainerLowest = Color(0xFF0C0E12),
+    surfaceContainerLow = Color(0xFF181B21),
+    surfaceContainer = Color(0xFF1C1F26),
+    surfaceContainerHigh = Color(0xFF242832),
+    surfaceContainerHighest = Color(0xFF2B303B),
+    outline = Color(0xFF8C919D),
+    outlineVariant = Color(0xFF3A3F4B),
     error = Color(0xFFFFB4AB),
 )
 
@@ -25,7 +37,18 @@ private val Light = lightColorScheme(
     primary = Color(0xFF0B57D0),
     primaryContainer = Color(0xFFD8E2FF),
     secondary = Color(0xFF006A5B),
+    secondaryContainer = Color(0xFFB8EFE1),
+    onSecondaryContainer = Color(0xFF00201A),
     tertiary = Color(0xFF8B5000),
+    background = Color(0xFFF8F9FD),
+    surface = Color(0xFFF8F9FD),
+    surfaceVariant = Color(0xFFE0E3EC),
+    surfaceContainerLowest = Color(0xFFFFFFFF),
+    surfaceContainerLow = Color(0xFFF1F3F9),
+    surfaceContainer = Color(0xFFEBEEF4),
+    surfaceContainerHigh = Color(0xFFE5E8EF),
+    surfaceContainerHighest = Color(0xFFDFE2EA),
+    outlineVariant = Color(0xFFC4C7D0),
 )
 
 @Composable

@@ -135,8 +135,9 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
 - **ON (1) / OFF (0)** with confirmation and read-back; save to the library and **export to GoldHEN** — switch it from
   the GoldHEN menu without the phone
 - **Code caves / injection**: jump from an instruction to your own code in unused padding of the game (or memory
-  allocated near it); the overwritten instructions are moved and re-encoded, a jump returns to the game. Saved and
-  exported as one mod — [details](docs/CODE_CAVES.md)
+  allocated near it). The overwritten instructions appear as read-only **Source Code** and are copied into an editable
+  **Target Code** — write before, after or instead of them and `jmp return` wherever you want. Saved and exported as
+  one mod — [details](docs/CODE_CAVES.md)
 
 </td><td valign="top">
 

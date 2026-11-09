@@ -60,11 +60,16 @@ class CodeInjectionTest {
         return CaveSpace(c.address, c.size, CaveKind.MODULE_PADDING, client.readMemory(pid, c.address, c.size), c.atSegmentEnd)
     }
 
-    private suspend fun plan(hook: Long, cave: CaveSpace, source: String, original: OriginalCode = OriginalCode.AFTER): CodeInjection {
+    /** Plans with Target Code built from the Source Code ([target] gets the Source instructions, one per line). */
+    private suspend fun plan(hook: Long, cave: CaveSpace, replaceBytes: Int = 0, target: (String) -> String): CodeInjection {
         val regions = client.getMemoryRegions(pid)
         val window = client.readMemory(pid, hook, InjectionPlanner.HOOK_WINDOW)
-        return InjectionPlanner.plan(hook, window, regions.regionFor(hook), cave, original, source, true) { at -> tools.assemble(source, at).bytes }
+        val src = CaveScript.source(InjectionPlanner.sourceFor(hook, window, cave.address, cave.capacity, replaceBytes))
+        return InjectionPlanner.plan(hook, window, regions.regionFor(hook), cave, target(src), replaceBytes) { text, at -> tools.assemble(text, at).bytes }
     }
+
+    /** [code] before the original instructions, then `jmp return` (the old "original code after my code"). */
+    private suspend fun plan(hook: Long, cave: CaveSpace, code: String): CodeInjection = plan(hook, cave) { "$code\n$it\njmp return" }
 
     private suspend fun switch(inj: CodeInjection, on: Boolean): InjectionResult =
         writer.execute(pid, inj, writer.prepare(pid, "eboot.bin", inj, on), on)
@@ -102,31 +107,41 @@ class CodeInjectionTest {
         val region = MemoryRegion("executable", 0x1000, 0x2000, 0, MemoryRegion.PROT_READ or MemoryRegion.PROT_EXEC)
         val caveBytes = ByteArray(256)
         val cave = CaveSpace(0x1E00, 256, CaveKind.MODULE_PADDING, caveBytes)
-        val nop: suspend (Long) -> ByteArray = { byteArrayOf(0x90.toByte()) }
+        // Target Code: "nop", the Source instructions, "jmp return".
+        fun after(window: ByteArray, cave: CaveSpace, hook: Long = 0x1000) =
+            "nop\n" + CaveScript.source(InjectionPlanner.sourceFor(hook, window, cave.address, cave.capacity)) + "\njmp return"
         // sub eax,1 ; sub eax,1 ; jne 0x1003 (back into the middle of the 6 bytes the jump overwrites)
         val loop = Hex.decode("83E801 83E801 75FB C3".replace(" ", "")) + ByteArray(100)
-        try { InjectionPlanner.plan(0x1000, loop, region, cave, OriginalCode.AFTER, "nop", true, nop); fail() } catch (e: CodePatchException) {
+        try { InjectionPlanner.plan(0x1000, loop, region, cave, "nop\njmp return", assemble = nop); fail() } catch (e: CodePatchException) {
             assertTrue(e.message!!, e.message!!.contains("jumps into the middle"))
         }
         val plain = Hex.decode("83E801 83E801 C3".replace(" ", "")) + ByteArray(100)
         // Cave too small.
-        try { InjectionPlanner.plan(0x1000, plain, region, CaveSpace(0x1E00, 4, CaveKind.MODULE_PADDING, ByteArray(4)), OriginalCode.AFTER, "nop", true, nop); fail() } catch (_: CodePatchException) {}
+        try { CaveSpace(0x1E00, 4, CaveKind.MODULE_PADDING, ByteArray(4)).let { InjectionPlanner.plan(0x1000, plain, region, it, after(plain, it), assemble = nop) }; fail() } catch (_: CodePatchException) {}
         // Cave no longer padding.
-        try { InjectionPlanner.plan(0x1000, plain, region, CaveSpace(0x1E00, 256, CaveKind.MODULE_PADDING, ByteArray(256) { 0x48 }), OriginalCode.AFTER, "nop", true, nop); fail() } catch (_: CodePatchException) {}
+        try { InjectionPlanner.plan(0x1000, plain, region, CaveSpace(0x1E00, 256, CaveKind.MODULE_PADDING, ByteArray(256) { 0x48 }), after(plain, cave), assemble = nop); fail() } catch (_: CodePatchException) {}
         // Not executable.
-        try { InjectionPlanner.plan(0x1000, plain, region.copy(prot = MemoryRegion.PROT_READ), cave, OriginalCode.AFTER, "nop", true, nop); fail() } catch (_: CodePatchException) {}
+        try { InjectionPlanner.plan(0x1000, plain, region.copy(prot = MemoryRegion.PROT_READ), cave, after(plain, cave), assemble = nop); fail() } catch (_: CodePatchException) {}
         // Cave overlapping the hook.
-        try { InjectionPlanner.plan(0x1000, plain, region, CaveSpace(0x1002, 256, CaveKind.MODULE_PADDING, caveBytes), OriginalCode.AFTER, "nop", true, nop); fail() } catch (_: CodePatchException) {}
+        try { InjectionPlanner.plan(0x1000, plain, region, CaveSpace(0x1002, 256, CaveKind.MODULE_PADDING, caveBytes), after(plain, cave), assemble = nop); fail() } catch (_: CodePatchException) {}
         // A valid one: 6 bytes stolen (two whole instructions), jmp rel32 + 1 NOP.
-        val ok = InjectionPlanner.plan(0x1000, plain, region, cave, OriginalCode.AFTER, "nop", true, nop)
+        val ok = InjectionPlanner.plan(0x1000, plain, region, cave, after(plain, cave), assemble = nop)
         assertEquals(HookJump.REL32, ok.jump)
         assertEquals(2, ok.stolen.size)
         assertEquals(0x1006L, ok.returnAddress)
         assertEquals("E9FB0D000090", Hex.encode(ok.hookOn))
         assertEquals(listOf("nop", "sub", "sub", "jmp"), ok.caveListing.map { it.mnemonic })
         assertEquals(0x1006L, ok.caveListing.last().branchTarget)
-        assertTrue(InjectionPlanner.template(ok.stolen, OriginalCode.AFTER).contains("//   sub eax, 1"))
+        assertEquals("sub eax, 1\nsub eax, 1\njmp return", InjectionPlanner.template(ok.stolen))
+        assertTrue(ok.replaced.isEmpty()) // both identical "sub eax, 1" lines count as kept
+        assertEquals(listOf(CavePartKind.CODE, CavePartKind.ORIGINAL, CavePartKind.ORIGINAL, CavePartKind.RETURN), ok.parts.map { it.kind })
     }
+
+    private val nop: suspend (String, Long) -> ByteArray = { text, _ -> ByteArray(text.lines().size) { 0x90.toByte() } }
+
+    /** Target Code: the Source instructions, "nop", "jmp return" (the old "original code before my code"). */
+    private fun before(hook: Long, window: ByteArray, cave: CaveSpace) =
+        CaveScript.source(InjectionPlanner.sourceFor(hook, window, cave.address, cave.capacity)) + "\nnop\njmp return"
 
     @Test fun farCaveUsesAbsoluteJumpsAndMovesBranches() = runBlocking {
         val hook = 0x40_0000L
@@ -134,7 +149,8 @@ class CodeInjectionTest {
         // mov eax,1 ; mov eax,2 ; mov eax,3  (15 bytes ≥ 14)
         val window = Hex.decode("B801000000B802000000B803000000") + ByteArray(100) { 0x90.toByte() }
         val far = 0x20_0000_0000L
-        val inj = InjectionPlanner.plan(hook, window, region, CaveSpace(far, 256, CaveKind.ALLOCATED, ByteArray(256)), OriginalCode.BEFORE, "nop", true) { byteArrayOf(0x90.toByte()) }
+        val farCave = CaveSpace(far, 256, CaveKind.ALLOCATED, ByteArray(256))
+        val inj = InjectionPlanner.plan(hook, window, region, farCave, before(hook, window, farCave), assemble = nop)
         assertEquals(HookJump.ABS64, inj.jump)
         assertEquals(3, inj.stolen.size)
         assertEquals("FF2500000000" + Hex.encode(com.ps4smartcheat.core.util.LE.bytes64(far)) + "90", Hex.encode(inj.hookOn))
@@ -146,7 +162,8 @@ class CodeInjectionTest {
         // A short conditional branch moved 256 MiB away becomes a near one that still targets the original code.
         val jcc = Hex.decode("7520B801000000") + ByteArray(100) { 0x90.toByte() }
         val near = hook + 0x1000_0000L
-        val moved = InjectionPlanner.plan(hook, jcc, region, CaveSpace(near, 256, CaveKind.ALLOCATED, ByteArray(256)), OriginalCode.BEFORE, "nop", true) { byteArrayOf(0x90.toByte()) }
+        val nearCave = CaveSpace(near, 256, CaveKind.ALLOCATED, ByteArray(256))
+        val moved = InjectionPlanner.plan(hook, jcc, region, nearCave, before(hook, jcc, nearCave), assemble = nop)
         assertEquals(HookJump.REL32, moved.jump)
         val jne = moved.caveListing.first()
         assertEquals(Flow.CONDITIONAL_JUMP, jne.flow)
@@ -155,14 +172,14 @@ class CodeInjectionTest {
         assertTrue(moved.warnings.any { it.contains("control-flow") })
         // A RIP-relative store moved 128 GiB away: below 4 GiB iced re-encodes it EIP-relative, still the same variable…
         val ripWindow = DemoGame.SPEND_CODE.copyOfRange(6, 16) + Hex.decode("B801000000") + ByteArray(100) { 0x90.toByte() }
-        val low = InjectionPlanner.plan(DemoGame.SUB_ONE, ripWindow, region.copy(start = 0x40_0000L), CaveSpace(far, 256, CaveKind.ALLOCATED, ByteArray(256)), OriginalCode.AFTER, "nop", true) { byteArrayOf(0x90.toByte()) }
+        val low = InjectionPlanner.plan(DemoGame.SUB_ONE, ripWindow, region.copy(start = 0x40_0000L), farCave, before(DemoGame.SUB_ONE, ripWindow, farCave), assemble = nop)
         assertEquals(DemoGame.COINS_ADDRESS, low.caveListing.single { it.writesMemory }.ripTarget)
         // …but a variable above 4 GiB (as on the PS4) cannot be reached from there: refused, not silently broken.
         val high = 0x9_0000_0000L
         val highRegion = MemoryRegion("executable", high, high + 0x10000, 0, MemoryRegion.PROT_READ or MemoryRegion.PROT_EXEC)
         val highWindow = Hex.decode("890510000000" + "B801000000" + "B802000000") + ByteArray(100) { 0x90.toByte() }
         try {
-            InjectionPlanner.plan(high, highWindow, highRegion, CaveSpace(far, 256, CaveKind.ALLOCATED, ByteArray(256)), OriginalCode.AFTER, "nop", true) { byteArrayOf(0x90.toByte()) }
+            InjectionPlanner.plan(high, highWindow, highRegion, farCave, before(high, highWindow, farCave), assemble = nop)
             fail()
         } catch (e: CodePatchException) {
             assertTrue(e.message!!, e.message!!.contains("cannot be moved"))
@@ -171,7 +188,7 @@ class CodeInjectionTest {
 
     @Test fun stateTellsOnOffHalfAndMismatch() = runBlocking {
         val region = MemoryRegion("executable", 0x1000, 0x2000, 0, MemoryRegion.PROT_READ or MemoryRegion.PROT_EXEC)
-        val inj = InjectionPlanner.plan(0x1000, Hex.decode("83E80183E801C3") + ByteArray(100), region, CaveSpace(0x1E00, 64, CaveKind.MODULE_PADDING, ByteArray(64)), OriginalCode.AFTER, "nop", true) { byteArrayOf(0x90.toByte()) }
+        val inj = InjectionPlanner.plan(0x1000, Hex.decode("83E80183E801C3") + ByteArray(100), region, CaveSpace(0x1E00, 64, CaveKind.MODULE_PADDING, ByteArray(64)), "nop\njmp return", assemble = nop)
         assertEquals(InjectionState.OFF, inj.state(inj.hookOff, inj.caveOff))
         assertEquals(InjectionState.ON, inj.state(inj.hookOn, inj.caveOn))
         assertEquals(InjectionState.CAVE_ONLY, inj.state(inj.hookOff, inj.caveOn))
@@ -191,7 +208,7 @@ class CodeInjectionTest {
         assertEquals(DemoGame.COINS_ADDRESS, moved.ripTarget) // same variable from the new place
         assertEquals(InjectionState.OFF, writer.state(pid, inj))
         assertTrue(inj.warnings.none { it.contains("zero bytes inside") }) // page padding at the end of the code
-        val inner = InjectionPlanner.plan(0x1000, Hex.decode("83E80183E801C3") + ByteArray(100), null, CaveSpace(0x1E00, 64, CaveKind.MODULE_PADDING, ByteArray(64)), OriginalCode.AFTER, "nop", true) { byteArrayOf(0x90.toByte()) }
+        val inner = InjectionPlanner.plan(0x1000, Hex.decode("83E80183E801C3") + ByteArray(100), null, CaveSpace(0x1E00, 64, CaveKind.MODULE_PADDING, ByteArray(64)), "nop\njmp return", assemble = nop)
         assertTrue(inner.warnings.any { it.contains("zero bytes inside") })
 
         // Read-only by default: nothing can be written.
@@ -223,10 +240,122 @@ class CodeInjectionTest {
 
     @Test fun replacingTheOriginalSkipsIt() = runBlocking {
         connect()
-        val inj = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE), "nop", OriginalCode.SKIP)
+        // Target Code without the Source instructions: they are replaced.
+        val inj = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE)) { "nop\njmp return" }
+        assertEquals(listOf("sub eax, 1", "mov [0x500120], eax"), inj.replaced.map { it.text })
+        assertTrue(inj.warnings.any { it.contains("no longer run") })
         assertTrue(switch(inj, true).ok)
         repeat(3) { DemoGame.spendCoin(server) }
         assertEquals(5000, coins) // neither the sub nor the store run any more
+    }
+
+    @Test fun theTemplateKeepsTheGameBehaviourUnchanged() = runBlocking {
+        connect()
+        val cave = moduleCave(DemoGame.SUB_ONE)
+        val window = client.readMemory(pid, DemoGame.SUB_ONE, InjectionPlanner.HOOK_WINDOW)
+        val source = InjectionPlanner.sourceFor(DemoGame.SUB_ONE, window, cave.address, cave.capacity)
+        // Source Code (read-only) and the Target Code it starts with.
+        assertEquals("sub eax, 1\nmov [0x500120], eax", CaveScript.source(source))
+        assertEquals("sub eax, 1\nmov [0x500120], eax\njmp return", InjectionPlanner.template(source))
+        val inj = plan(DemoGame.SUB_ONE, cave) { InjectionPlanner.template(source) }
+        assertEquals(listOf(CavePartKind.ORIGINAL, CavePartKind.ORIGINAL, CavePartKind.RETURN), inj.parts.map { it.kind })
+        assertTrue(inj.replaced.isEmpty())
+        assertTrue(switch(inj, true).ok)
+        DemoGame.spendCoin(server)
+        assertEquals(4999, coins)
+    }
+
+    @Test fun jmpReturnCanBeUsedSeveralTimesAndConditionally() = runBlocking {
+        connect()
+        // Coins below 100 are no longer spent: the first "return" skips the original code.
+        val inj = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE)) { src ->
+            "cmp eax, 100\njl return   // poor: keep the coins\n$src\njmp return"
+        }
+        val jl = inj.caveListing.single { it.mnemonic == "jl" }
+        assertEquals(inj.returnAddress, jl.branchTarget)
+        assertEquals(inj.returnAddress, inj.caveListing.last().branchTarget)
+        assertTrue(switch(inj, true).ok)
+        DemoGame.spendCoin(server)
+        assertEquals(4999, coins)
+        server.pokeInt32(pid, DemoGame.COINS_ADDRESS, 50)
+        repeat(3) { DemoGame.spendCoin(server) }
+        assertEquals(50, coins)
+    }
+
+    @Test fun labelsWorkAcrossTheOriginalInstructions() = runBlocking {
+        connect()
+        // A forward label right before the moved original code: tops the coins up to 1000 when they are low.
+        val inj = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE)) { src ->
+            "cmp eax, 1000\njge rich\nmov eax, 1000\nrich:\n$src\njmp return"
+        }
+        val rich = inj.labels.entries.single { "rich" in it.value }.key
+        assertEquals(inj.parts.first { it.kind == CavePartKind.ORIGINAL }.address, rich)
+        val jge = inj.caveListing.single { it.mnemonic == "jge" }
+        assertEquals(rich, jge.branchTarget)
+        assertEquals(2, jge.length) // the layout settled with a short branch
+        assertTrue(inj.describe().contains("rich:"))
+        assertTrue(switch(inj, true).ok)
+        DemoGame.spendCoin(server)
+        assertEquals(4999, coins)
+        server.pokeInt32(pid, DemoGame.COINS_ADDRESS, 10)
+        DemoGame.spendCoin(server)
+        assertEquals(999, coins)
+    }
+
+    @Test fun originalCodeDbAndJmpReturnNeedNoAssembler() = runBlocking {
+        connect()
+        val regions = client.getMemoryRegions(pid)
+        val window = client.readMemory(pid, DemoGame.SUB_ONE, InjectionPlanner.HOOK_WINDOW)
+        val cave = moduleCave(DemoGame.SUB_ONE)
+        // Spacing and case of the Source lines do not matter; "db" adds raw bytes (here: sub eax, 1 once more).
+        val target = "SUB  EAX,1\ndb 83 E8 01\nmov [0x500120],eax\njmp return"
+        val inj = InjectionPlanner.plan(DemoGame.SUB_ONE, window, regions.regionFor(DemoGame.SUB_ONE), cave, target) { _, _ -> fail("assembler used"); ByteArray(0) }
+        assertEquals(listOf(CavePartKind.ORIGINAL, CavePartKind.BYTES, CavePartKind.ORIGINAL, CavePartKind.RETURN), inj.parts.map { it.kind })
+        assertTrue(switch(inj, true).ok)
+        DemoGame.spendCoin(server)
+        assertEquals(4998, coins)
+    }
+
+    @Test fun replacingMoreInstructionsThanTheJumpNeeds() = runBlocking {
+        connect()
+        // Hook the load (6 bytes are enough for the jump) but replace the load and the sub (9 bytes).
+        val inj = plan(DemoGame.LOAD_COINS, moduleCave(DemoGame.LOAD_COINS), replaceBytes = 9) { src -> "$src\njmp return" }
+        assertEquals(listOf("mov", "sub"), inj.stolen.map { it.mnemonic })
+        assertEquals(DemoGame.STORE_COINS, inj.returnAddress)
+        assertEquals("E9", Hex.encode(inj.hookOn.copyOf(1)))
+        assertEquals(9, inj.hookOn.size) // jump + 4 NOPs
+        assertEquals(DemoGame.COINS_ADDRESS, inj.caveListing.first().ripTarget) // the moved load still reads the coins
+        assertTrue(switch(inj, true).ok)
+        DemoGame.spendCoin(server)
+        assertEquals(4999, coins)
+    }
+
+    @Test fun targetCodeMistakesAreRefusedBeforeAnythingIsWritten() = runBlocking {
+        connect()
+        val cave = moduleCave(DemoGame.SUB_ONE)
+        fun refused(target: String, expect: String) = runBlocking {
+            try { plan(DemoGame.SUB_ONE, cave) { target.replace("SRC", it) }; fail(target) } catch (e: CodePatchException) {
+                assertTrue("${e.message} / $expect", e.message!!.contains(expect))
+            }
+        }
+        refused("SRC", "must end with \"jmp return\"") // would run into the bytes after the cave
+        refused("// only a comment", "empty")
+        refused("return:\nSRC\njmp return", "reserved")
+        refused("x:\nx:\nSRC\njmp return", "more than once")
+        refused("eax:\nSRC\njmp return", "register name")
+        refused("db 0x123\nSRC\njmp return", "not a byte")
+        refused("skip:\nmov dword ptr [skip], 1\nSRC\njmp return", "not memory operands")
+        // A cave more than 2 GiB away: only the absolute "jmp return" can go back.
+        val region = MemoryRegion("executable", 0x40_0000L, 0x41_0000L, 0, MemoryRegion.PROT_READ or MemoryRegion.PROT_EXEC)
+        val far = CaveSpace(0x20_0000_0000L, 256, CaveKind.ALLOCATED, ByteArray(256))
+        val window = Hex.decode("B801000000B802000000B803000000") + ByteArray(100) { 0x90.toByte() }
+        try { InjectionPlanner.plan(0x40_0000L, window, region, far, "cmp eax, 1\nje return\njmp return", assemble = nop); fail() } catch (e: CodePatchException) {
+            assertTrue(e.message!!, e.message!!.contains("2 GiB"))
+        }
+        val ok = InjectionPlanner.plan(0x40_0000L, window, region, far, "cmp eax, 1\njne go\njmp return\ngo:\njmp return", assemble = nop)
+        assertEquals(2, ok.parts.count { it.kind == CavePartKind.RETURN })
+        assertTrue(ok.parts.filter { it.kind == CavePartKind.RETURN }.all { it.bytes.size == 14 })
+        assertEquals(3, ok.replaced.size)
     }
 
     @Test fun failedEnableIsUndoneAndNeverLeavesTheJump() = runBlocking {
@@ -308,7 +437,7 @@ class CodeInjectionTest {
         val entries = InjectionEntries.build(inj, "Coins 299", null, regions) { "e${++n}" }
         assertEquals(listOf("Coins 299 · cave 1/2", "Coins 299 · cave 2/2", "Coins 299 · jump"), entries.map { it.name })
         assertTrue(entries.all { it.group == "Coins 299" && it.isPatch })
-        assertEquals(source, entries.last().assembly)
+        assertEquals(source + "\nsub eax, 1\nmov [0x500120], eax\njmp return", entries.last().assembly)
         assertNotNull(entries.last().signature)
 
         // Stored, read back after a "restart".

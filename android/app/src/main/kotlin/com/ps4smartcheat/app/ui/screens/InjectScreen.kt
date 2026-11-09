@@ -1,18 +1,26 @@
 package com.ps4smartcheat.app.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -23,8 +31,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -35,7 +52,6 @@ import com.ps4smartcheat.app.ui.components.ChoiceRow
 import com.ps4smartcheat.app.ui.components.ConfirmDialog
 import com.ps4smartcheat.app.ui.components.ErrorText
 import com.ps4smartcheat.app.ui.components.SectionCard
-import com.ps4smartcheat.app.ui.components.Selector
 import com.ps4smartcheat.app.ui.components.StatusPill
 import com.ps4smartcheat.app.ui.components.Tone
 import com.ps4smartcheat.app.ui.components.WarningBanner
@@ -46,14 +62,14 @@ import com.ps4smartcheat.core.asm.CaveAllocator
 import com.ps4smartcheat.core.asm.CaveCandidate
 import com.ps4smartcheat.core.asm.CaveFinder
 import com.ps4smartcheat.core.asm.CaveKind
+import com.ps4smartcheat.core.asm.CavePartKind
+import com.ps4smartcheat.core.asm.CaveScript
 import com.ps4smartcheat.core.asm.CaveSpace
 import com.ps4smartcheat.core.asm.CodeInjection
 import com.ps4smartcheat.core.asm.CodePatchException
-import com.ps4smartcheat.core.asm.CodePatchPlanner
 import com.ps4smartcheat.core.asm.InjectionPlanner
 import com.ps4smartcheat.core.asm.InjectionState
 import com.ps4smartcheat.core.asm.InjectionStep
-import com.ps4smartcheat.core.asm.OriginalCode
 import com.ps4smartcheat.core.asm.X86
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.ConnectionState
@@ -92,11 +108,14 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
     private val _hookCode = MutableStateFlow<List<AsmInstruction>>(emptyList())
     /** Instructions at the hook (the first ones are overwritten by the jump). */
     val hookCode = _hookCode.asStateFlow()
-    private val _assembly = MutableStateFlow(true)
-    val assembly = _assembly.asStateFlow()
-    private val _original = MutableStateFlow(OriginalCode.AFTER)
-    val original = _original.asStateFlow()
+    private val _sourceCode = MutableStateFlow<List<AsmInstruction>>(emptyList())
+    /** Source Code (read-only): the instructions the jump overwrites, for the chosen cave and replace length. */
+    val sourceCode = _sourceCode.asStateFlow()
+    private val _replaceBytes = MutableStateFlow(0)
+    /** Bytes the user chose to replace at the hook (0 = just what the jump needs). */
+    val replaceBytes = _replaceBytes.asStateFlow()
     private val _source = MutableStateFlow("")
+    /** Target Code (editable): starts as the Source Code followed by `jmp return`. */
     val source = _source.asStateFlow()
     private val _caveKind = MutableStateFlow(CaveKind.MODULE_PADDING)
     val caveKind = _caveKind.asStateFlow()
@@ -121,8 +140,8 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
     private val _saveState = MutableStateFlow<SaveState>(SaveState.Idle)
     val saveState = _saveState.asStateFlow()
     private var initialized = false
-    /** Instructions a 5-byte jump would overwrite (for the template). */
-    private var stolenPreview: List<AsmInstruction> = emptyList()
+    /** Bytes read at the hook when the screen was opened (for the Source Code). */
+    private var window: ByteArray? = null
 
     fun init(address: Long?) {
         if (initialized) return
@@ -153,32 +172,69 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
             val region = sel.regions.regionFor(address) ?: throw CodePatchException("${Address.format(address)} is not mapped")
             if (!region.isExecutable) throw CodePatchException("${Address.format(address)} is not executable code (${region.name.ifBlank { "anon" }} ${region.protString()}).")
             val len = minOf(InjectionPlanner.HOOK_WINDOW.toLong(), region.end - address).toInt()
-            val window = c.backend.readMemory(sel.pid, address, len)
-            _hookCode.value = X86.decode(window, address).take(8)
-            stolenPreview = runCatching { InjectionPlanner.steal(address, window, 5) }.getOrDefault(emptyList())
-            _source.value = InjectionPlanner.template(stolenPreview, _original.value)
+            val bytes = c.backend.readMemory(sel.pid, address, len)
+            window = bytes
+            _hookCode.value = X86.decode(bytes, address).take(8)
+            updateSourceCode()
             findCavesNow()
         }
     }
 
-    fun setAssembly(v: Boolean) { _assembly.value = v; _current.value = null }
     fun setSource(v: String) { _source.value = v; _current.value = null; _error.value = null }
 
-    fun setOriginal(v: OriginalCode) {
-        val old = _original.value
-        _original.value = v
+    /** Puts the Target Code back to the Source Code followed by `jmp return`. */
+    fun resetTarget() = setSource(InjectionPlanner.template(_sourceCode.value))
+
+    /**
+     * Replace the hooked instructions up to and including [ins] (at least what the jump needs). Tapping an
+     * instruction the jump overwrites anyway goes back to the minimum.
+     */
+    fun replaceThrough(ins: AsmInstruction) {
+        val hook = _hook.value ?: return
+        if (!ins.valid) return
+        val w = window ?: return
+        val bytes = (ins.end - hook).toInt()
+        val t = caveTarget()
+        val minimum = runCatching { InjectionPlanner.sourceFor(hook, w, t?.first, t?.second ?: 0).sumOf { it.length } }.getOrDefault(0)
+        _replaceBytes.value = if (bytes <= minimum) 0 else bytes
         _current.value = null
-        // Replace an untouched template (keep anything the user typed).
-        if (_source.value.trim() == InjectionPlanner.template(stolenPreview, old).trim()) _source.value = InjectionPlanner.template(stolenPreview, v)
+        updateSourceCode()
+    }
+
+    /** Address and size of the cave the next build uses (the jump's size depends on its distance). */
+    private fun caveTarget(): Pair<Long, Int>? = when (_caveKind.value) {
+        CaveKind.MODULE_PADDING -> _cave.value?.let { it.address to it.size }
+        CaveKind.ALLOCATED -> _allocation.value?.let { it.address to it.length }
+    }
+
+    /**
+     * Recomputes the Source Code for the current cave and replace length. An untouched Target Code follows it; one
+     * the user edited is kept (instructions it leaves out are reported in the preview).
+     */
+    private fun updateSourceCode() {
+        val hook = _hook.value ?: return
+        val w = window ?: return
+        val old = _sourceCode.value
+        val new = try {
+            val t = caveTarget()
+            InjectionPlanner.sourceFor(hook, w, t?.first, t?.second ?: 0, _replaceBytes.value)
+        } catch (e: CodePatchException) {
+            _error.value = e.message
+            return
+        }
+        _sourceCode.value = new
+        val target = _source.value.trim()
+        if (target.isEmpty() || target == InjectionPlanner.template(old).trim()) _source.value = InjectionPlanner.template(new)
     }
 
     fun setCaveKind(k: CaveKind) {
         _caveKind.value = k
         _current.value = null
         if (k == CaveKind.MODULE_PADDING && _caves.value == null) findCaves()
+        updateSourceCode()
     }
 
-    fun pickCave(cand: CaveCandidate) { _cave.value = cand; _current.value = null }
+    fun pickCave(cand: CaveCandidate) { _cave.value = cand; _current.value = null; updateSourceCode() }
 
     /** Read-only search for padding in the executable around the hook. */
     fun findCaves() = launchBusy { findCavesNow() }
@@ -195,6 +251,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
             val list = CaveFinder.find(c.backend, sel.pid, regions, hook, reserved = reserved)
             _caves.value = list
             _cave.value = list.firstOrNull()
+            updateSourceCode()
             if (list.isEmpty()) _message.value = "No unused padding found near ${Address.format(hook)}. Allocated memory can be used instead (this session only)."
         }
     }
@@ -218,7 +275,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
         launchBusy {
             val regions = c.backend.getMemoryRegions(sel.pid).also { c.updateRegions(it) }
             val region = regions.regionFor(hook)
-            val window = c.backend.readMemory(sel.pid, hook, minOf(InjectionPlanner.HOOK_WINDOW.toLong(), (region?.end ?: (hook + InjectionPlanner.HOOK_WINDOW)) - hook).toInt())
+            val hookBytes = c.backend.readMemory(sel.pid, hook, minOf(InjectionPlanner.HOOK_WINDOW.toLong(), (region?.end ?: (hook + InjectionPlanner.HOOK_WINDOW)) - hook).toInt())
             val space = when (_caveKind.value) {
                 CaveKind.MODULE_PADDING -> {
                     val cand = _cave.value ?: throw CodePatchException("Find caves and pick one first.")
@@ -229,11 +286,8 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                     CaveSpace(a.address, a.length, CaveKind.ALLOCATED, c.backend.readMemory(sel.pid, a.address, a.length))
                 }
             }
-            val asm = _assembly.value
-            if (asm && normalised(src).isBlank()) throw CodePatchException("Enter at least one instruction (comments alone do nothing).")
-            val hex = if (asm) null else CodePatchPlanner.parseHex(src)
-            val inj = InjectionPlanner.plan(hook, window, region, space, _original.value, src, asm) { at ->
-                hex ?: c.codeTools.assemble(src, at).bytes
+            val inj = InjectionPlanner.plan(hook, hookBytes, region, space, src, _replaceBytes.value) { text, at ->
+                c.codeTools.assemble(text, at).bytes
             }
             val id = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(inj.caveAddress)}"
             val state = c.injectionWriter.state(sel.pid, inj)
@@ -278,6 +332,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                 val sel = c.selectedProcess.value ?: return@launchBusy
                 val a = c.caveAllocator.allocateNear(sel.pid, pending.hint, pending.length)
                 _allocation.value = a
+                updateSourceCode()
                 c.updateRegions(c.backend.getMemoryRegions(sel.pid))
                 _current.value = null
                 c.log.info("Allocated ${a.mappedSize} bytes of code memory at ${Address.format(a.address)} for a code cave")
@@ -293,7 +348,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                 }
                 c.caveAllocator.free(pending.allocation)
                 users.forEach { c.removeInjection(it.id) }
-                if (_allocation.value == pending.allocation) _allocation.value = null
+                if (_allocation.value == pending.allocation) { _allocation.value = null; updateSourceCode() }
                 if (_current.value?.allocation == pending.allocation) _current.value = null
                 c.selectedProcess.value?.let { c.updateRegions(c.backend.getMemoryRegions(it.pid)) }
                 _message.value = "Freed ${Address.format(pending.allocation.address)} (verified: no longer mapped)"
@@ -366,8 +421,6 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
             }
         }
     }
-
-    private fun normalised(src: String) = com.ps4smartcheat.core.asm.CodeTools.normalise(src)
 }
 
 @Composable
@@ -381,8 +434,7 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
     val sessionList by vm.injections.collectAsStateWithLifecycle()
     val hook by vm.hook.collectAsStateWithLifecycle()
     val hookCode by vm.hookCode.collectAsStateWithLifecycle()
-    val assembly by vm.assembly.collectAsStateWithLifecycle()
-    val original by vm.original.collectAsStateWithLifecycle()
+    val sourceCode by vm.sourceCode.collectAsStateWithLifecycle()
     val source by vm.source.collectAsStateWithLifecycle()
     val caveKind by vm.caveKind.collectAsStateWithLifecycle()
     val caves by vm.caves.collectAsStateWithLifecycle()
@@ -401,6 +453,7 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
     LaunchedEffect(saveState) { if (saveState is SaveState.Saved) saving = false }
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+    val small = MaterialTheme.typography.bodySmall
 
     LazyColumn(Modifier.fillMaxSize().testTag("injectList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
@@ -412,36 +465,55 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
         }
         hook?.let { h ->
             item {
-                SectionCard("1 · Hook at ${Address.format(h)}") {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(vm.relative(h), style = mono, color = dim)
-                        hookCode.forEach { ins -> Text("${Address.format(ins.address)}  ${ins.text}", style = mono) }
-                        Text(
-                            "A 5-byte jump replaces the first whole instructions here (14 bytes if the cave is more than 2 GiB away). " +
-                                "They are moved into the cave and re-encoded for it.",
-                            style = MaterialTheme.typography.bodySmall, color = dim,
-                        )
-                        TextButton(onClick = { onOpenCode(h) }) { Text("Open in disassembler") }
+                val sourceEnd = sourceCode.lastOrNull()?.end ?: h
+                val replacedBytes = (sourceEnd - h).toInt()
+                SectionCard(
+                    "Hook", step = 1, subtitle = "${Address.format(h)}  ${vm.relative(h)}".trim(),
+                    trailing = { if (sourceCode.isNotEmpty()) StatusPill("$replacedBytes bytes", Tone.NEUTRAL) },
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        hookCode.forEachIndexed { i, ins ->
+                            CodeLine(
+                                ins, mono, dim, highlighted = ins.address < sourceEnd,
+                                onClick = if (ins.valid) ({ vm.replaceThrough(ins) }) else null, tag = "hookRow-$i",
+                            )
+                        }
                     }
+                    Text(
+                        "Highlighted: the instructions the jump to the cave overwrites (a 5-byte jmp, 14 bytes for a cave more than " +
+                            "2 GiB away, padded with NOPs). Tap a later instruction to replace more of them; tap the first one to go back.",
+                        style = small, color = dim,
+                    )
+                    TextButton(onClick = { onOpenCode(h) }, contentPadding = PaddingValues(horizontal = 0.dp)) { Text("Open in disassembler") }
                 }
             }
             item {
-                SectionCard("2 · Your code") {
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Selector("Input", listOf(true, false), assembly, { if (it) "Assembly (assembled on the PS4)" else "Hex bytes" }, vm::setAssembly)
-                        Selector("Original instructions run…", OriginalCode.entries, original, { it.label }, vm::setOriginal, modifier = Modifier.testTag("injOriginal"))
-                        OutlinedTextField(
-                            value = source, onValueChange = vm::setSource, minLines = 4,
-                            label = { Text(if (assembly) "Instructions (Intel syntax; // comments)" else "Bytes (hex)") },
-                            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-                            modifier = Modifier.fillMaxWidth().testTag("injSource"),
-                        )
-                        if (assembly && connected && !ng) Text("Assembling needs ps4debug-NG; use hex bytes instead.", style = MaterialTheme.typography.bodySmall, color = dim)
+                SectionCard("Source Code", step = 2, trailing = { StatusPill("read-only") }) {
+                    CodePanel(Modifier.testTag("injSourceCode")) {
+                        val width = sourceCode.maxOfOrNull { Hex.encode(it.bytes, " ").length } ?: 0
+                        if (sourceCode.isEmpty()) Text("…", style = mono, color = dim)
+                        sourceCode.forEach { ins ->
+                            Text(
+                                buildAnnotatedString {
+                                    withStyle(SpanStyle(color = dim)) {
+                                        append(Address.format(ins.address) + "  " + Hex.encode(ins.bytes, " ").padEnd(width) + "  ")
+                                    }
+                                    append(ins.text)
+                                },
+                                style = mono, softWrap = false,
+                            )
+                        }
                     }
+                    Text(
+                        "The original instructions at the hook. Each line kept unchanged in the Target Code is moved into the cave and " +
+                            "re-encoded there, so RIP-relative addresses and branches still reach the same targets.",
+                        style = small, color = dim,
+                    )
                 }
             }
+            item { TargetCodeCard(vm, source, sourceCode, connected, ng, mono, dim) }
             item {
-                SectionCard("3 · Code cave") {
+                SectionCard("Code cave", step = 4) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         ChoiceRow(
                             "Unused padding in the game executable", "Same address every run: can be saved, switched from Cheats and exported to GoldHEN.",
@@ -455,10 +527,10 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
                         if (caveKind == CaveKind.MODULE_PADDING) {
                             OutlinedButton(onClick = vm::findCaves, enabled = connected && !busy, modifier = Modifier.testTag("injFindCaves")) { Text("Find caves") }
                             caves?.let { list ->
-                                if (list.isEmpty()) Text("No unused padding found near the hook.", style = MaterialTheme.typography.bodySmall)
+                                if (list.isEmpty()) Text("No unused padding found near the hook.", style = small)
                                 list.take(8).forEach { cand ->
                                     ChoiceRow(
-                                        "${Address.format(cand.address)}  ${cand.size} bytes",
+                                        "${Address.format(cand.address)}  ·  ${cand.size} bytes",
                                         "${cand.module?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: ""} · ${cand.confidence}",
                                         cave?.address == cand.address, { vm.pickCave(cand) },
                                         tag = "cave-" + java.lang.Long.toHexString(cand.address),
@@ -470,9 +542,13 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
                                 Text("Allocated: ${Address.format(a.address)} · ${a.length} bytes · rwx", style = mono, modifier = Modifier.testTag("injAllocated"))
                                 OutlinedButton(onClick = { vm.requestFree(a) }, enabled = !busy) { Text("Free this memory") }
                             } ?: Button(onClick = vm::requestAllocate, enabled = connected && ng && !busy && settings.editingEnabled, modifier = Modifier.testTag("injAllocate")) { Text("Allocate near the hook…") }
-                            if (!settings.editingEnabled) Text("Allocating changes the game's memory: enable memory editing in Settings.", style = MaterialTheme.typography.bodySmall, color = dim)
+                            if (!settings.editingEnabled) Text("Allocating changes the game's memory: enable memory editing in Settings.", style = small, color = dim)
                         }
-                        Button(onClick = vm::build, enabled = connected && !busy && source.isNotBlank(), modifier = Modifier.testTag("injBuild")) { Text("Build preview") }
+                        Button(
+                            onClick = vm::build, enabled = connected && !busy && source.isNotBlank(),
+                            modifier = Modifier.fillMaxWidth().testTag("injBuild"),
+                        ) { Text("Build preview") }
+                        Text("Nothing is written yet: the preview shows the exact bytes first.", style = small, color = dim)
                     }
                 }
             }
@@ -480,7 +556,7 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
             item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     if (busy) LinearProgressIndicator(Modifier.fillMaxWidth())
-                    message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("injMessage")) }
+                    message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = small, modifier = Modifier.testTag("injMessage")) }
                     ErrorText(error)
                 }
             }
@@ -505,14 +581,14 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
                             )
                             Text(
                                 "Saved as one group: the cave code (in ≤64-byte parts) and the jump. Cheats switches them ON in that order and OFF in reverse.",
-                                style = MaterialTheme.typography.bodySmall, color = dim,
+                                style = small, color = dim,
                             )
                         }
                         (saveState as? SaveState.Saved)?.let {
-                            Text("✓ ${it.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.testTag("injSaved"))
+                            Text("✓ ${it.message}", style = small, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.testTag("injSaved"))
                         }
                     } else {
-                        Text("Injections into allocated memory last for this game session only and cannot be saved.", style = MaterialTheme.typography.bodySmall, color = dim)
+                        Text("Injections into allocated memory last for this game session only and cannot be saved.", style = small, color = dim)
                     }
                 }
             }
@@ -526,7 +602,7 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
             Text(
                 "Injections are never re-applied automatically (also not after reconnecting or restarting the game). " +
                     "Only use them in offline single-player games.",
-                style = MaterialTheme.typography.bodySmall, color = dim,
+                style = small, color = dim,
             )
         }
     }
@@ -567,17 +643,140 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
     }
 }
 
+/**
+ * The editable Target Code: prefilled with the Source Code and `jmp return`. A summary under the editor shows which
+ * original instructions are kept and how often the code returns, before anything is assembled.
+ */
+@Composable
+private fun TargetCodeCard(
+    vm: InjectViewModel, source: String, sourceCode: List<AsmInstruction>, connected: Boolean, ng: Boolean,
+    mono: TextStyle, dim: Color,
+) {
+    var field by remember { mutableStateOf(TextFieldValue(source)) }
+    // Follow changes made by the view model (template for another cave, reset); typing keeps the cursor.
+    LaunchedEffect(source) { if (field.text != source) field = TextFieldValue(source, TextRange(source.length)) }
+    fun insertLine(line: String) {
+        val t = field.text
+        val pos = field.selection.end.coerceIn(0, t.length)
+        val lineEnd = t.indexOf('\n', pos).let { if (it < 0) t.length else it }
+        val text = if (t.isBlank()) line else t.substring(0, lineEnd) + "\n" + line + t.substring(lineEnd)
+        val cursor = if (t.isBlank()) line.length else lineEnd + 1 + line.length
+        field = TextFieldValue(text, TextRange(cursor))
+        vm.setSource(text)
+    }
+    val accent = MaterialTheme.colorScheme.primary
+    SectionCard("Target Code", step = 3, subtitle = "Runs in the cave instead of the Source Code") {
+        OutlinedTextField(
+            value = field,
+            onValueChange = { field = it; vm.setSource(it.text) },
+            minLines = 6,
+            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+            placeholder = { Text("mov eax, 1000\njmp return", fontFamily = FontFamily.Monospace) },
+            modifier = Modifier.fillMaxWidth().testTag("injTarget"),
+        )
+        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            AssistChip(onClick = { insertLine("jmp ${CaveScript.RETURN}") }, label = { Text("+ jmp return") }, modifier = Modifier.testTag("injInsertReturn"))
+            AssistChip(onClick = vm::resetTarget, label = { Text("Reset to Source Code") }, modifier = Modifier.testTag("injResetTarget"))
+        }
+        val parsed = remember(source, sourceCode) { runCatching { CaveScript.parse(source, sourceCode) } }
+        parsed.getOrNull()?.let { stmts ->
+            val kept = stmts.filterIsInstance<CaveScript.Stmt.Original>().map { it.ins.address }.toSet()
+            val keptCount = sourceCode.count { it.address in kept }
+            val returns = CaveScript.returnsIn(stmts)
+            val added = stmts.count { it is CaveScript.Stmt.Asm || it is CaveScript.Stmt.Bytes }
+            Row(Modifier.horizontalScroll(rememberScrollState()).testTag("injTargetSummary"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                StatusPill("original $keptCount/${sourceCode.size}", if (keptCount == sourceCode.size) Tone.GOOD else Tone.WARN)
+                StatusPill("return ×$returns", if (returns == 0) Tone.WARN else Tone.GOOD)
+                StatusPill("$added new line${if (added == 1) "" else "s"}")
+            }
+            if (sourceCode.isNotEmpty() && keptCount < sourceCode.size) {
+                Text(
+                    "Replaced (no longer run): " + sourceCode.filter { it.address !in kept }.joinToString("; ") { it.text },
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary,
+                )
+            }
+        }
+        parsed.exceptionOrNull()?.let { ErrorText(it.message) }
+        Text(
+            buildAnnotatedString {
+                append("Write your code before or after the original instructions, change them, or delete them to replace them. ")
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = accent)) { append("jmp return") }
+                append(" goes back to the game right after the hook — use it as often as you need, also with a condition (")
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append("je return") }
+                append("). Labels (")
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append("skip:") }
+                append(") and raw bytes (")
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append("db 90 90") }
+                append(") work too. Keep registers and flags the game needs.")
+            },
+            style = MaterialTheme.typography.bodySmall, color = dim,
+        )
+        if (connected && !ng) {
+            Text(
+                "Without ps4debug-NG nothing can be assembled: only the original instructions, db bytes and jmp return can be used.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
+    }
+}
+
+/** Monospace code on a tinted, rounded background; scrolls sideways instead of wrapping instructions. */
+@Composable
+private fun CodePanel(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        shape = RoundedCornerShape(10.dp),
+        modifier = modifier.fillMaxWidth(),
+    ) {
+        Column(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            content()
+        }
+    }
+}
+
+/** One instruction at the hook; [highlighted] when the jump overwrites it. */
+@Composable
+private fun CodeLine(ins: AsmInstruction, mono: TextStyle, dim: Color, highlighted: Boolean, onClick: (() -> Unit)?, tag: String) {
+    val cs = MaterialTheme.colorScheme
+    Row(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (highlighted) cs.primaryContainer.copy(alpha = 0.55f) else Color.Transparent)
+            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
+            .padding(horizontal = 8.dp, vertical = 5.dp)
+            .testTag(tag),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(if (highlighted) "▍" else " ", style = mono, color = cs.primary)
+        Text(Address.format(ins.address), style = mono, color = if (highlighted) cs.onPrimaryContainer else dim)
+        Text("  " + ins.text, style = mono, color = if (highlighted) cs.onPrimaryContainer else cs.onSurface, softWrap = false)
+    }
+}
+
+@Composable
+private fun partColor(kind: CavePartKind): Color = when (kind) {
+    CavePartKind.CODE -> MaterialTheme.colorScheme.primary
+    CavePartKind.ORIGINAL -> MaterialTheme.colorScheme.secondary
+    CavePartKind.RETURN -> MaterialTheme.colorScheme.tertiary
+    CavePartKind.BYTES -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
 @Composable
 private fun InjectionCard(
     a: AppContainer.ActiveInjection, vm: InjectViewModel, editing: Boolean, nonWritable: Boolean, busy: Boolean,
-    mono: androidx.compose.ui.text.TextStyle, dim: androidx.compose.ui.graphics.Color, preview: Boolean,
+    mono: TextStyle, dim: Color, preview: Boolean,
 ) {
     val inj = a.injection
     val context = androidx.compose.ui.platform.LocalContext.current
-    SectionCard(if (preview) "4 · Preview" else a.name) {
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag(if (preview) "injPreview" else "injSession-${a.id}")) {
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                val st = a.state
+    val st = a.state
+    val partColors = CavePartKind.entries.associateWith { partColor(it) }
+    val labelColor = MaterialTheme.colorScheme.primary
+    SectionCard(
+        if (preview) "Preview" else a.name, step = if (preview) 5 else null,
+        subtitle = "Hook ${Address.format(inj.hookAddress)} → cave ${Address.format(inj.caveAddress)} · ${inj.caveOn.size} bytes",
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.testTag(if (preview) "injPreview" else "injSession-${a.id}")) {
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 StatusPill(
                     st?.label ?: "unknown",
                     when (st) { InjectionState.ON -> Tone.GOOD; InjectionState.OFF -> Tone.NEUTRAL; InjectionState.CAVE_ONLY -> Tone.WARN; else -> Tone.BAD },
@@ -586,19 +785,37 @@ private fun InjectionCard(
                 StatusPill(if (inj.caveKind == CaveKind.ALLOCATED) "allocated · session" else "executable padding")
                 TextButton(onClick = { vm.refresh(a) }) { Text("Check") }
             }
-            Text("Hook ${Address.format(inj.hookAddress)} ${vm.relative(inj.hookAddress)} → cave ${Address.format(inj.caveAddress)} (${inj.caveOn.size} bytes)", style = MaterialTheme.typography.bodySmall)
-            Text("OFF  " + Hex.encode(inj.hookOff, " "), style = mono)
-            inj.stolen.forEach { Text("       ${it.text}", style = mono, color = dim) }
-            Text("ON   " + Hex.encode(inj.hookOn, " "), style = mono)
-            inj.hookListing.forEach { Text("       ${it.text}", style = mono, color = dim) }
-            HorizontalDivider()
-            inj.caveListing.forEach { ins ->
-                val part = when {
-                    ins.address in inj.userCode -> "new "
-                    inj.movedOriginal?.let { ins.address in it } == true -> "orig"
-                    else -> "back"
+            Text("Hook", style = MaterialTheme.typography.labelLarge)
+            CodePanel {
+                Text("OFF  " + Hex.encode(inj.hookOff, " "), style = mono, color = dim, softWrap = false)
+                inj.stolen.forEach { Text("     ${it.text}", style = mono, softWrap = false) }
+                Text("ON   " + Hex.encode(inj.hookOn, " "), style = mono, color = dim, softWrap = false)
+                inj.hookListing.forEach { Text("     ${it.text}", style = mono, softWrap = false) }
+            }
+            Text("Cave", style = MaterialTheme.typography.labelLarge)
+            CodePanel {
+                inj.caveListing.forEach { ins ->
+                    inj.labels[ins.address]?.forEach { l -> Text("$l:", style = mono, color = labelColor, softWrap = false) }
+                    val part = inj.partAt(ins.address)?.kind
+                    Text(
+                        buildAnnotatedString {
+                            withStyle(SpanStyle(color = part?.let { partColors.getValue(it) } ?: dim, fontWeight = FontWeight.SemiBold)) { append((part?.tag ?: "").padEnd(5)) }
+                            withStyle(SpanStyle(color = dim)) { append(Address.format(ins.address) + "  ") }
+                            append(ins.text)
+                        },
+                        style = mono, softWrap = false,
+                        modifier = Modifier.testTag("caveRow-" + java.lang.Long.toHexString(ins.address)),
+                    )
                 }
-                Text("$part ${Address.format(ins.address)}  ${ins.text}", style = mono, modifier = Modifier.testTag("caveRow-" + java.lang.Long.toHexString(ins.address)))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                CavePartKind.entries.forEach { k ->
+                    Text(k.tag, style = mono, color = partColors.getValue(k), fontWeight = FontWeight.SemiBold)
+                    Text(
+                        when (k) { CavePartKind.CODE -> "your code"; CavePartKind.ORIGINAL -> "moved"; CavePartKind.RETURN -> "back"; CavePartKind.BYTES -> "bytes" },
+                        style = MaterialTheme.typography.labelSmall, color = dim,
+                    )
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(
@@ -607,7 +824,11 @@ private fun InjectionCard(
                 ) { Text("Copy listing") }
                 OutlinedButton(onClick = { com.ps4smartcheat.app.ui.components.copyText(context, "Assembly", vm.copyText(inj, com.ps4smartcheat.core.asm.Listing.Style.CODE)) }) { Text("Copy code") }
             }
-            inj.warnings.forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+            if (inj.warnings.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    inj.warnings.forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                }
+            }
             if (!editing || !nonWritable) {
                 Text(
                     "To inject, enable memory editing and \"Allow writes to non-writable regions\" (the hook is in code) in Settings.",
@@ -615,14 +836,13 @@ private fun InjectionCard(
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                val st = a.state
                 Button(
                     onClick = { vm.prepare(a, true) }, enabled = editing && !busy && (st == InjectionState.OFF || st == InjectionState.CAVE_ONLY),
-                    modifier = Modifier.testTag(if (preview) "injOn" else "injOn-${a.id}"),
+                    modifier = Modifier.weight(1f).testTag(if (preview) "injOn" else "injOn-${a.id}"),
                 ) { Text("Inject (ON)") }
                 OutlinedButton(
                     onClick = { vm.prepare(a, false) }, enabled = editing && !busy && (st == InjectionState.ON || st == InjectionState.CAVE_ONLY && inj.caveKind == CaveKind.MODULE_PADDING),
-                    modifier = Modifier.testTag(if (preview) "injOff" else "injOff-${a.id}"),
+                    modifier = Modifier.weight(1f).testTag(if (preview) "injOff" else "injOff-${a.id}"),
                 ) { Text("Remove (OFF)") }
             }
             if (!preview) {
