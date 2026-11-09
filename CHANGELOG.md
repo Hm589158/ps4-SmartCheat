@@ -4,6 +4,11 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
+### Copy assembly
+- Code screen: **Copy listing** (address, `eboot.bin+offset`, bytes, instruction, aligned in columns) and **Copy code**
+  (instructions only, one per line) put the shown disassembly on the clipboard. The injection preview has the same
+  buttons for the hook and cave code.
+
 ### Code caves / Assembly injection (new — verified against the simulated server only)
 - **Code → tap an instruction → Inject code…** opens the injection builder: a jump at the instruction leads to a
   code cave holding your code, the overwritten instructions and a jump back. Where the original instructions run is

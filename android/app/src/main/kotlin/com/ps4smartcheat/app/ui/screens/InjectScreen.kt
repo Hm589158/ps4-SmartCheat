@@ -130,6 +130,19 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
         if (address != null) load(address)
     }
 
+    /** Hook and cave of [inj] as text for the clipboard. */
+    fun copyText(inj: CodeInjection, style: com.ps4smartcheat.core.asm.Listing.Style): String {
+        _message.value = "Copied the injection (${style.label})"
+        val f = { rows: List<AsmInstruction> -> com.ps4smartcheat.core.asm.Listing.format(rows, style, ::relative) }
+        return if (style == com.ps4smartcheat.core.asm.Listing.Style.CODE) {
+            f(inj.caveListing)
+        } else {
+            "; hook ${Address.format(inj.hookAddress)} (original)\n" + f(inj.stolen) +
+                "\n; hook (injected)\n" + f(inj.hookListing) +
+                "\n; cave ${Address.format(inj.caveAddress)}\n" + f(inj.caveListing)
+        }
+    }
+
     fun relative(a: Long): String = c.selectedProcess.value?.regions?.let { ModuleResolver.refFor(a, it) }
         ?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: ""
 
@@ -559,6 +572,7 @@ private fun InjectionCard(
     mono: androidx.compose.ui.text.TextStyle, dim: androidx.compose.ui.graphics.Color, preview: Boolean,
 ) {
     val inj = a.injection
+    val context = androidx.compose.ui.platform.LocalContext.current
     SectionCard(if (preview) "4 · Preview" else a.name) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.testTag(if (preview) "injPreview" else "injSession-${a.id}")) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -584,6 +598,13 @@ private fun InjectionCard(
                     else -> "back"
                 }
                 Text("$part ${Address.format(ins.address)}  ${ins.text}", style = mono, modifier = Modifier.testTag("caveRow-" + java.lang.Long.toHexString(ins.address)))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { com.ps4smartcheat.app.ui.components.copyText(context, "Assembly", vm.copyText(inj, com.ps4smartcheat.core.asm.Listing.Style.FULL)) },
+                    modifier = Modifier.testTag(if (preview) "injCopy" else "injCopy-${a.id}"),
+                ) { Text("Copy listing") }
+                OutlinedButton(onClick = { com.ps4smartcheat.app.ui.components.copyText(context, "Assembly", vm.copyText(inj, com.ps4smartcheat.core.asm.Listing.Style.CODE)) }) { Text("Copy code") }
             }
             inj.warnings.forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
             if (!editing || !nonWritable) {

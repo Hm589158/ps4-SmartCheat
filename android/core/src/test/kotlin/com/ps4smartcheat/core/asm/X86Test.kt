@@ -121,4 +121,15 @@ class X86Test {
         assertEquals(-1L, fromSaved.values["r15"])
         assertTrue(fromSaved.fromSaved)
     }
+
+    @Test fun listingCopiesWhatIsShown() {
+        val list = X86.decode(DemoGame.SPEND_CODE, DemoGame.SPEND_ROUTINE)
+        assertEquals("mov eax, [0x500120]\nsub eax, 1\nmov [0x500120], eax\nret", Listing.format(list, Listing.Style.CODE))
+        val full = Listing.format(list, Listing.Style.FULL) { "eboot.bin+0x" + java.lang.Long.toHexString(it - 0x400000).uppercase() }.lines()
+        assertEquals("0x000402000  eboot.bin+0x2000  8B 05 1A E1 0F 00  mov eax, [0x500120]", full[0])
+        assertEquals("0x00040200F  eboot.bin+0x200F  C3                 ret", full[3])
+        // Without module names the column is left out; undecodable bytes are kept.
+        assertEquals("0x000001000  06  db 0x06\n0x000001001  90  nop", Listing.format(X86.decode(b(0x06, 0x90), 0x1000), Listing.Style.FULL))
+        assertEquals("", Listing.format(emptyList(), Listing.Style.CODE))
+    }
 }

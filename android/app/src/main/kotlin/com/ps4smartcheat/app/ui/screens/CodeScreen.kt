@@ -188,6 +188,14 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    /** The shown disassembly as text for the clipboard; also reports what was copied. */
+    fun copyText(style: com.ps4smartcheat.core.asm.Listing.Style): String? {
+        val list = _rows.value
+        if (list.isEmpty()) return null
+        _message.value = "Copied ${list.size} instruction(s) (${style.label})"
+        return com.ps4smartcheat.core.asm.Listing.format(list, style, ::relative)
+    }
+
     fun relative(a: Long): String = c.selectedProcess.value?.regions?.let { ModuleResolver.refFor(a, it) }
         ?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: ""
 
@@ -346,6 +354,10 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
     // Close the save form only after the library confirmed the save.
     LaunchedEffect(saveState) { if (saveState is SaveState.Saved) saving = false }
     var group by remember { mutableStateOf("") }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    fun copy(style: com.ps4smartcheat.core.asm.Listing.Style) {
+        vm.copyText(style)?.let { com.ps4smartcheat.app.ui.components.copyText(context, "Assembly", it) }
+    }
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     val sel = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
     val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
@@ -474,7 +486,13 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                         }
                     }
                 }
-                if (rows.isNotEmpty()) Text("Tap an instruction to patch it. W = writes memory, R = reads, → = branch.", style = MaterialTheme.typography.bodySmall, color = dim)
+                if (rows.isNotEmpty()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedButton(onClick = { copy(com.ps4smartcheat.core.asm.Listing.Style.FULL) }, modifier = Modifier.testTag("codeCopy")) { Text("Copy listing") }
+                        OutlinedButton(onClick = { copy(com.ps4smartcheat.core.asm.Listing.Style.CODE) }, modifier = Modifier.testTag("codeCopyAsm")) { Text("Copy code") }
+                    }
+                    Text("Tap an instruction to patch it. W = writes memory, R = reads, → = branch.", style = MaterialTheme.typography.bodySmall, color = dim)
+                }
             }
         }
         items(rows, key = { it.address }) { ins ->

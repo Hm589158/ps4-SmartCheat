@@ -628,6 +628,15 @@ class AppJourneyTest {
         tag("codeAddress").performTextInput(Address.format(DemoGame.SUB_ONE))
         press("codeGo")
         waitText("sub eax, 1")
+        step("copy the listing")
+        press("codeCopyAsm")
+        waitText("Copied")
+        val clip = compose.activity.getSystemService(android.content.ClipboardManager::class.java).primaryClip!!.getItemAt(0).text.toString()
+        assertEquals(true, clip.lines().contains("sub eax, 1"))
+        press("codeCopy")
+        val full = compose.activity.getSystemService(android.content.ClipboardManager::class.java).primaryClip!!.getItemAt(0).text.toString()
+        assertEquals(true, full.lines().any { it.startsWith(Address.format(DemoGame.SUB_ONE)) && it.contains("eboot.bin+0x2006") && it.endsWith("sub eax, 1") })
+
         press("codeInject")
         waitText("1 · Hook at")
         waitText("end of code (page padding)") // caves were searched automatically, the safest one first
