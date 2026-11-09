@@ -222,7 +222,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
             val space = when (_caveKind.value) {
                 CaveKind.MODULE_PADDING -> {
                     val cand = _cave.value ?: throw CodePatchException("Find caves and pick one first.")
-                    CaveSpace(cand.address, cand.size, CaveKind.MODULE_PADDING, c.backend.readMemory(sel.pid, cand.address, cand.size))
+                    CaveSpace(cand.address, cand.size, CaveKind.MODULE_PADDING, c.backend.readMemory(sel.pid, cand.address, cand.size), cand.atSegmentEnd)
                 }
                 CaveKind.ALLOCATED -> {
                     val a = _allocation.value ?: throw CodePatchException("Allocate memory first.")

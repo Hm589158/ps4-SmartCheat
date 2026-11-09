@@ -39,7 +39,11 @@ enum class InjectionState(val label: String) {
 }
 
 /** Free space the cave code is written to; [current] = the bytes there now (at least [capacity] long). */
-class CaveSpace(val address: Long, val capacity: Int, val kind: CaveKind, val current: ByteArray)
+class CaveSpace(
+    val address: Long, val capacity: Int, val kind: CaveKind, val current: ByteArray,
+    /** Page padding up to the end of the code mapping (see [CaveCandidate.atSegmentEnd]). */
+    val atSegmentEnd: Boolean = false,
+)
 
 /**
  * A planned code-cave injection ("Assembly injection"): the instructions at [hookAddress] are replaced by a jump into
@@ -265,7 +269,7 @@ object InjectionPlanner {
         if (original == OriginalCode.SKIP) warnings += "The original instructions do not run any more; your code must do what the game needs from them."
         if (jump == HookJump.ABS64) warnings += "The cave is more than 2 GiB away: a 14-byte jump is used."
         if (cave.kind == CaveKind.ALLOCATED) warnings += "Allocated memory: this injection lasts only while the game runs and cannot be saved or exported."
-        if (cave.kind == CaveKind.MODULE_PADDING && caveOff[0] == 0.toByte()) {
+        if (cave.kind == CaveKind.MODULE_PADDING && caveOff[0] == 0.toByte() && !cave.atSegmentEnd) {
             warnings += "The cave is zero bytes inside the code mapping; it is very likely padding, but make sure nothing uses it."
         }
         warnings += "Writing the jump is not atomic: a game thread executing these bytes at that instant can crash."

@@ -57,7 +57,7 @@ class CodeInjectionTest {
     private suspend fun moduleCave(hook: Long): CaveSpace {
         val regions = client.getMemoryRegions(pid)
         val c = CaveFinder.find(client, pid, regions, hook).first()
-        return CaveSpace(c.address, c.size, CaveKind.MODULE_PADDING, client.readMemory(pid, c.address, c.size))
+        return CaveSpace(c.address, c.size, CaveKind.MODULE_PADDING, client.readMemory(pid, c.address, c.size), c.atSegmentEnd)
     }
 
     private suspend fun plan(hook: Long, cave: CaveSpace, source: String, original: OriginalCode = OriginalCode.AFTER): CodeInjection {
@@ -190,6 +190,9 @@ class CodeInjectionTest {
         val moved = inj.caveListing.single { it.mnemonic == "mov" && it.writesMemory }
         assertEquals(DemoGame.COINS_ADDRESS, moved.ripTarget) // same variable from the new place
         assertEquals(InjectionState.OFF, writer.state(pid, inj))
+        assertTrue(inj.warnings.none { it.contains("zero bytes inside") }) // page padding at the end of the code
+        val inner = InjectionPlanner.plan(0x1000, Hex.decode("83E80183E801C3") + ByteArray(100), null, CaveSpace(0x1E00, 64, CaveKind.MODULE_PADDING, ByteArray(64)), OriginalCode.AFTER, "nop", true) { byteArrayOf(0x90.toByte()) }
+        assertTrue(inner.warnings.any { it.contains("zero bytes inside") })
 
         // Read-only by default: nothing can be written.
         val readOnly = InjectionWriter(client, MemoryEditor(client, { EditPolicy() }))
