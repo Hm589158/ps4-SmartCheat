@@ -374,7 +374,9 @@ class AppContainer(context: Context) {
         storeCheats(listOf(entry), profileId, newProfileName, gameVersion, sel)
 
     /** [storeCheat] for several entries: all of them are written in one atomic write and verified, or none. */
-    private suspend fun storeCheats(entries: List<CheatEntry>, profileId: String?, newProfileName: String, gameVersion: String, sel: SelectedProcess): com.ps4smartcheat.core.cheat.CheatProfile {
+    private suspend fun storeCheats(entries: List<CheatEntry>, profileId: String?, newProfileName: String, typedVersion: String, sel: SelectedProcess): com.ps4smartcheat.core.cheat.CheatProfile {
+        // Store versions in GoldHEN form ("1.25" → "01.25"); anything else is kept as typed (checked at export).
+        val gameVersion = normalizedVersion(typedVersion)
         val profile = if (profileId != null) {
             cheats.profile(profileId) ?: throw IllegalArgumentException("The selected profile no longer exists — pick another one")
             cheats.upsertCheats(profileId, entries)
@@ -388,6 +390,10 @@ class AppContainer(context: Context) {
         }
         return profile
     }
+
+    /** "1.25" → "01.25" when unambiguous, otherwise the trimmed input (see GoldHenExporter.normalizeVersion). */
+    fun normalizedVersion(typed: String): String =
+        (com.ps4smartcheat.core.cheat.GoldHenExporter.normalizeVersion(typed) as? com.ps4smartcheat.core.cheat.GoldHenExporter.VersionCheck.Ok)?.version ?: typed.trim()
 
     // ------------------------------------------------------------ code caves / injection
 

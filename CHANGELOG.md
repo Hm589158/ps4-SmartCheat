@@ -4,6 +4,20 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
+### GoldHEN export: file names and versions (fix)
+- **File name by target process**, as the official GoldHEN_Cheat_Repository README specifies:
+  `{titleid}_{version}.json` for eboot.bin and `{titleid}_{version}_{process}.json` for any other process — e.g.
+  `CUSA05294_01.25_default.elf.json` (the repository itself has such files, e.g. `CUSA00018_01.21_default.elf.json`).
+  Previously the process was always left out, so GoldHEN would not pick up cheats for games that run e.g.
+  `default.elf`. The game name typed in the dialog is never part of the file name.
+- **Versions are normalised**: `1.25` → `01.25`, `v1,25` → `01.25`, `2` → `02.00`; correct ones stay as they are.
+  An ambiguous `1.5` is never guessed: the dialog offers `01.05` / `01.50`. Title IDs are normalised the same way
+  (`cusa-05294` → `CUSA05294`). Versions are also stored in this form when cheats are saved or a profile is edited.
+- **Export dialog**: title ID and version are editable there and checked while typing; it shows the resulting file
+  name, the folder to copy it to on the PS4 (`/user/data/GoldHEN/cheats/json/`), how many mods are exported and what
+  is skipped and why. Export is enabled only when the file is valid; problems are shown in the dialog. Corrected
+  values are saved in the profile.
+
 ### Copy assembly
 - Code screen: **Copy listing** (address, `eboot.bin+offset`, bytes, instruction, aligned in columns) and **Copy code**
   (instructions only, one per line) put the shown disassembly on the clipboard. The injection preview has the same

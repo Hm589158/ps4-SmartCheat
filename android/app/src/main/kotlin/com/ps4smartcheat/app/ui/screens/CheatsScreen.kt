@@ -16,6 +16,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -282,7 +284,13 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
 
     fun updateProfile(p: CheatProfile, name: String, titleId: String, version: String) = viewModelScope.launch {
         if (name.isBlank()) { _error.value = "Profile name is required"; return@launch }
-        c.cheats.updateProfile(p.copy(name = name.trim(), titleId = titleId.trim().ifBlank { null }, gameVersion = version.trim().ifBlank { null }))
+        c.cheats.updateProfile(
+            p.copy(
+                name = name.trim(),
+                titleId = titleId.trim().ifBlank { null }?.let { GoldHenExporter.normalizeTitleId(it) ?: it },
+                gameVersion = version.trim().ifBlank { null }?.let { c.normalizedVersion(it) },
+            ),
+        )
     }
 
     fun updateCheat(p: CheatProfile, e: CheatEntry, name: String, value: String) = viewModelScope.launch {
@@ -322,24 +330,42 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    /** Builds GoldHEN JSON; returns the suggested file name if export is possible. */
-    fun prepareGoldHen(p: CheatProfile, gameName: String, credits: String): String? {
-        val running = c.selectedProcess.value?.takeIf { !it.exited && it.name == p.processName }?.titleId
-        val r = GoldHenExporter.export(p, gameName, credits.split(',').map { it.trim() }, runningTitleId = running)
-        if (r.json == null) {
-            _error.value = (r.errors + r.skipped).joinToString("\n")
-            return null
+    private fun runningTitle(p: CheatProfile) = c.selectedProcess.value?.takeIf { !it.exited && it.name == p.processName }?.titleId
+
+    /** Live check for the export dialog (normalised title ID/version, file name, what is exported). Read-only. */
+    fun goldHenPreview(p: CheatProfile, titleId: String, version: String, gameName: String): GoldHenExporter.Preview =
+        GoldHenExporter.preview(p, titleId, version, gameName, runningTitle(p))
+
+    /**
+     * Builds the GoldHEN JSON with the dialog's values and returns the file name for the save picker, or null with
+     * the reason in [GoldHenExporter.Preview.problems] (shown in the dialog). Normalised title ID and version are
+     * stored in the profile so the next export needs no correction.
+     */
+    fun prepareGoldHen(p: CheatProfile, titleId: String, version: String, gameName: String, credits: String): String? {
+        val pre = goldHenPreview(p, titleId, version, gameName)
+        if (!pre.ok) return null
+        val fixed = p.copy(titleId = pre.titleId, gameVersion = (pre.version as GoldHenExporter.VersionCheck.Ok).version)
+        val r = GoldHenExporter.export(fixed, gameName, credits.split(',').map { it.trim() }, runningTitleId = runningTitle(p))
+        val json = r.json ?: run { _error.value = r.errors.joinToString("\n"); return null }
+        if (fixed.titleId != p.titleId || fixed.gameVersion != p.gameVersion) {
+            viewModelScope.launch {
+                try { c.cheats.updateProfile(fixed) } catch (e: Exception) { c.log.warn("Could not store the corrected title ID/version: ${e.message}") }
+            }
         }
-        pendingGoldHen = r.json
-        _message.value = "GoldHEN export: ${r.exported} cheat(s)" + if (r.skipped.isNotEmpty()) "; skipped:\n" + r.skipped.joinToString("\n") else ""
-        return GoldHenExporter.fileName(p)
+        pendingGoldHen = json
+        pendingGoldHenName = pre.fileName
+        _message.value = "GoldHEN export: ${r.exported} mod(s) → ${pre.fileName}" + if (r.skipped.isNotEmpty()) "; skipped:\n" + r.skipped.joinToString("\n") else ""
+        return pre.fileName
     }
+
+    private var pendingGoldHenName: String? = null
 
     fun writeGoldHen(resolver: ContentResolver, uri: Uri) = viewModelScope.launch {
         val text = pendingGoldHen ?: return@launch
         try {
             withContext(Dispatchers.IO) { resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) } }
             pendingGoldHen = null
+            pendingGoldHenName?.let { _message.value = "Saved $it. Copy it to ${GoldHenExporter.CHEATS_DIR} on the PS4 (keep the file name)." }
         } catch (e: Exception) {
             _error.value = "GoldHEN export failed: ${e.message}"
         }
@@ -436,7 +462,7 @@ fun CheatsScreen() {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Button(onClick = { vm.validate(p) }, enabled = isCurrentGame) { Text("Validate") }
-                    OutlinedButton(onClick = { goldHenProfile = p }, enabled = p.cheats.isNotEmpty()) { Text("GoldHEN export") }
+                    OutlinedButton(onClick = { goldHenProfile = p }, enabled = p.cheats.isNotEmpty(), modifier = Modifier.testTag("ghExport-${p.name}")) { Text("GoldHEN export") }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     if (p.cheats.any { it.isPatch }) {
@@ -510,32 +536,87 @@ fun CheatsScreen() {
         )
     }
     goldHenProfile?.let { p ->
-        var gameName by remember(p.id) { mutableStateOf(p.name) }
-        var credits by remember(p.id) { mutableStateOf("") }
-        AlertDialog(
-            onDismissRequest = { goldHenProfile = null },
-            title = { Text("Export GoldHEN cheat file") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        "Requires title ID and game version on the profile. Only cheats inside ${p.processName} with a recorded original value are exported. " +
-                            "GoldHEN offset semantics follow PS4CheaterNeo and are not yet verified on hardware.",
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                    OutlinedTextField(gameName, { gameName = it }, label = { Text("Game name") }, singleLine = true)
-                    OutlinedTextField(credits, { credits = it }, label = { Text("Credits (comma separated)") }, singleLine = true)
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val fileName = vm.prepareGoldHen(p, gameName, credits)
-                    goldHenProfile = null
-                    if (fileName != null) goldHenLauncher.launch(fileName)
-                }) { Text("Export") }
-            },
-            dismissButton = { TextButton(onClick = { goldHenProfile = null }) { Text("Cancel") } },
+        GoldHenExportDialog(
+            p, vm,
+            onExport = { fileName -> goldHenProfile = null; goldHenLauncher.launch(fileName) },
+            onDismiss = { goldHenProfile = null },
         )
     }
+}
+
+/** GoldHEN export: title ID / version corrected as typed, file name and checks shown before anything is written. */
+@Composable
+private fun GoldHenExportDialog(p: CheatProfile, vm: CheatsViewModel, onExport: (String) -> Unit, onDismiss: () -> Unit) {
+    var gameName by remember(p.id) { mutableStateOf(p.name) }
+    var titleId by remember(p.id) { mutableStateOf(p.titleId.orEmpty()) }
+    var version by remember(p.id) { mutableStateOf(p.gameVersion.orEmpty()) }
+    var credits by remember(p.id) { mutableStateOf("") }
+    val pre = remember(p, titleId, version, gameName) { vm.goldHenPreview(p, titleId, version, gameName) }
+    val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Export GoldHEN cheat file") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(gameName, { gameName = it }, label = { Text("Game name (inside the file)") }, singleLine = true, modifier = Modifier.testTag("ghxName"))
+                OutlinedTextField(
+                    titleId, { titleId = it }, label = { Text("Title ID") }, singleLine = true, modifier = Modifier.testTag("ghxTitle"),
+                    isError = titleId.isNotBlank() && pre.titleId == null,
+                    supportingText = {
+                        val t = pre.titleId
+                        Text(if (t == null) "e.g. CUSA05294" else if (t != titleId) "Exported as $t" else "OK")
+                    },
+                )
+                OutlinedTextField(
+                    version, { version = it }, label = { Text("Game version") }, singleLine = true, modifier = Modifier.testTag("ghxVersion"),
+                    isError = pre.version is GoldHenExporter.VersionCheck.Invalid && version.isNotBlank(),
+                    supportingText = {
+                        when (val v = pre.version) {
+                            is GoldHenExporter.VersionCheck.Ok -> Text(if (v.changed) "Exported as ${v.version}" else "OK", modifier = Modifier.testTag("ghxVersionNote"))
+                            is GoldHenExporter.VersionCheck.Invalid -> Text(if (version.isBlank()) "e.g. 01.25" else v.reason)
+                        }
+                    },
+                )
+                (pre.version as? GoldHenExporter.VersionCheck.Invalid)?.suggestions?.takeIf { it.isNotEmpty() }?.let { list ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Did you mean", style = MaterialTheme.typography.bodySmall)
+                        list.forEach { s -> OutlinedButton(onClick = { version = s }, modifier = Modifier.testTag("ghxSuggest-$s")) { Text(s) } }
+                    }
+                }
+                Text("Process: ${p.processName}", style = MaterialTheme.typography.bodyMedium)
+                OutlinedTextField(credits, { credits = it }, label = { Text("Credits (comma separated, optional)") }, singleLine = true)
+                HorizontalDivider()
+                Text("File", style = MaterialTheme.typography.labelLarge)
+                Text(pre.fileName ?: "—", style = mono, modifier = Modifier.testTag("ghxFileName"))
+                Text(
+                    if (p.processName == GoldHenExporter.MAIN_PROCESS) "Named {titleid}_{version}.json, as GoldHEN expects for eboot.bin."
+                    else "Named {titleid}_{version}_{process}.json: GoldHEN needs the process (${p.processName}) in the name for games that do not run eboot.bin.",
+                    style = MaterialTheme.typography.bodySmall, color = dim,
+                )
+                pre.uploadPath?.let { Text("Copy to $it (e.g. by FTP); keep the file name.", style = MaterialTheme.typography.bodySmall, color = dim) }
+                Text("${pre.exportable} mod(s) will be exported", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("ghxCount"))
+                if (pre.skipped.isNotEmpty()) {
+                    Text("Not exported (${pre.skipped.size}):", style = MaterialTheme.typography.bodySmall)
+                    pre.skipped.take(5).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = dim) }
+                    if (pre.skipped.size > 5) Text("• … ${pre.skipped.size - 5} more", style = MaterialTheme.typography.bodySmall, color = dim)
+                }
+                pre.problems.forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
+                Text(
+                    "Offsets are relative to the game executable (as PS4CheaterNeo reads GoldHEN files); not yet verified on hardware. " +
+                        "Corrected title ID and version are saved in the profile.",
+                    style = MaterialTheme.typography.bodySmall, color = dim,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { vm.prepareGoldHen(p, titleId, version, gameName, credits)?.let(onExport) },
+                enabled = pre.ok, modifier = Modifier.testTag("ghxExport"),
+            ) { Text("Export") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+    )
 }
 
 @Composable

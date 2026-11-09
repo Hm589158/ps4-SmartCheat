@@ -704,6 +704,20 @@ class AppJourneyTest {
         press("ghDisable-0")
         confirmDialog()
         waitMock { hexBytes(DemoGame.SUB_ONE, 3) == "83 E8 01" }
+
+        step("GoldHEN export: version format and file name")
+        press("ghExport-MOCK00001")
+        waitTag("ghxVersion")
+        tag("ghxVersion").performTextClearance()
+        tag("ghxVersion").performTextInput("1.5") // ambiguous: both forms offered, export blocked
+        waitTag("ghxSuggest-01.50")
+        tag("ghxExport").assertIsNotEnabled()
+        tag("ghxVersion").performTextClearance()
+        tag("ghxVersion").performTextInput("1.25")
+        waitText("Exported as 01.25")
+        waitText("MOCK00001_01.25.json")
+        waitText("/user/data/GoldHEN/cheats/json/MOCK00001_01.25.json")
+        shot("58_goldhen_export")
     }
 
     @Test fun findWhatWritesListsTheInstructionAndDetaches() {

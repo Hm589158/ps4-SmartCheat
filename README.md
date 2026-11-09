@@ -119,7 +119,9 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
 
 **🎮 Cheats and tools**
 - Cheat library with per-game profiles and JSON import/export
-- **GoldHEN** cheat export. Import enables a mod only if the game's memory matches the mod's original (`off`) bytes
+- **GoldHEN** cheat export, named as GoldHEN expects (`CUSA05294_01.25.json`, or `CUSA05294_01.25_default.elf.json`
+  for games that do not run eboot.bin; versions such as `1.25` are corrected to `01.25`). Import enables a mod only if
+  the game's memory matches the mod's original (`off`) bytes
 - Hex viewer with byte patches, game detection, automatic reconnect
 - Connection diagnostics, exportable event log, tablet layout
 

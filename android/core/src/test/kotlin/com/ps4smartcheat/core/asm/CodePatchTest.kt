@@ -178,7 +178,7 @@ class CodePatchTest {
         assertNotNull(r.json)
         assertEquals(1, r.exported)
         assertTrue(r.skipped.single().startsWith("Group \"G\" skipped"))
-        val bad = GoldHenExporter.export(CheatProfile("p", "P", "CUSA1234", "1.0", "eboot.bin", cheats = listOf(solo)), "Game", emptyList())
+        val bad = GoldHenExporter.export(CheatProfile("p", "P", "CUSA1234", "1.5", "eboot.bin", cheats = listOf(solo)), "Game", emptyList())
         assertEquals(2, bad.errors.size)
     }
 }
