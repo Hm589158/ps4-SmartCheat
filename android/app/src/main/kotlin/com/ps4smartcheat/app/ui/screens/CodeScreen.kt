@@ -350,7 +350,7 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
     val sel = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
     val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
 
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+    LazyColumn(Modifier.fillMaxSize().testTag("codeList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (selected == null) WarningBanner("No process selected.")

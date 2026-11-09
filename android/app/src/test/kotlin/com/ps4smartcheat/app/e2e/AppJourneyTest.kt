@@ -698,8 +698,10 @@ class AppJourneyTest {
         waitText("0x00001387") // eax when the store hit the watchpoint (coins 4999)
         waitTag("regOperand")
         waitText("now in memory: 4998") // the routine ran once more after the capture
-        waitTag("regRow-" + java.lang.Long.toHexString(DemoGame.STORE_COINS))
         shot("51_registers_in_disassembler")
+        val hitRow = "regRow-" + java.lang.Long.toHexString(DemoGame.STORE_COINS)
+        compose.onNodeWithTag("codeList").performScrollToNode(hasTestTag(hitRow))
+        waitTag(hitRow)
     }
 
     @Test fun payloadBelowCapability12DisablesWatchpoints() {
