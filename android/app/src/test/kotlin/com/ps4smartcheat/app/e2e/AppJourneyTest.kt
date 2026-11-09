@@ -639,8 +639,12 @@ class AppJourneyTest {
 
         press("codeInject")
         waitText("1 · Hook at")
-        waitText("end of code (page padding)") // caves were searched automatically, the safest one first
+        // Lazy list: later cards are composed only once scrolled into view.
+        waitTag("injectList")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injSource"))
         waitText("//   sub eax, 1") // template lists the instructions the jump moves
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injBuild"))
+        waitText("end of code (page padding)") // caves were searched automatically, the safest one first
 
         step("build preview")
         compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injSource"))
