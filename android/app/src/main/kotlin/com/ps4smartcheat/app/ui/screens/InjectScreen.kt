@@ -490,15 +490,15 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
             item {
                 SectionCard("Source Code", step = 2, trailing = { StatusPill("read-only") }) {
                     CodePanel(Modifier.testTag("injSourceCode")) {
-                        val width = sourceCode.maxOfOrNull { Hex.encode(it.bytes, " ").length } ?: 0
+                        val width = sourceCode.maxOfOrNull { it.text.length } ?: 0
                         if (sourceCode.isEmpty()) Text("…", style = mono, color = dim)
+                        // Address and instruction first (what matters); the bytes follow as a dim comment.
                         sourceCode.forEach { ins ->
                             Text(
                                 buildAnnotatedString {
-                                    withStyle(SpanStyle(color = dim)) {
-                                        append(Address.format(ins.address) + "  " + Hex.encode(ins.bytes, " ").padEnd(width) + "  ")
-                                    }
-                                    append(ins.text)
+                                    withStyle(SpanStyle(color = dim)) { append(Address.format(ins.address) + "  ") }
+                                    append(ins.text.padEnd(width))
+                                    withStyle(SpanStyle(color = dim)) { append("  ; " + Hex.encode(ins.bytes, " ")) }
                                 },
                                 style = mono, softWrap = false,
                             )
@@ -802,6 +802,14 @@ private fun InjectionCard(
                             withStyle(SpanStyle(color = part?.let { partColors.getValue(it) } ?: dim, fontWeight = FontWeight.SemiBold)) { append((part?.tag ?: "").padEnd(5)) }
                             withStyle(SpanStyle(color = dim)) { append(Address.format(ins.address) + "  ") }
                             append(ins.text)
+                            // Name branch targets the way the Target Code wrote them.
+                            val target = ins.branchTarget
+                            val name = when {
+                                target == null -> null
+                                target == inj.returnAddress -> CaveScript.RETURN
+                                else -> inj.labels[target]?.firstOrNull()
+                            }
+                            if (name != null) withStyle(SpanStyle(color = dim)) { append("  ; $name") }
                         },
                         style = mono, softWrap = false,
                         modifier = Modifier.testTag("caveRow-" + java.lang.Long.toHexString(ins.address)),

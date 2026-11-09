@@ -657,6 +657,7 @@ class AppJourneyTest {
         compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injPreview")) }.isSuccess }
         waitText("off (original code)")
         waitText("mov eax, 0x3E8")
+        waitText("jl 0x40200F  ; return") // both returns are named in the listing
         waitText("mov [0x500120], eax") // the moved store still targets the coins
         shot("55_injection_preview")
 
