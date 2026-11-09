@@ -5,8 +5,9 @@ name: Release
 #      SMARTCHEAT_KEYSTORE_BASE64, SMARTCHEAT_KEYSTORE_PASSWORD, SMARTCHEAT_KEY_ALIAS, SMARTCHEAT_KEY_PASSWORD
 #  - Otherwise a clearly labelled, debug-signed beta/test build published as a pre-release.
 # An existing release with the same tag is never overwritten.
-# Triggers: a pushed v* tag, a manual run, or a successful CI run on the default branch
-# (published as v<versionName>-build.<CI run number>).
+# Triggers: a pushed v* tag, a manual run, or a successful CI run on the default branch.
+# CI-triggered releases are numbered automatically: the last vX.Y.Z tag + 1 in the patch number (v1.0.1, v1.0.2…),
+# published as the latest release; once published, all older releases and their tags are deleted.
 
 on:
   push:
@@ -61,12 +62,18 @@ jobs:
             echo "SKIP_RELEASE=true" >> "$GITHUB_ENV"
             exit 0
           fi
-          VN=$(sed -n 's/.*versionName = ciVersionName ?: "\(.*\)".*/\1/p' app/build.gradle.kts)
-          # Beta versions are tagged v1.0.0-beta.<run>; others v1.0.0-build.<run>.
-          case "$VN" in
-            *-beta*) echo "TAG=v${VN}.${{ github.event.workflow_run.run_number }}" >> "$GITHUB_ENV" ;;
-            *)       echo "TAG=v${VN}-build.${{ github.event.workflow_run.run_number }}" >> "$GITHUB_ENV" ;;
-          esac
+          # Next version: highest plain vX.Y.Z tag + 1 in the patch number; the first one is v1.0.1.
+          LAST=$(git ls-remote --tags origin 'v*' | sed -E 's#.*refs/tags/##; s#\^\{\}$##' \
+                 | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
+          if [ -z "$LAST" ]; then
+            NEXT="1.0.1"
+          else
+            IFS=. read -r MA MI PA <<< "${LAST#v}"
+            NEXT="$MA.$MI.$((PA + 1))"
+          fi
+          echo "Last release tag: ${LAST:-none} -> v$NEXT"
+          echo "TAG=v$NEXT" >> "$GITHUB_ENV"
+          echo "AUTO_RELEASE=true" >> "$GITHUB_ENV"
 
       - name: Validate tag and refuse duplicates
         if: env.SKIP_RELEASE != 'true'
@@ -117,11 +124,12 @@ jobs:
           export SMARTCHEAT_VERSION_NAME="$VERSION_NAME" SMARTCHEAT_VERSION_CODE="${{ github.run_number }}"
           ./gradlew --no-daemon :app:assembleDebug
           APK=$(ls app/build/outputs/apk/debug/*.apk | head -n1)
-          # Beta builds keep their beta version in the name; other debug-signed builds are marked -test.
-          case "$VERSION_NAME" in
+          # Automatic (and beta) builds are the public build: plain name. Other debug-signed builds are marked -test.
+          if [ "${AUTO_RELEASE:-}" = "true" ]; then OUT="PS4-SmartCheat-v$VERSION_NAME.apk"
+          else case "$VERSION_NAME" in
             *-beta*) OUT="PS4-SmartCheat-v$VERSION_NAME.apk" ;;
             *)       OUT="PS4-SmartCheat-v$VERSION_NAME-test.apk" ;;
-          esac
+          esac; fi
           mkdir -p dist && cp "$APK" "dist/$OUT"
           echo "KIND=test" >> "$GITHUB_ENV"
 
@@ -132,17 +140,29 @@ jobs:
           APK_NAME=$(basename dist/*.apk)
           BASE="${VERSION_NAME%%-*}"
           BUILD=$(echo "$VERSION_NAME" | sed -nE 's/.*(-build|-beta)\.([0-9]+)$/\2/p')
-          # Titles: "PS4 SmartCheat v1.0.0" (signed) · "PS4 SmartCheat v1.0.0 Beta · build 53" (beta) ·
-          # "PS4 SmartCheat v1.0.0 · Test build 46" (other debug-signed builds, pre-release).
-          case "$VERSION_NAME" in
-            # Beta builds are the current public build: published as a normal release marked "Latest",
-            # so the repository's Releases sidebar links straight to the app.
-            *-beta*) TITLE="PS4 SmartCheat v$BASE Beta${BUILD:+ · build $BUILD}"; FLAGS="--latest" ;;
-            *)
-              if [ "$KIND" = "release" ]; then TITLE="PS4 SmartCheat v$BASE"; FLAGS="--latest"
-              else TITLE="PS4 SmartCheat v$BASE · Test build ${BUILD:-${VERSION_NAME#*-}}"; FLAGS="--prerelease"; fi ;;
-          esac
+          # Titles: "PS4 SmartCheat v1.0.1" (automatic public build, or signed) · "PS4 SmartCheat v1.0.0 · Test build 46"
+          # (other debug-signed builds, pre-release). Automatic builds are marked "Latest" so the Releases sidebar
+          # links straight to the app.
+          if [ "${AUTO_RELEASE:-}" = "true" ]; then
+            TITLE="PS4 SmartCheat v$VERSION_NAME"; FLAGS="--latest"; export CHANNEL=beta
+          elif [ "${VERSION_NAME#*-beta}" != "$VERSION_NAME" ]; then
+            TITLE="PS4 SmartCheat v$BASE Beta${BUILD:+ · build $BUILD}"; FLAGS="--latest"
+          elif [ "$KIND" = "release" ]; then
+            TITLE="PS4 SmartCheat v$BASE"; FLAGS="--latest"
+          else
+            TITLE="PS4 SmartCheat v$BASE · Test build ${BUILD:-${VERSION_NAME#*-}}"; FLAGS="--prerelease"
+          fi
           ../.github/scripts/release-notes.sh "$VERSION_NAME" "$KIND" "$APK_NAME" "$RELEASE_SHA" > "$RUNNER_TEMP/notes.md"
           gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt \
             --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
             --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md" $FLAGS
+
+      - name: Delete older releases
+        # Only after the new release exists: keep a single, current release (and remove the old tags with it).
+        if: env.SKIP_RELEASE != 'true' && env.AUTO_RELEASE == 'true'
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName --jq '.[].tagName' | while read -r t; do
+            [ "$t" = "$TAG" ] && continue
+            gh release delete "$t" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag && echo "deleted release $t"
+          done

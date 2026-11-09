@@ -216,7 +216,9 @@ class AppJourneyTest {
         waitText("eboot.bin+0x120") // region shown on the result row
         shot("06_refined")
 
-        // 5. Editor is read-only by default.
+        // 5. Editing is on by default; in read-only mode (switched off here) the editor refuses writes.
+        assertEquals(true, c().settings.value.editingEnabled && c().settings.value.allowNonWritableRegions && c().settings.value.allowSystemProcesses)
+        c().settings.update { it.copy(editingEnabled = false) }
         step("editor read-only")
         tag("result-$coins").performClick()
         waitText("Read-only mode")
@@ -517,14 +519,8 @@ class AppJourneyTest {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
         // Code patches need editing + non-writable regions (both confirmed).
-        step("enable code patching")
-        openSettings()
-        waitTag("editingSwitch")
-        tag("editingSwitch").performClick()
-        confirmDialog()
-        waitText("Allow writes to non-writable regions")
-        press("nonWritableSwitch")
-        confirmDialog()
+        // Editing and code writes are on by default (each write is still confirmed).
+        assertEquals(true, c().settings.value.editingEnabled && c().settings.value.allowNonWritableRegions)
 
         step("disassemble")
         compose.onNodeWithContentDescription("Code").performClick()
@@ -613,14 +609,8 @@ class AppJourneyTest {
     @Test fun codeCaveInjectionRunsInTheGameIsSavedAndSwitchedFromCheats() {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
-        step("enable code patching")
-        openSettings()
-        waitTag("editingSwitch")
-        tag("editingSwitch").performClick()
-        confirmDialog()
-        waitText("Allow writes to non-writable regions")
-        press("nonWritableSwitch")
-        confirmDialog()
+        // Editing and code writes are on by default (each write is still confirmed).
+        assertEquals(true, c().settings.value.editingEnabled && c().settings.value.allowNonWritableRegions)
 
         step("disassemble and open Inject")
         compose.onNodeWithContentDescription("Code").performClick()

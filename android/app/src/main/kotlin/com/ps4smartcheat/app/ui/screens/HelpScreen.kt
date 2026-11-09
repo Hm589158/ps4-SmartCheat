@@ -38,7 +38,7 @@ private val sections = listOf(
     HelpSection(
         "3. Edit safely",
         listOf(
-            "The app starts read-only. Enable memory editing in Settings when you want to write.",
+            "Memory editing is on by default; every write asks for confirmation and is verified by reading it back. Turn it off in Settings for a read-only session.",
             "Tap a result → Editor → new value → Write → confirm. Every write is verified by reading it back.",
             "Restore puts the original back; History → Undo/Redo steps through your writes (each confirmed).",
             "Freeze rewrites a value while the phone stays connected; it stops on disconnect or when the game exits.",

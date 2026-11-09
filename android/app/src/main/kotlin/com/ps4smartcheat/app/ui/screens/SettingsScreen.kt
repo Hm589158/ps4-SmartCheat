@@ -97,7 +97,7 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
             LabeledSwitch(
                 "Enable memory editing", s.editingEnabled,
                 { on -> if (on) confirmEditing = true else vm.update { it.copy(editingEnabled = false, allowSystemProcesses = false) } },
-                "Off = read-only. Resets to off every time the app starts.",
+                "On by default. Off = read-only. Every write is still confirmed and checked by reading it back.",
                 tag = "editingSwitch",
             )
             LabeledSwitch(
@@ -108,7 +108,7 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
             LabeledSwitch(
                 "Allow writes to system processes", s.allowSystemProcesses,
                 { on -> if (on) confirmSystem = true else vm.update { it.copy(allowSystemProcesses = false) } },
-                "Dangerous: can crash the console. Resets on restart.", enabled = s.editingEnabled,
+                "Dangerous: can crash the console. Writes to system processes show an extra warning.", enabled = s.editingEnabled,
             )
             var freeze by remember { mutableStateOf(vm.freezeInterval.toInt()) }
             NumberField("Freeze interval ms", freeze, 50..10_000) { freeze = it; vm.setFreezeInterval(it.toLong()) }

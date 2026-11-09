@@ -20,9 +20,10 @@ data class AppSettings(
     val readTimeoutMs: Int = 10_000,
     val queryFirmware: Boolean = true,
     val allowNonLocalHosts: Boolean = false,
-    val editingEnabled: Boolean = false,
-    val allowNonWritableRegions: Boolean = false,
-    val allowSystemProcesses: Boolean = false,
+    // Writing is on by default (owner's choice); every write is still confirmed and verified by a fresh read.
+    val editingEnabled: Boolean = true,
+    val allowNonWritableRegions: Boolean = true,
+    val allowSystemProcesses: Boolean = true,
     val includeReadOnlyRegions: Boolean = false,
     val includeExecutableRegions: Boolean = false,
     val maxResults: Int = 1_000_000,
@@ -86,10 +87,9 @@ class SettingsStore(context: Context) {
             readTimeoutMs = prefs.getInt("readTimeoutMs", d.readTimeoutMs),
             queryFirmware = prefs.getBoolean("queryFirmware", d.queryFirmware),
             allowNonLocalHosts = prefs.getBoolean("allowNonLocalHosts", d.allowNonLocalHosts),
-            // Editing always starts disabled after an app restart: read-only by default.
-            editingEnabled = false,
+            editingEnabled = prefs.getBoolean("editingEnabled", d.editingEnabled),
             allowNonWritableRegions = prefs.getBoolean("allowNonWritableRegions", d.allowNonWritableRegions),
-            allowSystemProcesses = false,
+            allowSystemProcesses = prefs.getBoolean("allowSystemProcesses", d.allowSystemProcesses),
             includeReadOnlyRegions = prefs.getBoolean("includeReadOnlyRegions", d.includeReadOnlyRegions),
             includeExecutableRegions = prefs.getBoolean("includeExecutableRegions", d.includeExecutableRegions),
             maxResults = prefs.getInt("maxResults", d.maxResults),
@@ -114,7 +114,9 @@ class SettingsStore(context: Context) {
             .putInt("readTimeoutMs", s.readTimeoutMs)
             .putBoolean("queryFirmware", s.queryFirmware)
             .putBoolean("allowNonLocalHosts", s.allowNonLocalHosts)
+            .putBoolean("editingEnabled", s.editingEnabled)
             .putBoolean("allowNonWritableRegions", s.allowNonWritableRegions)
+            .putBoolean("allowSystemProcesses", s.allowSystemProcesses)
             .putBoolean("includeReadOnlyRegions", s.includeReadOnlyRegions)
             .putBoolean("includeExecutableRegions", s.includeExecutableRegions)
             .putInt("maxResults", s.maxResults)

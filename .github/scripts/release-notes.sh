@@ -12,6 +12,8 @@ BASE="${VERSION_NAME%%-*}"            # 1.0.0
 # Changelog heading for this build: 1.0.0-beta.53 -> 1.0.0-beta, 1.0.0-build.46 -> 1.0.0
 CHAN="$(echo "$VERSION_NAME" | sed -E 's/-build\.[0-9]+$//; s/(-beta)\.[0-9]+$/\1/')"
 BETA=no; case "$VERSION_NAME" in *-beta*) BETA=yes ;; esac
+# Automatic releases (v1.0.1, v1.0.2…) are the public beta build.
+[ "${CHANNEL:-}" = "beta" ] && BETA=yes
 REPO="${GITHUB_REPOSITORY:-Hm589158/ps4-SmartCheat}"
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 
@@ -20,6 +22,8 @@ changes="$(awk -v v="## ${BASE}" -v full="## ${VERSION_NAME}" -v chan="## ${CHAN
   on && /^## / { exit }
   on { print }
 ' "$ROOT/CHANGELOG.md")"
+# No section for this exact version: use the newest section (the current changes).
+[ -n "${changes//[[:space:]]/}" ] || { changes="$(awk '/^## / { n++; if (n == 2) exit; if (n == 1) { next } } n == 1 { print }' "$ROOT/CHANGELOG.md")"; CHAN="$(grep -m1 '^## ' "$ROOT/CHANGELOG.md" | sed 's/^## //')"; }
 [ -n "${changes//[[:space:]]/}" ] || changes="See [CHANGELOG.md](https://github.com/${REPO}/blob/main/CHANGELOG.md)."
 
 if [ "$BETA" = yes ]; then
