@@ -316,7 +316,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Long, Int, Boolean) -> Unit) {
+fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Long, Int, Boolean) -> Unit, onInject: (Long) -> Unit = {}) {
     val vm = appViewModel { CodeViewModel(it) }
     LaunchedEffect(Unit) { vm.init(initialAddress) }
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -402,7 +402,13 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                             Text("${ins.text}   (${Hex.encode(ins.bytes, " ")})", style = mono)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ins.branchTarget?.let { t -> OutlinedButton(onClick = { vm.follow(t) }) { Text("Follow → ${Address.format(t)}") } }
+                                OutlinedButton(onClick = { onInject(ins.address) }, enabled = ins.valid, modifier = Modifier.testTag("codeInject")) { Text("Inject code…") }
                             }
+                            Text(
+                                "Inject code: jump from here to a code cave with your own instructions (the original ones still run). " +
+                                    "Patch below: overwrite the instruction in place.",
+                                style = MaterialTheme.typography.bodySmall, color = dim,
+                            )
                             (ins.ripTarget)?.let { t ->
                                 Text("References ${Address.format(t)} ${vm.relative(t)}", style = MaterialTheme.typography.bodySmall)
                                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

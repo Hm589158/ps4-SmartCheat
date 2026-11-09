@@ -604,6 +604,94 @@ class AppJourneyTest {
         shot("45_session_check")
     }
 
+    /** Scrolls the Inject screen's lazy list to [t] (off-screen items are not composed) and clicks it. */
+    private fun injPress(t: String) {
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag(t))
+        press(t)
+    }
+
+    @Test fun codeCaveInjectionRunsInTheGameIsSavedAndSwitchedFromCheats() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        step("enable code patching")
+        openSettings()
+        waitTag("editingSwitch")
+        tag("editingSwitch").performClick()
+        confirmDialog()
+        waitText("Allow writes to non-writable regions")
+        press("nonWritableSwitch")
+        confirmDialog()
+
+        step("disassemble and open Inject")
+        compose.onNodeWithContentDescription("Code").performClick()
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.SUB_ONE))
+        press("codeGo")
+        waitText("sub eax, 1")
+        press("codeInject")
+        waitText("1 · Hook at")
+        waitText("end of code (page padding)") // caves were searched automatically, the safest one first
+        waitText("//   sub eax, 1") // template lists the instructions the jump moves
+
+        step("build preview")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injSource"))
+        tag("injSource").performTextClearance()
+        tag("injSource").performTextInput("mov eax, 1000")
+        injPress("injBuild")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injPreview"))
+        waitText("off (original code)")
+        waitText("mov eax, 0x3E8")
+        waitText("mov [0x500120], eax") // the moved store still targets the coins
+        shot("51_injection_preview")
+
+        step("inject")
+        injPress("injOn")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 1) == "E9" }
+        waitText("Injection ON")
+        val trace = DemoGame.spendCoin(server)
+        assertEquals(999, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS)) // the cave code really ran
+        assertEquals(true, trace.any { it >= DemoGame.TEXT_START + 0xF000 })
+        shot("52_injection_on")
+
+        step("save to cheats")
+        injPress("injSave")
+        waitTag("cheatName")
+        tag("cheatName").performTextClearance()
+        tag("cheatName").performTextInput("Coins 999")
+        press("saveConfirm")
+        waitTag("injSaved")
+        waitText("Saved injection")
+        val reloaded = com.ps4smartcheat.core.cheat.CheatRepository(java.io.File(compose.activity.filesDir, "cheats.json"))
+        kotlinx.coroutines.runBlocking { reloaded.load() }
+        val stored = reloaded.profiles.value.single().cheats
+        assertEquals(listOf("Coins 999 · cave 1/1", "Coins 999 · jump"), stored.map { it.name })
+        assertEquals(setOf("Coins 999"), stored.map { it.group }.toSet())
+
+        step("remove")
+        injPress("injOff")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 3) == "83 E8 01" }
+        DemoGame.spendCoin(server)
+        assertEquals(998, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+
+        step("switch from Cheats")
+        tab("Cheats")
+        waitText("Coins 999")
+        press("codeSwitches-MOCK00001")
+        waitTag("ghEnable-0")
+        press("ghEnable-0")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 1) == "E9" }
+        DemoGame.spendCoin(server)
+        assertEquals(999, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+        shot("53_injection_library")
+        waitTag("ghDisable-0")
+        press("ghDisable-0")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 3) == "83 E8 01" }
+    }
+
     @Test fun findWhatWritesListsTheInstructionAndDetaches() {
         // Nothing is configured: the app picks its interrupt port and announces it in the attach request.
         connect()

@@ -157,6 +157,28 @@ so whether it is fixed cannot be verified. It is therefore not used.
   `(u64, u8 kind)` list; the code sends the sentinel-terminated stream above, which is what the app reads.**
   The server sweeps linearly with Zydis and skips one byte on undecodable data.
 
+### Memory allocation for code caves — verified in source
+
+Used only by Code injection with "Allocate memory near the hook" (user-confirmed; ps4debug-NG only).
+
+* `CMD_PROC_ALLOC_HINTED = 0xBDAA000E` (`debugger/source/proc.c` `proc_alloc_hinted_handle`): body (16 bytes)
+  `u32 pid; u64 hint; u32 length;`. Reply `CMD_SUCCESS`, `u64 address`. Kernel side
+  (`kdebugger/source/hooks.c` `sys_proc_alloc_hinted_handle`): `vm_map_findspace(map, hint, length)` then
+  `vm_map_insert(…, addr, addr + round_up(length, 0x4000), VM_PROT_ALL, VM_PROT_ALL)` — the first free range at or
+  above the hint, readable/writable/executable.
+* `CMD_PROC_FREE = 0xBDAA000C` (`proc_free_handle`): body (16 bytes) `u32 pid; u64 address; u32 length;`. Reply
+  `CMD_SUCCESS` (kernel `proc_deallocate`).
+* `CMD_PROC_ALLOC = 0xBDAA000B` (`proc_alloc_handle`, body `u32 pid; u32 length;`) — verified, not used (it has no
+  hint, so the memory could be out of `jmp rel32` range).
+* **The replies do not report failure.** The handlers ignore `sys_proc_cmd`'s return value and always send
+  `CMD_SUCCESS`; on failure `CMD_PROC_ALLOC_HINTED` returns the hint itself (input value of `args.address`) and
+  `CMD_PROC_ALLOC` an uninitialised value. The client therefore reads the map (`CMD_PROC_MAPS`) before and after:
+  the range must have been unmapped before and be mapped `rwx` after, page-aligned; otherwise the allocation is
+  reported as failed and nothing is written. After `CMD_PROC_FREE` the map must no longer contain the range.
+* Limits applied by the client: at most 16 KiB per allocation; never allocated, freed or re-used automatically;
+  allocations are listed per session and freed only on request after the jump into them was removed.
+* Whether the PS4 kernel lets a game execute such a mapping has **not been tested on hardware**.
+
 ### Disassembly `CMD_PROC_DISASM_REGION = 0xBDAA0020` — verified, not used
 
 Returns 32-byte metadata records per instruction (`addr, rip_rel_target, mem_disp, length, kind, mem_base_reg,
@@ -218,7 +240,7 @@ writes, single-stepping and FS/GS writes are not used.
 
 ## Not implemented on purpose
 
-Kernel read/write (`0xBDCC…`), RPC/ELF loading, memory allocation/protection changes, breakpoints, register
+Kernel read/write (`0xBDCC…`), RPC/ELF loading, protection changes (`CMD_PROC_PROTECT`), breakpoints, register
 writes, single-stepping, server-side AOB scans (`0xBDAA0501/0502`; pattern search runs on the phone), console
 reboot, Turbo snapshot (Phase B) scans.
 

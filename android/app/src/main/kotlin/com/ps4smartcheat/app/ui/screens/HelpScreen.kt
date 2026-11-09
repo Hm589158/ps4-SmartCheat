@@ -60,6 +60,7 @@ private val sections = listOf(
             "Tap the instruction to change, type new instructions (e.g. nop, or mov eax, 999) → Preview. The PS4 assembles them at that address (ps4debug-NG). Whole instructions are replaced and padded with NOPs; the preview shows ON and OFF bytes and warnings.",
             "Enable editing and \"Allow writes to non-writable regions\" in Settings, then ON (1) writes the new code and OFF (0) restores the original — each confirmed and verified.",
             "Save… stores the patch (with an optional group) in the cheat library: Cheats → ON/OFF switches, and GoldHEN export, so GoldHEN can switch it from its menu without the phone.",
+            "Longer code: tap the instruction → Inject code…. A jump leads to a code cave (unused padding in the game, found automatically, or memory allocated near it for this session) with your code, the overwritten instructions (moved and re-encoded) and a jump back. Build preview, then Inject (ON) / Remove (OFF); the cave is written before the jump and the jump removed first. Caves in the game can be saved to Cheats and exported to GoldHEN as one mod.",
         ),
     ),
     HelpSection(

@@ -43,9 +43,26 @@ enum class PatchState(val label: String) {
 
 data class ModCheck(val mod: GhImportMod, val addresses: List<Long>, val states: List<PatchState>) {
     val state: PatchState? get() = states.distinct().singleOrNull()
-    /** Enabling is allowed only when every patch is OFF; disabling only when every patch is ON. */
-    val canEnable: Boolean get() = mod.applicable && states.isNotEmpty() && states.all { it == PatchState.OFF }
-    val canDisable: Boolean get() = mod.applicable && states.isNotEmpty() && states.all { it == PatchState.ON }
+    private val known: Boolean get() = mod.applicable && states.isNotEmpty() && states.all { it == PatchState.OFF || it == PatchState.ON }
+    /**
+     * Enabling is allowed when every patch is OFF or already ON (an interrupted toggle) and at least one is OFF;
+     * disabling likewise. A patch in any other state (MISMATCH, UNMAPPED) blocks both.
+     */
+    val canEnable: Boolean get() = known && states.any { it == PatchState.OFF }
+    val canDisable: Boolean get() = known && states.any { it == PatchState.ON }
+    /** True when only some patches are ON (left by an interrupted toggle). */
+    val partial: Boolean get() = known && states.distinct().size == 2
+
+    /**
+     * Indices of the patches to write, in write order: ON in file order, OFF in reverse. Patches already in the
+     * target state are skipped. The reverse order matters for code-cave injections (cave chunks first, jump last):
+     * switching OFF removes the jump before the cave code.
+     */
+    fun writeOrder(enable: Boolean): List<Int> {
+        val want = if (enable) PatchState.OFF else PatchState.ON
+        val idx = states.indices.filter { states[it] == want }
+        return if (enable) idx else idx.asReversed()
+    }
 }
 
 /**

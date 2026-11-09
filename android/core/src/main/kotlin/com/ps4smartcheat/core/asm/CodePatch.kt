@@ -88,19 +88,22 @@ object CodePatchPlanner {
         }
         replaced.filter { it.flow != Flow.NEXT }.forEach { warnings += "Overwrites a control-flow instruction: ${it.text}." }
         if (covered > newBytes.size) warnings += "${covered - newBytes.size} byte(s) of NOP padding keep the following instructions intact."
-        val sigTail = X86.decode(window, address).let { all ->
-            // Signature: the replaced instructions plus following ones up to 16 bytes, ending early at a return or
-            // jump (code after it may be unrelated and differ between builds).
-            val list = ArrayList<AsmInstruction>()
-            var n = 0
-            for (i in all) {
-                if (!i.valid || n >= maxOf(16, covered)) break
-                list += i; n += i.length
-                if (n >= covered && (i.flow == Flow.RETURN || i.flow == Flow.JUMP)) break
-            }
-            list
+        return CodePatch(address, off, on, source?.trim(), replaced, result, warnings, signatureOf(window, address, covered))
+    }
+
+    /**
+     * AOB signature of the code at [address]: the [covered] bytes plus following instructions up to 16 bytes, ending
+     * early at a return or jump (code after it may be unrelated and differ between builds); constants wildcarded.
+     */
+    fun signatureOf(window: ByteArray, address: Long, covered: Int): String {
+        val list = ArrayList<AsmInstruction>()
+        var n = 0
+        for (i in X86.decode(window, address)) {
+            if (!i.valid || n >= maxOf(16, covered)) break
+            list += i; n += i.length
+            if (n >= covered && (i.flow == Flow.RETURN || i.flow == Flow.JUMP)) break
         }
-        return CodePatch(address, off, on, source?.trim(), replaced, result, warnings, X86.signature(sigTail))
+        return X86.signature(list)
     }
 
     /** Parses hex such as `90 90` or `0x9090` into bytes; throws [CodePatchException] for bad input. */

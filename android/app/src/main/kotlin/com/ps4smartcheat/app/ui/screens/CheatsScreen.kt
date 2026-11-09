@@ -241,7 +241,12 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
                     _error.value = "\"${f.mods[index].name}\" is ${check.states.joinToString { it.label }} — nothing written."
                     return@launch
                 }
-                val plans = check.mod.patches.mapIndexed { i, p -> c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.on else p.off) }
+                // ON in file order, OFF in reverse (an injection's jump goes last ON and first OFF); patches already in
+                // the target state (an interrupted toggle) are skipped.
+                val plans = check.writeOrder(enable).map { i ->
+                    val p = check.mod.patches[i]
+                    c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.on else p.off)
+                }
                 _ghToggle.value = GhToggle(index, enable, plans)
             } catch (e: EditDeniedException) {
                 _error.value = e.message
@@ -595,6 +600,7 @@ private fun GoldHenCard(
                     val status = when {
                         !m.applicable -> "not applicable: " + m.problems.joinToString("; ")
                         ck == null -> "${m.patches.size} patch(es) — not checked"
+                        ck.partial -> "${m.patches.size} patch(es) — partly on (${ck.states.count { it == com.ps4smartcheat.core.cheat.PatchState.ON }} of ${m.patches.size}, interrupted): Enable completes it, Disable undoes it"
                         else -> "${m.patches.size} patch(es) — " + (ck.state?.label ?: ck.states.joinToString { it.label })
                     }
                     Text(status, style = MaterialTheme.typography.bodySmall, color = if (m.applicable) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.tertiary)

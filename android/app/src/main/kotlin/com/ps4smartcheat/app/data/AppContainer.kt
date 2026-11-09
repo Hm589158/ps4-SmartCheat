@@ -242,6 +242,7 @@ class AppContainer(context: Context) {
         scanner.invalidate(pid, "$name (pid $pid) exited")
         freezer.frozen.value.filter { it.pid == pid }.forEach { freezer.unfreeze(it.id) }
         editor.forgetProcess(pid)
+        _injections.value = _injections.value.filterNot { it.pid == pid } // its memory and code are gone
         _selected.value = _selected.value?.takeIf { it.pid == pid }?.copy(exitedReason = "$name (pid $pid) exited") ?: _selected.value
         log.notify("$name (pid $pid) exited — its scan session was closed", EventCategory.PROCESS)
     }
@@ -369,19 +370,77 @@ class AppContainer(context: Context) {
      * Stores [entry] in profile [profileId], or in a new profile (one atomic write), then verifies by reading the
      * library file back. Throws when anything fails; nothing is reported as saved that is not on disk.
      */
-    private suspend fun storeCheat(entry: CheatEntry, profileId: String?, newProfileName: String, gameVersion: String, sel: SelectedProcess): com.ps4smartcheat.core.cheat.CheatProfile {
+    private suspend fun storeCheat(entry: CheatEntry, profileId: String?, newProfileName: String, gameVersion: String, sel: SelectedProcess): com.ps4smartcheat.core.cheat.CheatProfile =
+        storeCheats(listOf(entry), profileId, newProfileName, gameVersion, sel)
+
+    /** [storeCheat] for several entries: all of them are written in one atomic write and verified, or none. */
+    private suspend fun storeCheats(entries: List<CheatEntry>, profileId: String?, newProfileName: String, gameVersion: String, sel: SelectedProcess): com.ps4smartcheat.core.cheat.CheatProfile {
         val profile = if (profileId != null) {
             cheats.profile(profileId) ?: throw IllegalArgumentException("The selected profile no longer exists — pick another one")
-            cheats.upsertCheat(profileId, entry)
+            cheats.upsertCheats(profileId, entries)
             cheats.profile(profileId)!!
         } else {
-            cheats.createProfileWithCheat(newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name, entry)
+            cheats.createProfileWithCheats(newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name, entries)
         }
-        if (!cheats.verifyStored(profile.id, entry.id)) {
-            log.event(EventLevel.ERROR, EventCategory.CHEAT, "cheat not found after saving", "profile" to profile.id, "cheat" to entry.id)
-            throw IllegalStateException("The cheat library was written, but the entry could not be read back from storage.")
+        if (!cheats.verifyStored(profile.id, entries.map { it.id })) {
+            log.event(EventLevel.ERROR, EventCategory.CHEAT, "cheat not found after saving", "profile" to profile.id, "cheats" to entries.size)
+            throw IllegalStateException("The cheat library was written, but the entries could not be read back from storage.")
         }
         return profile
+    }
+
+    // ------------------------------------------------------------ code caves / injection
+
+    /** ps4debug-NG memory allocation for caves (validated against the map; never automatic). */
+    val caveAllocator = com.ps4smartcheat.core.asm.CaveAllocator(client, backend)
+    /** Ordered, verified writes of injections (cave first, jump last; reverse to remove). */
+    val injectionWriter = com.ps4smartcheat.core.asm.InjectionWriter(backend, editor)
+
+    /** An injection planned or written in this session. Session only: never persisted, never re-applied. */
+    data class ActiveInjection(
+        val id: String,
+        val pid: Int,
+        val processName: String,
+        val name: String,
+        val injection: com.ps4smartcheat.core.asm.CodeInjection,
+        /** Memory allocated for its cave (null for a cave in the executable's padding); freed only on request. */
+        val allocation: com.ps4smartcheat.core.asm.CaveAllocation?,
+        val state: com.ps4smartcheat.core.asm.InjectionState?,
+    )
+
+    private val _injections = MutableStateFlow<List<ActiveInjection>>(emptyList())
+    /** Injections of this session (newest last) so they can be checked, switched off and freed later. */
+    val injections: StateFlow<List<ActiveInjection>> = _injections.asStateFlow()
+
+    fun putInjection(a: ActiveInjection) {
+        _injections.value = _injections.value.filterNot { it.id == a.id } + a
+    }
+
+    fun removeInjection(id: String) {
+        _injections.value = _injections.value.filterNot { it.id == id }
+    }
+
+    /**
+     * Saves an injection whose cave is in the game executable as one group (cave chunks, then the jump), verified
+     * by reading the library back. Allocated caves are refused (their address changes every run).
+     */
+    suspend fun saveInjection(
+        inj: com.ps4smartcheat.core.asm.CodeInjection, name: String, group: String?,
+        profileId: String?, newProfileName: String, gameVersion: String,
+    ): String {
+        val sel = _selected.value ?: throw IllegalArgumentException("Select a process first")
+        require(name.isNotBlank()) { "Enter a cheat name" }
+        val regions = try {
+            backend.getMemoryRegions(sel.pid).also { updateRegions(it) }
+        } catch (e: BackendException) {
+            sel.regions
+        }
+        val entries = com.ps4smartcheat.core.cheat.InjectionEntries.build(inj, name, group, regions) { cheats.newId() }
+            .map { it.copy(discoveredPid = sel.pid) }
+        val profile = storeCheats(entries, profileId, newProfileName, gameVersion, sel)
+        val ref = entries.last().module!!
+        log.event(EventLevel.INFO, EventCategory.CHEAT, "code injection saved", "profile" to profile.name, "hook" to "${ref.name}+0x${java.lang.Long.toHexString(ref.offset)}", "caveBytes" to inj.caveOn.size)
+        return "Saved injection \"${name.trim()}\" in \"${profile.name}\" (${entries.size} parts, group \"${entries.last().group}\")"
     }
 
     /** Disconnect requested by the user (button or notification): no automatic reconnect afterwards. */

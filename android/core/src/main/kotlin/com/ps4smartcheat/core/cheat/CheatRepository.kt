@@ -83,26 +83,48 @@ class CheatRepository(
      * Creates a profile that already contains [entry], in one atomic write: a failure leaves neither an empty profile
      * nor a half-saved cheat behind.
      */
-    suspend fun createProfileWithCheat(name: String, titleId: String?, gameVersion: String?, processName: String, entry: CheatEntry): CheatProfile {
+    suspend fun createProfileWithCheat(name: String, titleId: String?, gameVersion: String?, processName: String, entry: CheatEntry): CheatProfile =
+        createProfileWithCheats(name, titleId, gameVersion, processName, listOf(entry))
+
+    /** Like [createProfileWithCheat] for several entries (e.g. the parts of a code-cave injection), in one write. */
+    suspend fun createProfileWithCheats(name: String, titleId: String?, gameVersion: String?, processName: String, entries: List<CheatEntry>): CheatProfile {
         require(name.isNotBlank()) { "Enter a profile name" }
+        require(entries.isNotEmpty()) { "Nothing to save" }
         val now = clock()
         val p = CheatProfile(
             id = idGenerator(), name = name.trim(), titleId = titleId?.trim()?.ifBlank { null },
             gameVersion = gameVersion?.trim()?.ifBlank { null }, processName = processName,
-            createdAtMillis = now, updatedAtMillis = now, cheats = listOf(entry),
+            createdAtMillis = now, updatedAtMillis = now, cheats = entries,
         )
         mutate { it + p }
         return p
+    }
+
+    /** Adds or replaces [entries] in profile [profileId] in one atomic write (all or nothing), keeping their order. */
+    suspend fun upsertCheats(profileId: String, entries: List<CheatEntry>) = mutate { list ->
+        require(list.any { it.id == profileId }) { "Unknown profile $profileId" }
+        list.map { p ->
+            if (p.id != profileId) p
+            else {
+                val byId = entries.associateBy { it.id }
+                val kept = p.cheats.map { byId[it.id] ?: it }
+                p.copy(cheats = kept + entries.filter { e -> p.cheats.none { it.id == e.id } }, updatedAtMillis = clock())
+            }
+        }
     }
 
     /**
      * Reads the library file back from storage and checks that [cheatId] is in profile [profileId] and that the whole
      * file still passes validation (a file that fails it would be set aside at the next start). Does not change state.
      */
-    suspend fun verifyStored(profileId: String, cheatId: String): Boolean = mutex.withLock {
+    suspend fun verifyStored(profileId: String, cheatId: String): Boolean = verifyStored(profileId, listOf(cheatId))
+
+    /** [verifyStored] for several entries: true only when all of them are in the stored file. */
+    suspend fun verifyStored(profileId: String, cheatIds: List<String>): Boolean = mutex.withLock {
         withContext(io) {
             try {
-                CheatJson.decode(file.readText()).profiles.firstOrNull { it.id == profileId }?.cheats?.any { it.id == cheatId } == true
+                val stored = CheatJson.decode(file.readText()).profiles.firstOrNull { it.id == profileId }?.cheats?.map { it.id }?.toSet()
+                stored != null && cheatIds.all { it in stored }
             } catch (e: Exception) {
                 false
             }

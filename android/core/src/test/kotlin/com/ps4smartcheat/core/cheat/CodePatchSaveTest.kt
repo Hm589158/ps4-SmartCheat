@@ -101,6 +101,22 @@ class CodePatchSaveTest {
         assertEquals(setOf("Existing", "New"), repo().also { it.load() }.profiles.value.map { it.name }.toSet())
     }
 
+    @Test fun severalEntriesAreSavedAllOrNothing() = runBlocking {
+        val r = repo()
+        r.load()
+        val p = r.createProfileWithCheats("Demo", null, null, "eboot.bin", listOf(patchEntry("a"), patchEntry("b")))
+        assertTrue(r.verifyStored(p.id, listOf("a", "b")))
+        assertFalse(r.verifyStored(p.id, listOf("a", "zz")))
+        val before = file.readText()
+        // One invalid part: nothing of the group is written.
+        try { r.upsertCheats(p.id, listOf(patchEntry("c"), patchEntry("d").copy(originalBytes = "83"))); fail() } catch (_: CheatFormatException) {}
+        assertEquals(before, file.readText())
+        // Replacing keeps the position, new ones are appended in order.
+        r.upsertCheats(p.id, listOf(patchEntry("b").copy(name = "B"), patchEntry("c"), patchEntry("d")))
+        assertEquals(listOf("a" to "No coin loss", "b" to "B", "c" to "No coin loss", "d" to "No coin loss"),
+            repo().also { it.load() }.profiles.value.single().cheats.map { it.id to it.name })
+    }
+
     // ------------------------------------------------------------------ real PS4 naming ("executable")
 
     private val realMap = listOf(

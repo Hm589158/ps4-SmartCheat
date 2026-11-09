@@ -4,6 +4,29 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
+### Code caves / Assembly injection (new — verified against the simulated server only)
+- **Code → tap an instruction → Inject code…** opens the injection builder: a jump at the instruction leads to a
+  code cave holding your code, the overwritten instructions and a jump back. Where the original instructions run is
+  selectable: after your code (default), before it, or not at all.
+- The overwritten instructions are whole instructions (5 bytes for `jmp rel32`, 14 for an absolute jump when the cave
+  is more than 2 GiB away) and are **moved and re-encoded for the cave** with iced's BlockEncoder: RIP-relative
+  operands keep pointing at the same data, short branches become near ones. What cannot be moved is refused. Code that
+  jumps back into the overwritten bytes is detected and the hook refused.
+- **Caves in the game executable** (saveable): unused padding found by a bounded read-only search — page padding after
+  the code first, then `int3` padding between functions, then long zero runs (marked as less certain); caves used by
+  saved injections are skipped. **Allocated caves** (this session only): 16 KiB near the hook through ps4debug-NG's
+  `CMD_PROC_ALLOC_HINTED`, after confirmation; since the server reports success even when the kernel call failed, the
+  map is checked before and after, and an address that was in use or is not `rwx` is refused. Freed only on request,
+  after the jump was removed.
+- Writes go through the memory editor (read-only by default, confirmation, verified by a fresh read) in a safe order:
+  the cave first (in ≤ 64-byte parts), the jump last; removal restores the jump first. A failed enable undoes what it
+  wrote. Preview shows the hook bytes OFF/ON, the cave listing (new / moved / jump back) and warnings.
+- **Save to Cheats**: one group (cave parts + jump), toggled from Cheats in that order (OFF in reverse) and exported as
+  one GoldHEN mod. Library switches now also finish or undo a mod left half-applied by an interrupted toggle.
+- Injections are listed for the session (check, OFF, free memory) and never re-applied automatically.
+- Simulated server: `CMD_PROC_ALLOC`/`FREE`/`ALLOC_HINTED` with ps4debug-NG's failure behaviour, and the demo game
+  now runs its routine with a small x86 interpreter, so tests see patched and injected code really execute.
+
 ### Register values in the disassembler
 - Opening a watchpoint hit (live or saved) in the disassembler shows its registers: a "Registers at the hit" card
   with the registers the selected instruction uses and their values (sub-registers such as `eax`, `ax`, `al`, `ah`,

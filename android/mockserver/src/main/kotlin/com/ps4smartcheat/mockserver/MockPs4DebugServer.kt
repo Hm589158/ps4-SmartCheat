@@ -102,6 +102,18 @@ class MockPs4DebugServer(
 
         /** ps4debug-NG code commands: assemble (0xBDAA0024) and FIND_XREFS_TO (0xBDAA0022). */
         @Volatile var codeTools = true
+        /** CMD_PROC_ALLOC / CMD_PROC_FREE / CMD_PROC_ALLOC_HINTED (answered only when [brand] is set). */
+        @Volatile var alloc = true
+        /**
+         * The kernel allocation fails. Like ps4debug-NG, the reply is still CMD_SUCCESS: CMD_PROC_ALLOC returns an
+         * uninitialised address (here 0) and CMD_PROC_ALLOC_HINTED returns the hint itself (proc.c ignores the result).
+         */
+        @Volatile var allocFails = false
+        /** Protection of allocated memory (the kernel uses VM_PROT_ALL). */
+        @Volatile var allocProt = 7
+        /** CMD_PROC_FREE replies CMD_SUCCESS but leaves the memory mapped. */
+        @Volatile var freeIgnored = false
+
         /** Debugger commands (0xBDBBxxxx). */
         @Volatile var debugger = true
         /** Port the mock connects back to when the attach request names none (the real default is 755). */
@@ -402,6 +414,8 @@ class MockPs4DebugServer(
                 turboCancelPid = pid
                 status(out, CMD_SUCCESS); return true
             }
+            CMD_PROC_ALLOC, CMD_PROC_ALLOC_HINTED, CMD_PROC_FREE ->
+                return if (faults.brand != null && faults.alloc) allocCommand(cmd, body, out) else unknownProc(out)
             CMD_PROC_ASSEMBLE -> return if (faults.brand != null && faults.codeTools) code.assemble(body, out) else unknownProc(out)
             CMD_PROC_FIND_XREFS_TO -> return if (faults.brand != null && faults.codeTools) code.xrefsTo(body, out) else unknownProc(out)
             in 0xBDBB0001.toInt()..0xBDBB0013.toInt(), CMD_DEBUG_PROCESS_STOP ->
@@ -415,6 +429,51 @@ class MockPs4DebugServer(
     private val ng = NgScan()
     private val code = CodeEmulation()
     private val dbg = DebugEmulation()
+
+    /** Number of CMD_PROC_ALLOC(_HINTED) requests (for tests). */
+    val allocRequests = java.util.concurrent.atomic.AtomicInteger()
+
+    /** ps4debug-NG proc.c proc_alloc_handle / proc_free_handle / proc_alloc_hinted_handle; kdebugger hooks.c. */
+    private fun allocCommand(cmd: Int, body: ByteBuffer, out: OutputStream): Boolean {
+        val page = 0x4000L
+        when (cmd) {
+            CMD_PROC_FREE -> {
+                if (body.capacity() < 16) { status(out, CMD_DATA_NULL); return true }
+                val pid = body.int; val addr = body.long; val len = body.int.toLong() and 0xFFFFFFFFL
+                val p = process(pid)
+                if (p != null && !faults.freeIgnored) synchronized(lock) {
+                    val end = addr + ((len + page - 1) and (page - 1).inv())
+                    p.regions.removeIf { it.start >= addr && it.end <= end }
+                }
+                status(out, CMD_SUCCESS)
+                return true
+            }
+            else -> {
+                allocRequests.incrementAndGet()
+                val hinted = cmd == CMD_PROC_ALLOC_HINTED
+                if (body.capacity() < if (hinted) 16 else 8) { status(out, CMD_DATA_NULL); return true }
+                val pid = body.int
+                val hint = if (hinted) body.long else 0L
+                val len = body.int.toLong() and 0xFFFFFFFFL
+                val p = process(pid)
+                var result = hint // what the server sends when the kernel call fails
+                if (p != null && !faults.allocFails && len in 1..0x10000000L) synchronized(lock) {
+                    val size = (len + page - 1) and (page - 1).inv()
+                    var a = (maxOf(hint, 0x10000L) + page - 1) and (page - 1).inv()
+                    for (r in p.regions.sortedBy { it.start }) {
+                        if (r.end <= a) continue
+                        if (r.start >= a + size) break
+                        a = (r.end + page - 1) and (page - 1).inv()
+                    }
+                    p.region("", a, size.toInt(), faults.allocProt)
+                    result = a
+                }
+                status(out, CMD_SUCCESS)
+                out.write(le(8).putLong(result).array())
+                return true
+            }
+        }
+    }
 
     /** proc_handle's default branch: CMD_ERROR and the handler returns 1 (connection closed). */
     private fun unknownProc(out: OutputStream): Boolean { status(out, CMD_ERROR); return false }
@@ -939,6 +998,9 @@ class MockPs4DebugServer(
         const val TURBO_END = 0xBDAACC14.toInt()
         const val TURBO_CANCEL = 0xBDAACC17.toInt()
         const val AUTH_MAGIC = 0xBB40E64D.toInt()
+        const val CMD_PROC_ALLOC = 0xBDAA000B.toInt()
+        const val CMD_PROC_FREE = 0xBDAA000C.toInt()
+        const val CMD_PROC_ALLOC_HINTED = 0xBDAA000E.toInt()
         const val CMD_PROC_FIND_XREFS_TO = 0xBDAA0022.toInt()
         const val CMD_PROC_ASSEMBLE = 0xBDAA0024.toInt()
         const val CMD_DEBUG_ATTACH = 0xBDBB0001.toInt()

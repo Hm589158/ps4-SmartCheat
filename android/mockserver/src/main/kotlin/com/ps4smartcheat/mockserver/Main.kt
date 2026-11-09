@@ -50,6 +50,10 @@ object DemoGame {
     const val HEAP_START = 0x0000_0020_0000_0000L
     const val COINS_ADDRESS = DATA_START + 0x120
     const val HEAP_SIZE = 4 * 1024 * 1024
+    /** int3 bytes right after the spend routine (0x402010..0x40205F). */
+    const val INT3_PADDING = 0x50
+    /** Zero bytes at the end of the code mapping (0x40F000..0x40FFFF). */
+    const val TAIL_PADDING = 0x1000
 
     fun install(server: MockPs4DebugServer, seed: Int = 1234): MockPs4DebugServer.Process {
         server.addProcess(MockPs4DebugServer.Process(1, "SceSysCore.elf"))
@@ -64,6 +68,9 @@ object DemoGame {
         Random(seed + 1).nextBytes(heap.data)
         server.pokeInt32(PID, COINS_ADDRESS, 5000)
         server.poke(PID, SPEND_ROUTINE, SPEND_CODE)
+        // Compiler-style padding: int3 between functions and zeros after the end of the code (code caves).
+        server.poke(PID, SPEND_ROUTINE + SPEND_CODE.size, ByteArray(INT3_PADDING) { 0xCC.toByte() })
+        server.poke(PID, TEXT_START + 0x10000 - TAIL_PADDING, ByteArray(TAIL_PADDING))
         return p
     }
 
@@ -87,16 +94,10 @@ object DemoGame {
     )
 
     /**
-     * Runs the routine against the mock's memory: the load and the store are reported to the debugger emulation
-     * (they trip watchpoints), and the `sub` only happens if its bytes are still `83 E8 01` — so a NOP patch made by
-     * the app really stops the coins from decreasing.
+     * Runs the routine from the mock's memory with [MiniCpu]: the load and the store are reported to the debugger
+     * emulation (they trip watchpoints), and whatever code the app patched or injected really runs — a NOP patch
+     * stops the coins from decreasing, an injected `jmp` into a code cave executes the cave.
+     * @return the executed instruction addresses
      */
-    fun spendCoin(server: MockPs4DebugServer, pid: Int = PID) {
-        server.gameAccess(pid, LOAD_COINS, 6, COINS_ADDRESS, 4, write = false)
-        var eax = server.peekInt32(pid, COINS_ADDRESS)
-        val sub = server.peek(pid, SUB_ONE, 3)
-        if (sub.contentEquals(byteArrayOf(0x83.toByte(), 0xE8.toByte(), 0x01))) eax -= 1
-        server.pokeInt32(pid, COINS_ADDRESS, eax)
-        server.gameAccess(pid, STORE_COINS, 6, COINS_ADDRESS, 4, write = true, registers = mapOf("rax" to (eax.toLong() and 0xFFFFFFFFL)))
-    }
+    fun spendCoin(server: MockPs4DebugServer, pid: Int = PID): List<Long> = MiniCpu(server, pid).also { it.run(SPEND_ROUTINE) }.trace
 }
