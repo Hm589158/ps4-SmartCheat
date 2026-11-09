@@ -691,6 +691,15 @@ class AppJourneyTest {
         compose.onAllNodesWithText("Open")[0].performSemanticsAction(SemanticsActions.OnClick)
         waitTag("codeAddress")
         waitText("mov [0x500120], eax")
+
+        step("register values in the disassembler")
+        waitTag("regCard")
+        waitTag("regUse-eax")
+        waitText("0x00001387") // eax when the store hit the watchpoint (coins 4999)
+        waitTag("regOperand")
+        waitText("now in memory: 4998") // the routine ran once more after the capture
+        waitTag("regRow-" + java.lang.Long.toHexString(DemoGame.STORE_COINS))
+        shot("51_registers_in_disassembler")
     }
 
     @Test fun payloadBelowCapability12DisablesWatchpoints() {

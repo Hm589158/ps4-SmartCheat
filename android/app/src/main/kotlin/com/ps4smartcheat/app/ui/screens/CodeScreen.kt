@@ -154,6 +154,38 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
         _state.value = null
         _references.value = null
         _source.value = if (_assembly.value) ins.text else Hex.encode(ins.bytes, " ")
+        readOperand(ins)
+    }
+
+    /** Register values of the watchpoint hit this view was opened from (null = none). */
+    val registers = c.registerContext
+    fun clearRegisters() { c.registerContext.value = null; _operand.value = null }
+
+    private val _operand = MutableStateFlow<String?>(null)
+    /** "now in memory: …" for the selected instruction's memory operand, at the address computed from the registers. */
+    val operand = _operand.asStateFlow()
+
+    /** Reads the memory operand's current value (mapped memory only; read-only). */
+    private fun readOperand(ins: AsmInstruction) {
+        _operand.value = null
+        val snap = c.registerContext.value ?: return
+        val sel = c.selectedProcess.value ?: return
+        val ea = snap.effectiveAddress(ins) ?: return
+        val size = ins.memory?.size?.takeIf { it in setOf(1, 2, 4, 8) } ?: return
+        if (sel.regions.regionFor(ea, size)?.isReadable != true) { _operand.value = "not mapped now"; return }
+        viewModelScope.launch {
+            _operand.value = try {
+                val b = c.backend.readMemory(sel.pid, ea, size)
+                var v = 0L
+                for (i in size - 1 downTo 0) v = (v shl 8) or (b[i].toLong() and 0xFF)
+                val hex = "0x" + java.lang.Long.toHexString(v).uppercase()
+                val float = when (size) { 4 -> " · float ${java.lang.Float.intBitsToFloat(v.toInt())}"; 8 -> " · double ${java.lang.Double.longBitsToDouble(v)}"; else -> "" }
+                val dec = when (size) { 1 -> v.toByte().toString(); 2 -> v.toShort().toString(); 4 -> v.toInt().toString(); else -> v.toString() }
+                "$dec ($hex)$float"
+            } catch (e: BackendException) {
+                "could not read: ${e.message}"
+            }
+        }
     }
 
     fun relative(a: Long): String = c.selectedProcess.value?.regions?.let { ModuleResolver.refFor(a, it) }
@@ -305,6 +337,9 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
     val error by vm.error.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val saveState by vm.saveState.collectAsStateWithLifecycle()
+    val regs by vm.registers.collectAsStateWithLifecycle()
+    val operand by vm.operand.collectAsStateWithLifecycle()
+    var allRegs by remember { mutableStateOf(false) }
     val connected = connection is ConnectionState.Connected
     val ng = (connection as? ConnectionState.Connected)?.info?.capabilities?.isNg == true
     var saving by remember { mutableStateOf(false) }
@@ -328,6 +363,39 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                 note?.let { WarningBanner(it) }
                 message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall, modifier = Modifier.testTag("codeMessage")) }
                 ErrorText(error)
+                regs?.let { snap ->
+                    SectionCard("Registers at the hit") {
+                        Column(Modifier.testTag("regCard"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                com.ps4smartcheat.app.ui.components.StatusPill(if (snap.fromSaved) "saved" else "live hit", com.ps4smartcheat.app.ui.components.Tone.GOOD)
+                                com.ps4smartcheat.app.ui.components.StatusPill("thread ${snap.thread}")
+                                androidx.compose.material3.TextButton(onClick = vm::clearRegisters) { Text("Clear") }
+                            }
+                            Text(
+                                "Values right after ${Address.format(snap.instructionAddress)} ran (a data watchpoint stops after the access). " +
+                                    "Other instructions may have seen different values.",
+                                style = MaterialTheme.typography.bodySmall, color = dim,
+                            )
+                            row?.let { ins ->
+                                val uses = snap.usedBy(ins)
+                                Text(if (uses.isEmpty()) "${ins.text}: no general-purpose registers" else "Used by ${ins.text}:", style = MaterialTheme.typography.bodyMedium)
+                                uses.forEach { u ->
+                                    Text(regLine(u.name, u.value, u.bits), style = mono, modifier = Modifier.testTag("regUse-${u.name}"))
+                                }
+                                snap.effectiveAddress(ins)?.let { ea ->
+                                    Text("operand → ${Address.format(ea)} ${vm.relative(ea)}", style = mono, modifier = Modifier.testTag("regEa"))
+                                    operand?.let { Text("   now in memory: $it", style = mono, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.testTag("regOperand")) }
+                                }
+                            }
+                            androidx.compose.material3.TextButton(onClick = { allRegs = !allRegs }) { Text(if (allRegs) "Hide all registers" else "All registers") }
+                            if (allRegs) {
+                                com.ps4smartcheat.core.debug.Registers.DISPLAY.mapNotNull { n -> snap.values[n]?.let { n to it } }.chunked(2).forEach { pair ->
+                                    Text(pair.joinToString("   ") { (n, v) -> n.padEnd(6) + "%016X".format(v) }, style = mono)
+                                }
+                            }
+                        }
+                    }
+                }
                 row?.let { ins ->
                     SectionCard("Patch at ${Address.format(ins.address)}") {
                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -422,6 +490,17 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                     Text(ins.text, style = mono)
                 }
                 Text("   ${vm.relative(ins.address)}  ${Hex.encode(ins.bytes, " ")}", style = mono, color = dim)
+                regs?.let { snap ->
+                    val uses = snap.usedBy(ins)
+                    if (uses.isNotEmpty() || ins.address == snap.instructionAddress) {
+                        Text(
+                            (if (ins.address == snap.instructionAddress) "   ◆ hit  " else "   ") +
+                                uses.joinToString("  ") { u -> "${u.name}=" + hexOf(u.value, u.bits) },
+                            style = mono, color = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.testTag("regRow-" + java.lang.Long.toHexString(ins.address)),
+                        )
+                    }
+                }
             }
         }
     }
@@ -441,3 +520,9 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
         )
     }
 }
+
+/** Register value padded to its width, e.g. `0x00001387`; decimal added for 32 bits and below. */
+private fun hexOf(v: Long, bits: Int): String = "0x" + java.lang.Long.toHexString(v).uppercase().padStart(bits / 4, '0')
+
+private fun regLine(name: String, v: Long, bits: Int): String =
+    name.padEnd(5) + " = " + hexOf(v, bits) + if (bits <= 32) "  (" + (if (bits == 32) v.toInt().toString() else v.toString()) + ")" else ""

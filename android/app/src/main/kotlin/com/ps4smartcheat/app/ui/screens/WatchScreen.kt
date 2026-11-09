@@ -220,6 +220,19 @@ class WatchViewModel(private val c: AppContainer) : ViewModel() {
     /** Where to open a saved instruction now: through its module offset when the game was restarted. */
     fun resolve(a: com.ps4smartcheat.core.debug.SavedAccess): Long = a.resolve(c.selectedProcess.value?.regions.orEmpty())
 
+    /** Opens a live hit in the disassembler with its registers. Returns the address to show. */
+    fun openRecord(r: AccessRecord): Long {
+        c.registerContext.value = com.ps4smartcheat.core.debug.RegisterSnapshot.of(r)
+        return r.instructionAddress
+    }
+
+    /** Opens a saved hit in the disassembler with the registers stored with it. Returns the address to show. */
+    fun openSaved(a: com.ps4smartcheat.core.debug.SavedAccess, s: SavedWatchSession): Long {
+        val at = resolve(a)
+        c.registerContext.value = com.ps4smartcheat.core.debug.RegisterSnapshot.of(a, at, s.finishedAtMillis)
+        return at
+    }
+
     override fun onCleared() {
         // Leaving the screen ends monitoring; the coroutine's cleanup (release) still runs to completion.
         stopRequested = true
@@ -314,7 +327,7 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                             Text(pair.joinToString("   ") { (n, v) -> n.padEnd(6) + "%016X".format(v) }, style = mono)
                         }
                     }
-                    OutlinedButton(onClick = { onOpenCode(r.instructionAddress) }) { Text("Open in disassembler") }
+                    OutlinedButton(onClick = { onOpenCode(vm.openRecord(r)) }, modifier = Modifier.testTag("openRecord")) { Text("Open in disassembler") }
                 }
             }
         }
@@ -368,7 +381,7 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                                         Text("${a.count}×  " + (a.module?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: Address.format(a.instructionAddress)), style = mono)
                                         Text(a.text ?: "(not decoded)", style = mono, color = dim)
                                     }
-                                    TextButton(onClick = { onOpenCode(vm.resolve(a)) }, modifier = Modifier.testTag("openSaved-${s.id}")) { Text("Open") }
+                                    TextButton(onClick = { onOpenCode(vm.openSaved(a, s)) }, modifier = Modifier.testTag("openSaved-${s.id}")) { Text("Open") }
                                 }
                             }
                             TextButton(onClick = { vm.deleteSaved(s.id) }) { Text("Delete", color = MaterialTheme.colorScheme.error) }

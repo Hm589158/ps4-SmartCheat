@@ -47,6 +47,12 @@ class AsmInstruction(
     internal val constantRanges: List<IntRange> = emptyList(),
     /** The bytes ended in the middle of an instruction (not an invalid opcode). */
     val truncated: Boolean = false,
+    /**
+     * General-purpose registers the instruction reads or writes (explicit operands, address registers and implicit
+     * ones such as `rsp` for `push`), lower case as displayed (`eax`, `rbx`, `r8d`…). Segment registers and `rip` are
+     * left out.
+     */
+    val registers: List<String> = emptyList(),
 ) {
     val length: Int get() = bytes.size
     val end: Long get() = address + bytes.size
@@ -118,7 +124,22 @@ object X86 {
         }
         val branch = if (ins.isCallNear || ins.isJmpNear || ins.isJmpShort || ins.isJccShortOrNear || ins.isJmpShortOrNear) ins.nearBranchTarget else null
         val rip = if (ins.isIPRelativeMemoryOperand) ins.ipRelativeMemoryAddress() else null
-        val memory = infoFactory.getInfo(ins).usedMemory.firstOrNull { it.base != Register.NONE || it.index != Register.NONE || it.displacement != 0L }
+        val instrInfo = infoFactory.getInfo(ins)
+        // Registers as written in the operands first (iced reports a written eax as rax), then implicit ones
+        // (rsp for push/call, rcx for loop…) whose 64-bit register is not covered yet.
+        val explicit = ArrayList<String>()
+        for (i in 0 until ins.opCount) {
+            if (ins.getOpKind(i) == com.github.icedland.iced.x86.OpKind.REGISTER) regName(fmt, ins.getOpRegister(i))?.let { explicit += it }
+        }
+        if (hasExplicitMemoryOperand(ins)) {
+            regName(fmt, ins.memoryBase)?.let { explicit += it }
+            regName(fmt, ins.memoryIndex)?.let { explicit += it }
+        }
+        fun gpr(n: String) = n !in NOT_GPR && registerValue(n, PROBE) != null
+        val usedRegs = (explicit + instrInfo.usedRegisters.mapNotNull { u -> regName(fmt, u.register) })
+            .filter { gpr(it) }
+            .distinctBy { fullRegister(it) }
+        val memory = instrInfo.usedMemory.firstOrNull { it.base != Register.NONE || it.index != Register.NONE || it.displacement != 0L }
             ?.takeIf { hasExplicitMemoryOperand(ins) }
             ?.let { m ->
                 val access = m.access
@@ -142,8 +163,19 @@ object X86 {
         }
         return AsmInstruction(
             address, slice.copyOf(ins.length), text, text.substringBefore(' '), flow, branch, rip, memory, valid = true,
-            constantRanges = consts,
+            constantRanges = consts, registers = usedRegs,
         )
+    }
+
+    private val NOT_GPR = setOf("rip", "eip", "ip", "cs", "ds", "es", "ss", "fs", "gs")
+    private val GPR64 = listOf("rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "rsp") + (8..15).map { "r$it" }
+    /** Every general-purpose register present: used to tell general-purpose names from vector/mask/segment ones. */
+    private val PROBE: Map<String, Long> = GPR64.associateWith { 0L }
+
+    /** The 64-bit register a name belongs to (`eax`/`ax`/`al`/`ah` → `rax`, `r8d` → `r8`); unknown names unchanged. */
+    fun fullRegister(name: String): String {
+        val n = name.lowercase()
+        return GPR64.firstOrNull { full -> registerValue(n, mapOf(full to -1L)) != null } ?: n
     }
 
     private fun hasExplicitMemoryOperand(ins: Instruction): Boolean =
@@ -206,19 +238,49 @@ object X86 {
     fun effectiveAddress(ins: AsmInstruction, registers: Map<String, Long>): Long? {
         ins.ripTarget?.let { return it }
         val m = ins.memory ?: return null
-        fun value(name: String?): Long? = if (name == null) 0L else registers[name] ?: registers[full64(name)]?.let { truncate(name, it) }
+        fun value(name: String?): Long? = if (name == null) 0L else registerValue(name, registers)
         val base = value(m.base) ?: return null
         val index = value(m.index) ?: return null
         return base + index * maxOf(1, m.scale) + m.displacement
     }
 
-    private fun full64(name: String): String = when {
-        name.matches(Regex("e[a-ds][xip]|e[sb]p|e[sd]i")) -> "r" + name.substring(1)
-        name.matches(Regex("r\\d+d")) -> name.dropLast(1)
-        else -> name
+    /**
+     * Value of register [name] (any width: `rax`, `eax`, `ax`, `al`, `ah`, `r8d`, `r8w`, `r8b`…) from a snapshot of the
+     * 64-bit registers ([values], lower-case `rax`…`r15`, `rip`, `rsp`, `rflags`). Null when not in the snapshot
+     * (e.g. vector registers).
+     */
+    fun registerValue(name: String, values: Map<String, Long>): Long? {
+        val n = name.lowercase()
+        values[n]?.let { return it }
+        legacy32.matchEntire(n)?.let { return values["r" + it.groupValues[1]]?.and(0xFFFFFFFFL) }
+        numbered.matchEntire(n)?.let { m ->
+            val v = values["r" + m.groupValues[1]] ?: return null
+            return when (m.groupValues[2]) { "d" -> v and 0xFFFFFFFFL; "w" -> v and 0xFFFFL; "b", "l" -> v and 0xFFL; else -> v }
+        }
+        legacy16.matchEntire(n)?.let { return values["r$n"]?.and(0xFFFFL) }
+        low8abcd.matchEntire(n)?.let { return values["r" + it.groupValues[1] + "x"]?.and(0xFFL) }
+        high8.matchEntire(n)?.let { return values["r" + it.groupValues[1] + "x"]?.let { v -> (v ushr 8) and 0xFFL } }
+        low8other.matchEntire(n)?.let { return values["r" + it.groupValues[1]]?.and(0xFFL) }
+        return null
     }
 
-    private fun truncate(name: String, v: Long): Long = if (name.startsWith("e") || name.endsWith("d")) v and 0xFFFFFFFFL else v
+    /** Width in bits of a general-purpose register name (64 for unknown names). */
+    fun registerBits(name: String): Int {
+        val n = name.lowercase()
+        return when {
+            legacy32.matches(n) || (numbered.matchEntire(n)?.groupValues?.get(2) == "d") -> 32
+            legacy16.matches(n) || (numbered.matchEntire(n)?.groupValues?.get(2) == "w") -> 16
+            low8abcd.matches(n) || high8.matches(n) || low8other.matches(n) || (numbered.matchEntire(n)?.groupValues?.get(2) in setOf("b", "l")) -> 8
+            else -> 64
+        }
+    }
+
+    private val legacy32 = Regex("^e(ax|bx|cx|dx|si|di|bp|sp)$")
+    private val legacy16 = Regex("^(ax|bx|cx|dx|si|di|bp|sp)$")
+    private val numbered = Regex("^r(\\d{1,2})([dwbl]?)$")
+    private val low8abcd = Regex("^([abcd])l$")
+    private val high8 = Regex("^([abcd])h$")
+    private val low8other = Regex("^(si|di|bp|sp)l$")
 
     /**
      * An AOB signature for the code at [address]: the instruction bytes with 32-bit displacements and immediates

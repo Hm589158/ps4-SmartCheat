@@ -4,6 +4,15 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
+### Register values in the disassembler
+- Opening a watchpoint hit (live or saved) in the disassembler shows its registers: a "Registers at the hit" card
+  with the registers the selected instruction uses and their values (sub-registers such as `eax`, `ax`, `al`, `ah`,
+  `r8d` are taken from their 64-bit register and masked), the operand address computed from them and the value in
+  memory there now; every instruction row shows the values of the registers it uses, the hit is marked ◆; all
+  registers on demand. Values are those right after the hit instruction ran (watchpoints stop after the access).
+- The decoder lists each instruction's registers as written (explicit operands, address registers, implicit ones
+  such as `rsp` for `push`).
+
 ### Saving Assembly patches (fix)
 - **Root cause:** on a real PS4 the game's code and data are mapped under the name `executable` (as PS4CheaterNeo
   reads them), not `eboot.bin`. The app only recognised file-style names (`.bin`, `.sprx`…), so code in the game

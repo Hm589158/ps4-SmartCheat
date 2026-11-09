@@ -324,6 +324,11 @@ class AppContainer(context: Context) {
     val pointerCandidates = com.ps4smartcheat.core.pointer.PointerCandidateStore(File(context.filesDir, "pointer-candidates"))
     /** Results of finished "What writes / accesses" sessions, openable later without the debugger. */
     val watchResults = com.ps4smartcheat.core.debug.WatchResultStore(File(context.filesDir, "watch-results.json"))
+    /**
+     * Register values of the watchpoint hit last opened in the disassembler (live or saved); the Code screen shows
+     * them next to the instructions. Session only.
+     */
+    val registerContext = MutableStateFlow<com.ps4smartcheat.core.debug.RegisterSnapshot?>(null)
 
     /**
      * Saves a code patch (ON/OFF) of the selected process. Patches are stored relative to the game executable so

@@ -79,6 +79,13 @@ Finished sessions (newest 30, all games) are saved with each instruction's addre
 watchpoint screen and open in the disassembler later — no debugger session needed, also after a game restart
 (the module offset is resolved again).
 
+## Registers in the disassembler
+
+"Open in disassembler" (a live hit) or "Open" (a saved one) passes the hit's registers to the Code screen: the
+"Registers at the hit" card lists the registers the selected instruction uses with their values, the operand
+address computed from them and the value in memory there now; each row shows its registers' values and the hit is
+marked ◆. The values are those right after the hit instruction ran; other instructions may have seen different ones.
+
 ## Reading the results
 
 * Each row is one instruction with how often it hit, the thread name and — when the instruction's operands could be

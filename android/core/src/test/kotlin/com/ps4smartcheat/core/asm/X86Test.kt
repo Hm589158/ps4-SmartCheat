@@ -78,4 +78,47 @@ class X86Test {
     @Test fun normalisesSource() {
         assertEquals("nop\nmov eax, 5\nret", CodeTools.normalise("  nop ; mov   eax,  5 // comment\n\n# only comment\nret"))
     }
+
+    @Test fun instructionsListTheRegistersTheyUse() {
+        val store = X86.decodeOne(b(0x89, 0x43, 0x1C), 0, 0x1000) // mov [rbx+0x1C], eax
+        assertEquals(setOf("rbx", "eax"), store.registers.toSet())
+        val push = X86.decodeOne(b(0x53), 0, 0x1000) // push rbx (implicit rsp)
+        assertTrue(push.registers.containsAll(listOf("rbx", "rsp")))
+        val rip = X86.decode(DemoGame.SPEND_CODE, DemoGame.SPEND_ROUTINE).first() // mov eax, [rip+…]
+        assertEquals(listOf("eax"), rip.registers)
+    }
+
+    @Test fun subRegisterValuesComeFromTheir64BitRegister() {
+        val v = mapOf("rax" to 0x1122334455667788L, "rsi" to 0x0A0B0C0D0E0F1011L, "r8" to -1L, "rsp" to 0x7EFF0010L)
+        assertEquals(0x55667788L, X86.registerValue("eax", v))
+        assertEquals(0x7788L, X86.registerValue("ax", v))
+        assertEquals(0x88L, X86.registerValue("al", v))
+        assertEquals(0x77L, X86.registerValue("ah", v))
+        assertEquals(0x11L, X86.registerValue("sil", v))
+        assertEquals(0xFFFFFFFFL, X86.registerValue("r8d", v))
+        assertEquals(0xFFFFL, X86.registerValue("r8w", v))
+        assertEquals(0xFFL, X86.registerValue("r8b", v))
+        assertEquals(-1L, X86.registerValue("r8", v))
+        assertEquals(0x7EFF0010L, X86.registerValue("rsp", v))
+        assertNull(X86.registerValue("xmm0", v))
+        assertNull(X86.registerValue("rbx", v))
+        assertEquals(listOf(64, 32, 16, 8, 8, 32), listOf("rax", "eax", "ax", "al", "ah", "r9d").map { X86.registerBits(it) })
+    }
+
+    @Test fun snapshotShowsTheValuesAnInstructionUses() {
+        val store = X86.decodeOne(b(0x89, 0x43, 0x1C), 0, 0x1000)
+        val snap = com.ps4smartcheat.core.debug.RegisterSnapshot(mapOf("rax" to 0x1387L, "rbx" to 0x2000001000L), 0x1000, "GameMain", 0, fromSaved = false)
+        val uses = snap.usedBy(store).associateBy { it.name }
+        assertEquals(0x2000001000L, uses.getValue("rbx").value)
+        assertEquals(0x1387L, uses.getValue("eax").value)
+        assertEquals(32, uses.getValue("eax").bits)
+        assertEquals(0x200000101CL, snap.effectiveAddress(store))
+        // From a saved session (hex strings).
+        val saved = com.ps4smartcheat.core.debug.SavedAccess(0x1000, null, "89431C", "mov [rbx+0x1C], eax", 1, "GameMain",
+            mapOf("rax" to "0x1387", "rbx" to "0x2000001000", "r15" to "0xFFFFFFFFFFFFFFFF"))
+        val fromSaved = com.ps4smartcheat.core.debug.RegisterSnapshot.of(saved, 0x1000, 5)
+        assertEquals(0x200000101CL, fromSaved.effectiveAddress(store))
+        assertEquals(-1L, fromSaved.values["r15"])
+        assertTrue(fromSaved.fromSaved)
+    }
 }
