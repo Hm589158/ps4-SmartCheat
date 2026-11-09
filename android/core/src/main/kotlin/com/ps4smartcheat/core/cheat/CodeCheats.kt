@@ -20,7 +20,7 @@ object CodeCheats {
                 val module = c.module
                 when {
                     module == null -> { problems += "${c.name}: absolute address — save patches from the game executable"; null }
-                    module.name != profile.processName -> { problems += "${c.name}: in ${module.name}, not ${profile.processName}"; null }
+                    !ModuleResolver.sameModule(module.name, profile.processName) -> { problems += "${c.name}: in ${module.name}, not ${profile.processName}"; null }
                     c.originalBytes.isNullOrBlank() -> { problems += "${c.name}: original bytes unknown"; null }
                     else -> GhPatch(module.offset, Hex.decode(c.patchBytes!!), Hex.decode(c.originalBytes))
                 }

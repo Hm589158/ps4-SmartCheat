@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
@@ -369,6 +370,10 @@ internal fun SaveCheatForm(
     onCancel: () -> Unit,
     onSave: (name: String, profileId: String?, newProfileName: String, version: String) -> Unit,
     initialName: String = "",
+    /** A save is running: inputs stay as typed, Save/Cancel are disabled and a spinner is shown. */
+    busy: Boolean = false,
+    /** Why the last save failed (shown inside the form, which stays open with the input kept). */
+    error: String? = null,
 ) {
     var name by remember { mutableStateOf(initialName) }
     var target by remember { mutableStateOf<CheatProfile?>(profiles.firstOrNull()) }
@@ -386,9 +391,11 @@ internal fun SaveCheatForm(
             OutlinedTextField(version, { version = it }, label = { Text("Game version (e.g. 01.00)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Text("ps4debug does not report the game version; enter it from the game's info screen.", style = MaterialTheme.typography.bodySmall)
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Button(onClick = { onSave(name, target?.id, newName, version) }, modifier = Modifier.testTag("saveConfirm")) { Text("Save") }
-            TextButton(onClick = onCancel) { Text("Cancel") }
+        if (!error.isNullOrBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("saveError"))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Button(onClick = { onSave(name, target?.id, newName, version) }, enabled = !busy, modifier = Modifier.testTag("saveConfirm")) { Text(if (busy) "Saving…" else "Save") }
+            TextButton(onClick = onCancel, enabled = !busy) { Text("Cancel") }
+            if (busy) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp).testTag("saveBusy"), strokeWidth = 2.dp)
         }
     }
 }

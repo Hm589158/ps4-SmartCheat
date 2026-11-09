@@ -33,7 +33,9 @@ class CheatRepository(
     @Volatile var loadError: String? = null
         private set
 
-    suspend fun load() = mutex.withLock {
+    suspend fun load() = mutex.withLock { loadLocked() }
+
+    private suspend fun loadLocked() {
         withContext(io) {
             loaded = true
             if (!file.exists()) { _profiles.value = emptyList(); return@withContext }
@@ -77,6 +79,36 @@ class CheatRepository(
 
     suspend fun deleteProfile(id: String) = mutate { list -> list.filterNot { it.id == id } }
 
+    /**
+     * Creates a profile that already contains [entry], in one atomic write: a failure leaves neither an empty profile
+     * nor a half-saved cheat behind.
+     */
+    suspend fun createProfileWithCheat(name: String, titleId: String?, gameVersion: String?, processName: String, entry: CheatEntry): CheatProfile {
+        require(name.isNotBlank()) { "Enter a profile name" }
+        val now = clock()
+        val p = CheatProfile(
+            id = idGenerator(), name = name.trim(), titleId = titleId?.trim()?.ifBlank { null },
+            gameVersion = gameVersion?.trim()?.ifBlank { null }, processName = processName,
+            createdAtMillis = now, updatedAtMillis = now, cheats = listOf(entry),
+        )
+        mutate { it + p }
+        return p
+    }
+
+    /**
+     * Reads the library file back from storage and checks that [cheatId] is in profile [profileId] and that the whole
+     * file still passes validation (a file that fails it would be set aside at the next start). Does not change state.
+     */
+    suspend fun verifyStored(profileId: String, cheatId: String): Boolean = mutex.withLock {
+        withContext(io) {
+            try {
+                CheatJson.decode(file.readText()).profiles.firstOrNull { it.id == profileId }?.cheats?.any { it.id == cheatId } == true
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+
     suspend fun upsertCheat(profileId: String, entry: CheatEntry) = mutate { list ->
         require(list.any { it.id == profileId }) { "Unknown profile $profileId" }
         list.map { p ->
@@ -117,9 +149,15 @@ class CheatRepository(
         return ImportResult(added, replaced, emptyList())
     }
 
+    /**
+     * Applies [transform] and persists the result before publishing it: if writing fails, the in-memory state is
+     * unchanged and the exception reaches the caller. A save right after app start waits for the stored library to
+     * be loaded first instead of overwriting it.
+     */
     private suspend fun mutate(transform: (List<CheatProfile>) -> List<CheatProfile>) = mutex.withLock {
-        check(loaded) { "CheatRepository.load() must be called first" }
+        if (!loaded) loadLocked()
         val next = transform(_profiles.value)
+        CheatJson.validate(CheatLibraryFile(profiles = next)) // never write a file that would fail to load
         withContext(io) { persist(next) }
         _profiles.value = next
     }

@@ -94,11 +94,40 @@ data class CheatLibraryFile(
 object ModuleResolver {
     private val moduleSuffixes = listOf(".bin", ".elf", ".self", ".sprx", ".prx")
 
-    fun isModuleName(name: String): Boolean = moduleSuffixes.any { name.endsWith(it, ignoreCase = true) }
+    /**
+     * Name of the game's main executable in a real PS4 memory map: the kernel names its mappings "executable", not
+     * after the file (PS4CheaterNeo `SectionTool`/`Main.cs` look the code up as section "executable", prot 5). Libraries
+     * keep their file names (`libkernel.sprx`…).
+     */
+    const val MAIN_EXECUTABLE = "executable"
 
-    /** Lowest start address of all regions named [name], or null. */
-    fun baseOf(name: String, regions: List<MemoryRegion>): Long? =
-        regions.filter { it.name == name && it.isValid }.minOfOrNull { it.start }
+    fun isModuleName(name: String): Boolean = name == MAIN_EXECUTABLE || moduleSuffixes.any { name.endsWith(it, ignoreCase = true) }
+
+    /** A process/executable file name (eboot.bin, default.elf…) that the PS4 maps as [MAIN_EXECUTABLE]. */
+    fun isExecutableFileName(name: String): Boolean =
+        name.endsWith(".bin", ignoreCase = true) || name.endsWith(".elf", ignoreCase = true) || name.endsWith(".self", ignoreCase = true)
+
+    /**
+     * True when [moduleName] (from a saved reference) and [processName] (e.g. "eboot.bin") denote the same main
+     * executable: the same name, or "executable" in the map vs. the executable's file name.
+     */
+    fun sameModule(moduleName: String, processName: String): Boolean =
+        moduleName == processName ||
+            (moduleName == MAIN_EXECUTABLE && isExecutableFileName(processName)) ||
+            (processName == MAIN_EXECUTABLE && isExecutableFileName(moduleName))
+
+    /**
+     * Lowest start address of all regions named [name], or null. A main-executable file name (eboot.bin) falls back
+     * to regions named "executable" and vice versa, so references saved under either naming resolve on both.
+     */
+    fun baseOf(name: String, regions: List<MemoryRegion>): Long? {
+        fun lowest(n: String) = regions.filter { it.name == n && it.isValid }.minOfOrNull { it.start }
+        return lowest(name) ?: when {
+            isExecutableFileName(name) -> lowest(MAIN_EXECUTABLE)
+            name == MAIN_EXECUTABLE -> regions.filter { it.isValid && isExecutableFileName(it.name) }.minOfOrNull { it.start }
+            else -> null
+        }
+    }
 
     /** Computes a module-relative reference when [address] lies inside a module image. */
     fun refFor(address: Long, regions: List<MemoryRegion>): ModuleRef? {

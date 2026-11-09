@@ -288,13 +288,12 @@ class AppContainer(context: Context) {
         require(name.isNotBlank()) { "Enter a cheat name" }
         val value = replacement?.trim()?.ifBlank { null }
         if (value != null) ValueCodec.parse(type, value) // throws ValueParseException (an IllegalArgumentException)
-        val pid = profileId ?: cheats.createProfile(newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name).id
         val module = ModuleResolver.refFor(address, sel.regions)
         val entry = CheatEntry(
             id = cheats.newId(), name = name.trim(), type = type, address = address, module = module, replacementValue = value,
             originalBytes = original?.takeIf { it.size == type.size }?.let { Hex.encode(it) }, discoveredPid = sel.pid,
         )
-        cheats.upsertCheat(pid, entry)
+        storeCheat(entry, profileId, newProfileName, gameVersion, sel)
         log.event(EventLevel.INFO, EventCategory.CHEAT, "cheat saved", "address" to Address.format(address), "module" to (module?.name ?: "absolute"))
         return "Saved \"${entry.name}\"" + if (module == null) " (absolute address — may not survive a game restart)" else " (${module.name} relative)"
     }
@@ -328,7 +327,11 @@ class AppContainer(context: Context) {
 
     /**
      * Saves a code patch (ON/OFF) of the selected process. Patches are stored relative to the game executable so
-     * they can be toggled after restarts and exported to GoldHEN; absolute addresses are refused.
+     * they can be toggled after restarts and exported to GoldHEN; code outside a module image is refused.
+     *
+     * Success is only reported after the library file was written **and read back** with the patch in it; any
+     * failure throws (IllegalArgumentException for input/target problems, IllegalStateException / IOException /
+     * CheatFormatException for storage) and leaves the library unchanged.
      */
     suspend fun saveCodePatch(
         patch: com.ps4smartcheat.core.asm.CodePatch, name: String, group: String?,
@@ -336,17 +339,44 @@ class AppContainer(context: Context) {
     ): String {
         val sel = _selected.value ?: throw IllegalArgumentException("Select a process first")
         require(name.isNotBlank()) { "Enter a cheat name" }
-        val module = ModuleResolver.refFor(patch.address, sel.regions)
-            ?: throw IllegalArgumentException("The patch is not inside a module image; only executable-relative patches can be saved")
-        val pid = profileId ?: cheats.createProfile(newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name).id
+        // The map from selection time can be stale (modules load later): read it now when possible.
+        val regions = try {
+            backend.getMemoryRegions(sel.pid).also { updateRegions(it) }
+        } catch (e: BackendException) {
+            sel.regions
+        }
+        val module = ModuleResolver.refFor(patch.address, regions)
+            ?: throw IllegalArgumentException(
+                "${Address.format(patch.address)} is in " + (regions.firstOrNull { it.contains(patch.address) }?.name?.ifBlank { null }?.let { "\"$it\"" } ?: "unnamed memory") +
+                    ", not in the game executable or a library, so it cannot be saved as a reusable patch.",
+            )
         val entry = CheatEntry(
             id = cheats.newId(), name = name.trim(), type = ValueType.INT8, address = patch.address, module = module,
             originalBytes = Hex.encode(patch.off), discoveredPid = sel.pid, patchBytes = Hex.encode(patch.on),
             assembly = patch.source, group = group?.trim()?.ifEmpty { null }, signature = patch.signature,
         )
-        cheats.upsertCheat(pid, entry)
-        log.event(EventLevel.INFO, EventCategory.CHEAT, "code patch saved", "offset" to "${module.name}+0x${java.lang.Long.toHexString(module.offset)}", "bytes" to patch.length)
-        return "Saved code patch \"${entry.name}\" (${module.name}+0x${java.lang.Long.toHexString(module.offset).uppercase()})"
+        val profile = storeCheat(entry, profileId, newProfileName, gameVersion, sel)
+        log.event(EventLevel.INFO, EventCategory.CHEAT, "code patch saved", "profile" to profile.name, "offset" to "${module.name}+0x${java.lang.Long.toHexString(module.offset)}", "bytes" to patch.length)
+        return "Saved code patch \"${entry.name}\" in \"${profile.name}\" (${module.name}+0x${java.lang.Long.toHexString(module.offset).uppercase()})"
+    }
+
+    /**
+     * Stores [entry] in profile [profileId], or in a new profile (one atomic write), then verifies by reading the
+     * library file back. Throws when anything fails; nothing is reported as saved that is not on disk.
+     */
+    private suspend fun storeCheat(entry: CheatEntry, profileId: String?, newProfileName: String, gameVersion: String, sel: SelectedProcess): com.ps4smartcheat.core.cheat.CheatProfile {
+        val profile = if (profileId != null) {
+            cheats.profile(profileId) ?: throw IllegalArgumentException("The selected profile no longer exists — pick another one")
+            cheats.upsertCheat(profileId, entry)
+            cheats.profile(profileId)!!
+        } else {
+            cheats.createProfileWithCheat(newProfileName.ifBlank { sel.titleId ?: sel.name }, sel.titleId, gameVersion, sel.name, entry)
+        }
+        if (!cheats.verifyStored(profile.id, entry.id)) {
+            log.event(EventLevel.ERROR, EventCategory.CHEAT, "cheat not found after saving", "profile" to profile.id, "cheat" to entry.id)
+            throw IllegalStateException("The cheat library was written, but the entry could not be read back from storage.")
+        }
+        return profile
     }
 
     /** Disconnect requested by the user (button or notification): no automatic reconnect afterwards. */

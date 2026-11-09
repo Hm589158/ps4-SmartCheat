@@ -58,6 +58,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
+/** Progress of saving a code patch to the cheat library. */
+sealed interface SaveState {
+    data object Idle : SaveState
+    data object Saving : SaveState
+    data class Saved(val message: String) : SaveState
+    data class Failed(val error: String) : SaveState
+}
+
 /**
  * Disassembly view and Assembly ON/OFF patch builder. Instructions are decoded on the phone from memory read with
  * CMD_PROC_READ; new code is assembled by ps4debug-NG's Keystone at the exact address. ON writes the new
@@ -220,15 +228,33 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    private val _saveState = MutableStateFlow<SaveState>(SaveState.Idle)
+    /** State of "Save…": the form closes only on [SaveState.Saved]. */
+    val saveState = _saveState.asStateFlow()
+
+    /** Called when the save form is opened again: forget the last result. */
+    fun resetSave() { if (_saveState.value !is SaveState.Saving) _saveState.value = SaveState.Idle }
+
+    /**
+     * Saves the previewed patch to the cheat library. Ignored while a save is running (no double saves). The result
+     * is [SaveState.Saved] only after the library file was written and read back with the patch in it.
+     */
     fun save(name: String, group: String, profileId: String?, newProfileName: String, version: String) {
-        val p = _preview.value ?: return
+        if (_saveState.value is SaveState.Saving) return
+        val p = _preview.value ?: run { _saveState.value = SaveState.Failed("Build a preview first (Preview button)."); return }
+        _saveState.value = SaveState.Saving
         viewModelScope.launch {
-            try {
-                _message.value = c.saveCodePatch(p, name, group, profileId, newProfileName, version)
-                _error.value = null
+            _saveState.value = try {
+                SaveState.Saved(c.saveCodePatch(p, name, group, profileId, newProfileName, version))
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
             } catch (e: IllegalArgumentException) {
-                _error.value = e.message
+                SaveState.Failed(e.message ?: "Invalid input")
+            } catch (e: Exception) {
+                c.log.error("Saving code patch failed: ${e.message}", notifyUser = false)
+                SaveState.Failed("Could not save: ${e.message ?: e.javaClass.simpleName}")
             }
+            (_saveState.value as? SaveState.Saved)?.let { c.log.notify(it.message) }
         }
     }
 
@@ -278,9 +304,12 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
     val note by vm.note.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val profiles by vm.profiles.collectAsStateWithLifecycle()
+    val saveState by vm.saveState.collectAsStateWithLifecycle()
     val connected = connection is ConnectionState.Connected
     val ng = (connection as? ConnectionState.Connected)?.info?.capabilities?.isNg == true
     var saving by remember { mutableStateOf(false) }
+    // Close the save form only after the library confirmed the save.
+    LaunchedEffect(saveState) { if (saveState is SaveState.Saved) saving = false }
     var group by remember { mutableStateOf("") }
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     val sel = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f)
@@ -345,7 +374,10 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Button(onClick = { vm.prepare(true) }, enabled = state == PatchState.OFF && settings.editingEnabled, modifier = Modifier.testTag("codeOn")) { Text("ON (1)") }
                                 OutlinedButton(onClick = { vm.prepare(false) }, enabled = state == PatchState.ON && settings.editingEnabled, modifier = Modifier.testTag("codeOff")) { Text("OFF (0)") }
-                                OutlinedButton(onClick = { saving = !saving }, modifier = Modifier.testTag("codeSave")) { Text("Save…") }
+                                OutlinedButton(
+                                    onClick = { if (!saving) vm.resetSave(); saving = !saving },
+                                    enabled = saveState !is SaveState.Saving, modifier = Modifier.testTag("codeSave"),
+                                ) { Text("Save…") }
                             }
                             if (saving) {
                                 OutlinedTextField(group, { group = it }, label = { Text("Group (optional — toggled and exported together)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
@@ -354,10 +386,16 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                                     profiles = profiles.filter { s != null && it.processName == s.name && (it.titleId.isNullOrBlank() || it.titleId == s.titleId) },
                                     defaultProfileName = s?.titleId ?: s?.name ?: "",
                                     onCancel = { saving = false },
-                                    onSave = { n, pid, newName, version -> vm.save(n, group, pid, newName, version); saving = false },
+                                    // The form stays open (with the input) until the save is confirmed; see LaunchedEffect below.
+                                    onSave = { n, pid, newName, version -> vm.save(n, group, pid, newName, version) },
                                     initialName = p.source?.lineSequence()?.firstOrNull()?.let { "Patch: $it" } ?: "Code patch",
+                                    busy = saveState is SaveState.Saving,
+                                    error = (saveState as? SaveState.Failed)?.error,
                                 )
                                 Text("Saved patches can be switched ON/OFF in Cheats and exported as a GoldHEN cheat file.", style = MaterialTheme.typography.bodySmall, color = dim)
+                            }
+                            (saveState as? SaveState.Saved)?.let {
+                                Text("✓ ${it.message}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.secondary, modifier = Modifier.testTag("codeSaved"))
                             }
                         }
                     }

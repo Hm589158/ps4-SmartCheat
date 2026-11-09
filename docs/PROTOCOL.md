@@ -51,6 +51,11 @@ Notes (verified in source):
 * ps4debug-NG's `PROTOCOL.md` describes map entries as 64 bytes with `prot` as `u64`; the actual source
   (`proc.h`, `struct proc_vm_map_entry`) and the PS4CheaterNeo client use **58 bytes** with `u16 prot`. The source wins.
 * `prot` uses FreeBSD `VM_PROT_*`: READ=1, WRITE=2, EXECUTE=4.
+* Map entry **names** come from the PS4 kernel: the game's own code and data are named `executable`, libraries by
+  file name (`libkernel.sprx`…), the rest anonymous. Source: PS4CheaterNeo (`SectionTool.cs` sorts `executable` first,
+  `Main.cs` looks the code up as section `"executable"` with prot 5, `PointerFinder.cs` uses it as the base). The app
+  treats `executable` as the process's main module (`eboot.bin` in profiles and GoldHEN files); module offsets are
+  relative to its lowest mapping. The simulated server names it `eboot.bin`; both are accepted.
 * `CMD_PROC_INFO` answers success even for unknown pids (fields from a zeroed struct).
 
 ## Firmware detection

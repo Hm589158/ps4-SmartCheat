@@ -4,6 +4,20 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
+### Saving Assembly patches (fix)
+- **Root cause:** on a real PS4 the game's code and data are mapped under the name `executable` (as PS4CheaterNeo
+  reads them), not `eboot.bin`. The app only recognised file-style names (`.bin`, `.sprx`…), so code in the game
+  was "not inside a module image": saving a patch failed — and the error was shown at the top of the Code screen while
+  the form had already closed, so nothing appeared in Cheats. The simulated server used `eboot.bin`, which hid it.
+- `executable` is now the game's main module everywhere: patches and value cheats are saved executable-relative,
+  GoldHEN export/import and the library ON/OFF switches accept it as `eboot.bin`, references saved under either name
+  resolve on both, and pointer scans treat the executable's data as static.
+- Save flow: the patch and a new profile are written in one atomic step, the library file is read back to confirm
+  the patch is stored before "saved" is reported, entries that would make the library unreadable at the next start
+  are refused, and a save right after app start waits for the stored library instead of overwriting it.
+- The save form stays open until the save is confirmed: errors are shown inside the form with the input kept, Save
+  is disabled with a spinner while saving (no double saves); on success the form closes and Cheats updates by itself.
+
 ### Watchpoints without freezes (new in this build — verified against the simulated server only)
 - **Capture once** (now the default): records the first instruction that writes/accesses the address with all
   registers, then removes the watchpoint and detaches — the game pauses exactly once. "Monitor" keeps the previous

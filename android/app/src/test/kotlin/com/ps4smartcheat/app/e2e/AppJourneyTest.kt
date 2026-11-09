@@ -553,11 +553,31 @@ class AppJourneyTest {
         assertEquals(5000, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
         shot("43_patch_on")
 
-        step("save patch")
+        step("save patch: failure keeps the form and the input")
         press("codeSave")
         waitTag("cheatName")
+        tag("cheatName").performTextClearance()
         press("saveConfirm")
+        waitTag("saveError")
+        waitText("Enter a cheat name")
+        assertEquals(true, exists("cheatName")) // still open, nothing saved
+        assertEquals(0, c().cheats.profiles.value.size)
+
+        step("save patch: success")
+        tag("cheatName").performTextInput("No coin loss")
+        press("saveConfirm")
+        waitTag("codeSaved")
         waitText("Saved code patch")
+        compose.waitUntil(10_000) { !exists("cheatName") } // the form closes only after the save was confirmed
+        val savedProfile = c().cheats.profiles.value.single()
+        assertEquals("No coin loss", savedProfile.cheats.single().name)
+        // Persisted: a fresh repository on the same file (what the next app start reads) finds the patch.
+        val reloaded = com.ps4smartcheat.core.cheat.CheatRepository(java.io.File(compose.activity.filesDir, "cheats.json"))
+        kotlinx.coroutines.runBlocking { reloaded.load() }
+        val stored = reloaded.profiles.value.single().cheats.single()
+        assertEquals("909090", stored.patchBytes)
+        assertEquals("83E801", stored.originalBytes)
+        assertEquals(0x2006L, stored.module!!.offset)
 
         step("switch OFF")
         press("codeOff")
@@ -568,6 +588,7 @@ class AppJourneyTest {
 
         step("library switches")
         tab("Cheats")
+        waitText("No coin loss") // the Cheats list updated by itself
         waitText("code patch")
         press("codeSwitches-MOCK00001")
         waitTag("ghEnable-0")

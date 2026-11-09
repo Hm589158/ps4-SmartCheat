@@ -121,7 +121,7 @@ object SessionValidator {
                 val why = if (state == PatchState.UNMAPPED) "offset not mapped" else "bytes differ (other game version?)"
                 val sig = c.signature?.takeIf { it.isNotBlank() }
                     ?: return ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.INVALID, "$why; no signature saved", address)
-                val code = regions.filter { it.name == module.name && it.isExecutable && it.isReadable }
+                val code = regions.filter { (it.name == module.name || ModuleResolver.sameModule(it.name, module.name)) && it.isExecutable && it.isReadable }
                 val hits = PatternSearch.search(backend, pid, code, BytePattern.hex(sig), maxHits = 3).hits
                 when (hits.size) {
                     0 -> ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.INVALID, "$why; signature not found", address)

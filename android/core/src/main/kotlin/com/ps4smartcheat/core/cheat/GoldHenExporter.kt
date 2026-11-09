@@ -93,7 +93,7 @@ object GoldHenExporter {
 
     private fun memoryFor(c: CheatEntry, processName: String): kotlin.Result<GhMemory> = runCatching {
         val module = c.module ?: error("absolute address (not inside the game executable) — GoldHEN needs an executable offset.")
-        if (module.name != processName) error("address is in module ${module.name}, not $processName.")
+        if (!ModuleResolver.sameModule(module.name, processName)) error("address is in module ${module.name}, not $processName.")
         if (module.offset < 0) error("negative executable offset.")
         val off = c.originalBytes?.uppercase()?.filterNot { it.isWhitespace() }
             ?.takeIf { it.isNotEmpty() } ?: error("original bytes unknown — \"off\" cannot be filled without inventing data.")
