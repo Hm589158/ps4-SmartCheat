@@ -700,8 +700,11 @@ class AppJourneyTest {
         waitText("now in memory: 4998") // the routine ran once more after the capture
         shot("51_registers_in_disassembler")
         val hitRow = "regRow-" + java.lang.Long.toHexString(DemoGame.STORE_COINS)
-        compose.onNodeWithTag("codeList").performScrollToNode(hasTestTag(hitRow))
+        // The row is clickable (its children's tags are merged away): scroll to the row itself, then check the
+        // inline register line in the unmerged tree.
+        compose.onNodeWithTag("codeList").performScrollToNode(hasTestTag("asm_" + java.lang.Long.toHexString(DemoGame.STORE_COINS)))
         waitTag(hitRow)
+        waitText("◆ hit")
     }
 
     @Test fun payloadBelowCapability12DisablesWatchpoints() {
