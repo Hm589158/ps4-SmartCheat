@@ -811,7 +811,7 @@ class AppJourneyTest {
         step("register values in the disassembler")
         waitTag("regCard")
         waitTag("regUse-eax")
-        waitText("0x00001387") // eax when the store hit the watchpoint (coins 4999)
+        waitText("0x00001387 (4999)") // eax when the store hit the watchpoint (coins 4999), hex and decimal
         waitTag("regOperand")
         waitText("now in memory: 4998") // the routine ran once more after the capture
         shot("51_registers_in_disassembler")

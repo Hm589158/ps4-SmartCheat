@@ -42,3 +42,27 @@ data class RegisterSnapshot(
         )
     }
 }
+
+/** Register values as text: hexadecimal padded to the register's width, plus decimal. */
+object RegisterFormat {
+    /** `0x00001387` for 32 bits, `0x0000000000001387` for 64. */
+    fun hex(value: Long, bits: Int): String = "0x" + java.lang.Long.toHexString(mask(value, bits)).uppercase().padStart(bits / 4, '0')
+
+    /** Unsigned decimal of the [bits]-wide value, plus the signed value when the top bit is set (`4294967295 / -1`). */
+    fun decimal(value: Long, bits: Int): String {
+        val v = mask(value, bits)
+        val unsigned = if (bits == 64) java.lang.Long.toUnsignedString(v) else v.toString()
+        val negative = bits in 1..64 && (v ushr (bits - 1)) and 1L == 1L
+        if (!negative) return unsigned
+        val signed = if (bits == 64) v else v - (1L shl bits)
+        return "$unsigned / $signed"
+    }
+
+    /** `0x00001387 (4999)`. */
+    fun both(value: Long, bits: Int): String = hex(value, bits) + " (" + decimal(value, bits) + ")"
+
+    /** `eax   = 0x00001387 (4999)`. */
+    fun line(name: String, value: Long, bits: Int, width: Int = 6): String = name.padEnd(width) + "= " + both(value, bits)
+
+    private fun mask(v: Long, bits: Int): Long = if (bits >= 64) v else v and ((1L shl bits) - 1)
+}

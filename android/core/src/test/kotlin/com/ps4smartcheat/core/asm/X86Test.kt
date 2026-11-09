@@ -132,4 +132,15 @@ class X86Test {
         assertEquals("0x000001000  06  db 0x06\n0x000001001  90  nop", Listing.format(X86.decode(b(0x06, 0x90), 0x1000), Listing.Style.FULL))
         assertEquals("", Listing.format(emptyList(), Listing.Style.CODE))
     }
+
+    @Test fun registerValuesInHexAndDecimal() {
+        val f = com.ps4smartcheat.core.debug.RegisterFormat
+        assertEquals("0x00001387 (4999)", f.both(0x1387, 32))
+        assertEquals("0x0000000000001387 (4999)", f.both(0x1387, 64))
+        assertEquals("0xFFFFFFFF (4294967295 / -1)", f.both(-1, 32))
+        assertEquals("0xFFFFFFFFFFFFFFFF (18446744073709551615 / -1)", f.both(-1, 64))
+        assertEquals("0x88 (136 / -120)", f.both(0x1122334455667788, 8))
+        assertEquals("0x7788 (30600)", f.both(0x1122334455667788, 16))
+        assertEquals("eax   = 0x00001387 (4999)", f.line("eax", 0x1387, 32))
+    }
 }

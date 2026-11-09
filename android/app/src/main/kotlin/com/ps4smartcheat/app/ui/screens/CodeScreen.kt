@@ -412,8 +412,8 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                             }
                             androidx.compose.material3.TextButton(onClick = { allRegs = !allRegs }) { Text(if (allRegs) "Hide all registers" else "All registers") }
                             if (allRegs) {
-                                com.ps4smartcheat.core.debug.Registers.DISPLAY.mapNotNull { n -> snap.values[n]?.let { n to it } }.chunked(2).forEach { pair ->
-                                    Text(pair.joinToString("   ") { (n, v) -> n.padEnd(6) + "%016X".format(v) }, style = mono)
+                                com.ps4smartcheat.core.debug.Registers.DISPLAY.mapNotNull { n -> snap.values[n]?.let { n to it } }.forEach { (n, v) ->
+                                    Text(com.ps4smartcheat.core.debug.RegisterFormat.line(n, v, 64), style = mono, modifier = Modifier.testTag("regAll-$n"))
                                 }
                             }
                             androidx.compose.material3.HorizontalDivider()
@@ -537,7 +537,7 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                     if (uses.isNotEmpty() || ins.address == snap.instructionAddress) {
                         Text(
                             (if (ins.address == snap.instructionAddress) "   ◆ hit  " else "   ") +
-                                uses.joinToString("  ") { u -> "${u.name}=" + hexOf(u.value, u.bits) },
+                                uses.joinToString("  ") { u -> "${u.name}=" + com.ps4smartcheat.core.debug.RegisterFormat.both(u.value, u.bits) },
                             style = mono, color = MaterialTheme.colorScheme.tertiary,
                             modifier = Modifier.testTag("regRow-" + java.lang.Long.toHexString(ins.address)),
                         )
@@ -563,8 +563,5 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
     }
 }
 
-/** Register value padded to its width, e.g. `0x00001387`; decimal added for 32 bits and below. */
-private fun hexOf(v: Long, bits: Int): String = "0x" + java.lang.Long.toHexString(v).uppercase().padStart(bits / 4, '0')
-
-private fun regLine(name: String, v: Long, bits: Int): String =
-    name.padEnd(5) + " = " + hexOf(v, bits) + if (bits <= 32) "  (" + (if (bits == 32) v.toInt().toString() else v.toString()) + ")" else ""
+/** `eax   = 0x00001387 (4999)`: hexadecimal padded to the register's width and decimal (signed too when negative). */
+private fun regLine(name: String, v: Long, bits: Int): String = com.ps4smartcheat.core.debug.RegisterFormat.line(name, v, bits)

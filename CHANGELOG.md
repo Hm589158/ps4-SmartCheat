@@ -4,6 +4,12 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.0-beta
 
+### Register values in hex and decimal
+- Registers are shown as hexadecimal (padded to the register's width) **and** decimal everywhere: the "Registers at
+  the hit" card (`eax = 0x00001387 (4999)`), "All registers" (one per line, 64-bit), the values next to each
+  instruction in the disassembly, and the watch results. Values with the top bit set also show the signed value
+  (`0xFFFFFFFF (4294967295 / -1)`).
+
 ### Call stack at watchpoint hits (new — verified against the simulated server only)
 - "What writes / accesses" now records the **call stack** of the first hit of each instruction: who called the
   function that wrote the value, and who called that. ps4debug has no unwinder, so up to 1 KiB of the thread's stack

@@ -337,8 +337,8 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
                     Text(r.instruction?.text ?: "(instruction before ${Address.format(r.trapRip)} not decoded)", style = mono)
                     Text("thread ${r.threadName}" + (r.effectiveAddress?.let { " · accessed ${Address.format(it)}" } ?: "") + " · tap for registers", style = MaterialTheme.typography.bodySmall, color = dim)
                     if (expanded == r.instructionAddress) {
-                        r.registers.general.chunked(2).forEach { pair ->
-                            Text(pair.joinToString("   ") { (n, v) -> n.padEnd(6) + "%016X".format(v) }, style = mono)
+                        r.registers.general.forEach { (n, v) ->
+                            Text(com.ps4smartcheat.core.debug.RegisterFormat.line(n, v, 64), style = mono)
                         }
                     }
                     OutlinedButton(onClick = { onOpenCode(vm.openRecord(r)) }, modifier = Modifier.testTag("openRecord")) { Text("Open in disassembler") }
