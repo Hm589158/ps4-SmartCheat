@@ -3,13 +3,15 @@ package com.ps4smartcheat.app
 import com.ps4smartcheat.app.data.AppSettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class AppSettingsTest {
-    @Test fun defaultsAreSafe() {
+    @Test fun defaults() {
         val s = AppSettings()
-        assertFalse(s.editingEnabled)
-        assertFalse(s.editPolicy().allowSystemProcesses)
+        // Editing is on by default (owner's choice); each write is still confirmed and verified.
+        assertTrue(s.editingEnabled && s.allowNonWritableRegions && s.editPolicy().allowSystemProcesses)
+        // The network stays local-only by default.
         assertFalse(s.connectOptions().allowNonLocalHosts)
         assertEquals(744, s.connectOptions().port)
     }
