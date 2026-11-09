@@ -2,7 +2,22 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
-## 1.0.0-beta
+## 1.0.1
+
+### Editing on by default
+- Memory editing, writes to non-writable regions (code patches, code caves) and writes to system processes are on by
+  default and kept after restarting the app. Every write is still shown for confirmation and verified by reading it
+  back; writes to system processes keep their extra warning. Turn editing off in Settings for a read-only session.
+
+### Settings reorganised
+- Order by use: Connection (now with game auto-select) → Memory editing → Scanning (Engine / Regions, with limits,
+  refresh and Turbo aliasing under "Advanced settings") → Diagnostics → App. The event log is folded behind
+  "Show log (n)" instead of filling the screen.
+
+### Release numbering
+- Releases are numbered v1.0.1, v1.0.2, … (one step per update) instead of "beta · build N"; when a new release is
+  published the older ones are removed, so the Releases page always shows the current app.
+
 
 ### Register values in hex and decimal
 - Registers are shown as hexadecimal (padded to the register's width) **and** decimal everywhere: the "Registers at

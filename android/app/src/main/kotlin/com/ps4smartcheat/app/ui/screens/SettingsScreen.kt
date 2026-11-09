@@ -78,6 +78,12 @@ private fun NumberField(label: String, value: Int, range: IntRange, onValue: (In
     )
 }
 
+/** Small heading inside a settings card. */
+@Composable
+private fun SubHeading(text: String) {
+    Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary, modifier = Modifier.padding(top = 4.dp))
+}
+
 @Composable
 fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
     val vm = appViewModel { SettingsViewModel(it) }
@@ -92,95 +98,116 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
     var confirmSystem by remember { mutableStateOf(false) }
     var confirmNonLocal by remember { mutableStateOf(false) }
 
+    var showLog by remember { mutableStateOf(false) }
+    var advancedScan by remember { mutableStateOf(false) }
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // 1. Connection — what is needed first.
+        SectionCard("Connection") {
+            NumberField("Connect timeout ms", s.connectTimeoutMs, 500..60_000) { v -> vm.update { it.copy(connectTimeoutMs = v) } }
+            NumberField("Read timeout ms", s.readTimeoutMs, 1_000..120_000) { v -> vm.update { it.copy(readTimeoutMs = v) } }
+            LabeledSwitch(
+                "Auto-select the running game", s.autoSelectGame, { v -> vm.update { it.copy(autoSelectGame = v) } },
+                "After connecting, and when the same game restarts (matched by title ID and path).",
+            )
+            LabeledSwitch("Query firmware version", s.queryFirmware, { v -> vm.update { it.copy(queryFirmware = v) } }, "Uses CMD_FW_VERSION when the payload supports it.")
+            LabeledSwitch(
+                "Allow non-local addresses", s.allowNonLocalHosts,
+                { on -> if (on) confirmNonLocal = true else vm.update { it.copy(allowNonLocalHosts = false) } },
+                "ps4debug has no authentication. Keep this off.",
+            )
+        }
+
+        // 2. Memory editing.
         SectionCard("Memory editing") {
+            Text(
+                "On by default. Every write is still shown for confirmation and checked by reading it back.",
+                style = MaterialTheme.typography.bodySmall, color = dim,
+            )
             LabeledSwitch(
                 "Enable memory editing", s.editingEnabled,
                 { on -> if (on) confirmEditing = true else vm.update { it.copy(editingEnabled = false, allowSystemProcesses = false) } },
-                "On by default. Off = read-only. Every write is still confirmed and checked by reading it back.",
+                "Off = read-only session.",
                 tag = "editingSwitch",
             )
             LabeledSwitch(
                 "Allow writes to non-writable regions", s.allowNonWritableRegions,
                 { on -> if (on) confirmNonWritable = true else vm.update { it.copy(allowNonWritableRegions = false) } },
-                "Code/read-only patches. Each write still needs confirmation.", enabled = s.editingEnabled, tag = "nonWritableSwitch",
+                "Needed for code patches and code caves.", enabled = s.editingEnabled, tag = "nonWritableSwitch",
             )
             LabeledSwitch(
                 "Allow writes to system processes", s.allowSystemProcesses,
                 { on -> if (on) confirmSystem = true else vm.update { it.copy(allowSystemProcesses = false) } },
-                "Dangerous: can crash the console. Writes to system processes show an extra warning.", enabled = s.editingEnabled,
+                "Can crash the console; such writes show an extra warning.", enabled = s.editingEnabled,
             )
             var freeze by remember { mutableStateOf(vm.freezeInterval.toInt()) }
             NumberField("Freeze interval ms", freeze, 50..10_000) { freeze = it; vm.setFreezeInterval(it.toLong()) }
         }
-        SectionCard("Scan backend") {
+
+        // 3. Scanning: engine, regions, limits.
+        SectionCard("Scanning") {
+            SubHeading("Engine")
             Selector("Backend", BackendPreference.entries, s.scanBackend, { it.label }, { b -> vm.update { it.copy(scanBackend = b) } })
             Text(
-                "Automatic tries Turbo Scan (ps4debug-NG ≥ 1.3) → server-side scan (ps4debug-NG) → Android chunked scan, " +
-                    "falling back when a backend is missing or cannot run a request. Float and unaligned scans always run on Android.",
-                style = MaterialTheme.typography.bodySmall,
+                "Automatic: Turbo Scan → server-side scan (ps4debug-NG) → Android scan, falling back when one is missing. " +
+                    "Float and unaligned scans always run on Android.",
+                style = MaterialTheme.typography.bodySmall, color = dim,
             )
             LabeledSwitch(
                 "ps4debug-NG detection and auto-authentication", s.probeServerScan, { v -> vm.update { it.copy(probeServerScan = v) } },
-                "On connect: CMD_BRANDING, then the CMD_PROC_AUTH challenge–response (re-done after reconnects) only if the payload identifies as ps4debug-NG.",
+                "CMD_BRANDING on connect, then CMD_PROC_AUTH only for ps4debug-NG.",
             )
-            LabeledSwitch(
-                "Turbo page-table aliasing reads", s.turboAliasing, { v -> vm.update { it.copy(turboAliasing = v) } },
-                "ps4debug-NG option that maps target pages into the payload for faster reads. Off by default (more invasive); not verified on hardware.",
-            )
-        }
-        SectionCard("Scanning") {
+            SubHeading("Regions")
             LabeledSwitch("Include read-only regions", s.includeReadOnlyRegions, { v -> vm.update { it.copy(includeReadOnlyRegions = v) } })
             LabeledSwitch("Include executable regions", s.includeExecutableRegions, { v -> vm.update { it.copy(includeExecutableRegions = v) } })
-            LabeledSwitch("Unaligned scan (slower)", s.unalignedScan, { v -> vm.update { it.copy(unalignedScan = v) } }, "Check every byte offset instead of natural alignment.")
-            NumberField("Max results", s.maxResults, 1_000..5_000_000) { v -> vm.update { it.copy(maxResults = v) } }
-            NumberField("Read chunk KiB", s.chunkKb, 4..4096) { v -> vm.update { it.copy(chunkKb = v) } }
-            NumberField("Results per page", s.pageSize, 10..200) { v -> vm.update { it.copy(pageSize = v) } }
-            NumberField("Skip regions larger than MiB (0 = no limit)", s.maxRegionMiB, 0..65_536) { v -> vm.update { it.copy(maxRegionMiB = v) } }
-            NumberField("Live refresh interval ms", s.monitorIntervalMs, 250..10_000) { v -> vm.update { it.copy(monitorIntervalMs = v) } }
+            LabeledSwitch("Unaligned scan (slower)", s.unalignedScan, { v -> vm.update { it.copy(unalignedScan = v) } }, "Every byte offset instead of natural alignment.")
+            androidx.compose.material3.TextButton(onClick = { advancedScan = !advancedScan }, modifier = Modifier.testTag("advancedScan")) {
+                Text(if (advancedScan) "Hide advanced settings" else "Advanced settings (limits, refresh, Turbo aliasing)")
+            }
+            if (advancedScan) {
+                SubHeading("Limits")
+                NumberField("Max results", s.maxResults, 1_000..5_000_000) { v -> vm.update { it.copy(maxResults = v) } }
+                NumberField("Results per page", s.pageSize, 10..200) { v -> vm.update { it.copy(pageSize = v) } }
+                NumberField("Read chunk KiB", s.chunkKb, 4..4096) { v -> vm.update { it.copy(chunkKb = v) } }
+                NumberField("Skip regions larger than MiB (0 = no limit)", s.maxRegionMiB, 0..65_536) { v -> vm.update { it.copy(maxRegionMiB = v) } }
+                NumberField("Live refresh interval ms", s.monitorIntervalMs, 250..10_000) { v -> vm.update { it.copy(monitorIntervalMs = v) } }
+                LabeledSwitch(
+                    "Turbo page-table aliasing reads", s.turboAliasing, { v -> vm.update { it.copy(turboAliasing = v) } },
+                    "Faster reads by mapping target pages into the payload. More invasive; not verified on hardware.",
+                )
+            }
         }
-        SectionCard("Game detection") {
-            LabeledSwitch(
-                "Auto-select the running game", s.autoSelectGame, { v -> vm.update { it.copy(autoSelectGame = v) } },
-                "After connecting, and when the same game restarts, select it automatically (by title ID and path, not only the process name). Read-only.",
-            )
-        }
-        SectionCard("Connection") {
-            NumberField("Connect timeout ms", s.connectTimeoutMs, 500..60_000) { v -> vm.update { it.copy(connectTimeoutMs = v) } }
-            NumberField("Read timeout ms", s.readTimeoutMs, 1_000..120_000) { v -> vm.update { it.copy(readTimeoutMs = v) } }
-            LabeledSwitch("Query firmware version", s.queryFirmware, { v -> vm.update { it.copy(queryFirmware = v) } }, "Uses the CMD_FW_VERSION extension when the payload supports it.")
-            LabeledSwitch(
-                "Allow non-local addresses", s.allowNonLocalHosts,
-                { on -> if (on) confirmNonLocal = true else vm.update { it.copy(allowNonLocalHosts = false) } },
-                "ps4debug is unauthenticated. Keep this off.",
-            )
-        }
-        SectionCard("Appearance") {
-            Selector("Theme", ThemeMode.entries, s.theme, { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } }, { t -> vm.update { it.copy(theme = t) } })
-        }
-        SectionCard("Diagnostics log") {
-            Text("Structured events (connection, protocol, process, scan…). Kept in memory only; never uploaded. Export to share when reporting a problem.", style = MaterialTheme.typography.bodySmall)
+
+        // 4. Diagnostics: tools first, the log folded away.
+        SectionCard("Diagnostics") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedButton(onClick = onDiagnostics, modifier = Modifier.testTag("openDiagnostics")) { Text("Connection diagnostics") }
                 OutlinedButton(onClick = onHelp) { Text("Guide") }
             }
+            Text("Event log: kept in memory only, never uploaded. Export it to attach to a problem report.", style = MaterialTheme.typography.bodySmall, color = dim)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = vm::clearLog) { Text("Clear") }
-                OutlinedButton(onClick = { logLauncher.launch("smartcheat-log.jsonl") }) { Text("Export (JSON Lines)") }
+                OutlinedButton(onClick = { showLog = !showLog }, modifier = Modifier.testTag("toggleLog")) { Text(if (showLog) "Hide log" else "Show log (${log.size})") }
+                OutlinedButton(onClick = { logLauncher.launch("smartcheat-log.jsonl") }) { Text("Export") }
+                androidx.compose.material3.TextButton(onClick = vm::clearLog) { Text("Clear") }
             }
-            if (log.isEmpty()) Text("Empty")
-            log.takeLast(100).reversed().forEach { Text(it.format(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+            if (showLog) {
+                if (log.isEmpty()) Text("Empty", color = dim)
+                log.takeLast(100).reversed().forEach { Text(it.format(), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall) }
+            }
         }
-        SectionCard("About") {
-            Text("PS4 SmartCheat ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE})" + if (BuildConfig.VERSION_NAME.contains("beta")) " — Beta" else "")
+
+        // 5. Appearance and about.
+        SectionCard("App") {
+            Selector("Theme", ThemeMode.entries, s.theme, { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } }, { t -> vm.update { it.copy(theme = t) } })
+            Text("PS4 SmartCheat ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE})", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "Requires ps4debug-NG (port 744; by OSR, github.com/Pharaoh2k/ps4debug-NG, GPL-3.0) — the app authenticates " +
-                    "automatically for server-side and Turbo scanning. Core flow reported working on FW 11.00 + GoldHEN + " +
-                    "ps4debug-NG 1.3.3; features added since 0.8 are verified against the mock server and in beta testing on " +
-                    "hardware. For offline games and homebrew on your own console.",
-                style = MaterialTheme.typography.bodySmall,
+                "Requires ps4debug-NG (port 744; by OSR, github.com/Pharaoh2k/ps4debug-NG, GPL-3.0). Core flow reported working on " +
+                    "FW 11.00 + GoldHEN + ps4debug-NG 1.3.3; newer features are verified against the simulated server. " +
+                    "For offline games and homebrew on your own console.",
+                style = MaterialTheme.typography.bodySmall, color = dim,
             )
-            Text("Report issues: github.com/Hm589158/ps4-SmartCheat/issues", style = MaterialTheme.typography.bodySmall)
+            Text("Report issues: github.com/Hm589158/ps4-SmartCheat/issues", style = MaterialTheme.typography.bodySmall, color = dim)
         }
     }
 
