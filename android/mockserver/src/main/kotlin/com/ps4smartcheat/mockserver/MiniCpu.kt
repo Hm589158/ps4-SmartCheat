@@ -55,9 +55,14 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int, stac
             if (ins.code == Code.INVALID) throw Unsupported("invalid instruction at 0x%X".format(rip))
             trace += rip
             val next = rip + ins.length
+            server.gameStep(pid, rip, named())
             when (ins.code) {
                 Code.NOPD, Code.NOPW, Code.NOPQ, Code.NOP_RM32, Code.NOP_RM16, Code.NOP_RM64 -> rip = next
-                Code.RETNQ -> { if (depth == 0) return; depth--; rip = pop() }
+                Code.RETNQ -> {
+                    // The routine's own return leaves the emulated code: the "next" address is outside (reported as 0).
+                    if (depth == 0) { server.gameStepDone(pid, 0, named()); return }
+                    depth--; rip = pop()
+                }
                 Code.CALL_REL32_64 -> { push(next); depth++; rip = ins.nearBranchTarget }
                 Code.CALL_RM64 -> {
                     if (ins.getOpKind(0) != OpKind.REGISTER) throw Unsupported("call through memory at 0x%X".format(rip))
@@ -122,6 +127,8 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int, stac
                 }
                 else -> throw Unsupported("mock CPU cannot run ${ins.code} at 0x%X".format(rip))
             }
+            // The instruction is done: a requested single step or a pending execution-breakpoint stop is reported here.
+            server.gameStepDone(pid, rip, named())
         }
         throw Unsupported("routine did not return within $maxSteps instructions")
     }

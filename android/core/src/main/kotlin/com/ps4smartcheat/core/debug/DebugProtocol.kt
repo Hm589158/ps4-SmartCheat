@@ -6,7 +6,7 @@ import com.ps4smartcheat.core.util.cString
 /**
  * ps4debug-NG debugger commands (0xBDBBxxxx). Verified in Pharaoh2k/ps4debug-ng v1.3.4
  * `debugger/include/protocol.h`, `debugger/include/debug.h`, `debugger/source/debug.c`, `debugger/source/server.c`
- * (see docs/PROTOCOL.md §Debugger). Breakpoints, register writes, single-stepping and kernel commands are not used.
+ * (see docs/PROTOCOL.md §Debugger). Software (int3) breakpoints, register writes and kernel commands are not used.
  */
 object DebugProtocol {
     const val CMD_DEBUG_ATTACH: Int = 0xBDBB0001.toInt()
@@ -14,6 +14,16 @@ object DebugProtocol {
     const val CMD_DEBUG_SET_WATCHPOINT: Int = 0xBDBB0004.toInt()
     const val CMD_DEBUG_GETREGS: Int = 0xBDBB0008.toInt()
     const val CMD_DEBUG_CONTINUE: Int = 0xBDBB0010.toInt()
+    /**
+     * `{u32 lwpid}` (debug.c `debug_step_thread_handle`): PT_STEP for that thread; stops of other threads are resumed
+     * by the server without a packet until this thread reports. `CMD_SUCCESS` / `CMD_ERROR`, connection kept.
+     */
+    const val CMD_DEBUG_STEP_THREAD: Int = 0xBDBB0013.toInt()
+    const val STEP_THREAD_PACKET_SIZE = 4
+    /** `{u32 lwpid}` (debug.c `debug_getregs_handle`): `CMD_SUCCESS` + 176-byte `__reg64`; an error closes the connection. */
+    const val GETREGS_PACKET_SIZE = 4
+    /** DR6.BS: the stop was a single step. */
+    const val DR6_SINGLE_STEP: Long = 1L shl 14
     const val CMD_DEBUG_PROCESS_STOP: Int = 0xBDBB0500.toInt()
 
     /** `struct cmd_debug_attach_packet { u32 pid; u32 client_ip; }` — client_ip in network byte order. */
@@ -117,6 +127,7 @@ class InterruptEvent(
     val dr7: Long get() = debugRegisters[7]
     /** Watchpoint slots that fired according to DR6 (B0..B3). */
     val firedSlots: Set<Int> get() = (0 until 4).filter { (dr6 ushr it) and 1L == 1L }.toSet()
+    val singleStep: Boolean get() = dr6 and DebugProtocol.DR6_SINGLE_STEP != 0L
 
     companion object {
         fun parse(p: ByteArray): InterruptEvent {

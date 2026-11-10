@@ -120,6 +120,8 @@ class MockPs4DebugServer(
         @Volatile var debugPort = 755
         /** CMD_DEBUG_CONTINUE answers CMD_ERROR (connection kept, like a failing PT_CONTINUE) this many times. */
         @Volatile var continueFailures = 0
+        /** CMD_DEBUG_STEP(_THREAD) answers CMD_ERROR (PT_STEP failed); the connection is kept. */
+        @Volatile var stepFails = false
         /** Delay before CMD_DEBUG_CONTINUE is processed (ms). */
         @Volatile var continueDelayMs = 0L
         /**
@@ -529,9 +531,21 @@ class MockPs4DebugServer(
         val watch = arrayOfNulls<Watchpoint>(4)
         @Volatile var stoppedRegs: ByteArray = ByteArray(176)
         val resume = java.util.concurrent.Semaphore(0)
-        /** The "game" is in a ptrace stop (paused) until CONTINUE / DETACH. */
+        /** The "game" is in a ptrace stop (paused) until CONTINUE / STEP / DETACH. */
         @Volatile var stopped = false
+        /** CMD_DEBUG_STEP(_THREAD) was accepted: the thread traps after its next instruction. */
+        @Volatile var stepping = false
+        /**
+         * An execution breakpoint matched: like debug.c, the server steps the thread past the instruction itself and
+         * only then reports the stop — with the registers from **before** the instruction.
+         */
+        @Volatile var pendingExecPacket: ByteArray? = null
     }
+
+    /** Thread id of the mock game's only thread. */
+    val gameLwpid: Int = 100001
+    /** Number of CMD_DEBUG_STEP / CMD_DEBUG_STEP_THREAD requests accepted (for tests). */
+    val steps = AtomicInteger()
 
     /** True while the game is paused at a reported stop (for tests). */
     val gamePaused: Boolean get() = debug?.stopped == true
@@ -591,7 +605,22 @@ class MockPs4DebugServer(
                     d.resume.release()
                     status(out, CMD_SUCCESS); return true
                 }
-                CMD_DEBUG_GETREGS -> { status(out, CMD_SUCCESS); out.write(d.stoppedRegs); return true }
+                CMD_DEBUG_GETREGS -> {
+                    // debug.c debug_getregs_handle: {u32 lwpid} → CMD_SUCCESS + 176 bytes; PT_GETREGS failure → CMD_ERROR, return 1.
+                    if (body.capacity() < 4) { status(out, CMD_DATA_NULL); return false }
+                    if (body.int != gameLwpid || !d.stopped) { status(out, CMD_ERROR); return false }
+                    status(out, CMD_SUCCESS); out.write(d.stoppedRegs); return true
+                }
+                CMD_DEBUG_STEP, CMD_DEBUG_STEP_THREAD -> {
+                    // debug.c debug_step_handle / debug_step_thread_handle: PT_STEP; CMD_SUCCESS or CMD_ERROR, returns 0.
+                    if (cmd == CMD_DEBUG_STEP_THREAD && body.capacity() >= 4 && body.int != gameLwpid) { status(out, CMD_ERROR); return true }
+                    if (!d.stopped || faults.stepFails) { status(out, CMD_ERROR); return true } // PT_STEP needs a stopped process
+                    steps.incrementAndGet()
+                    d.stepping = true
+                    d.stopped = false
+                    d.resume.release()
+                    status(out, CMD_SUCCESS); return true
+                }
                 else -> { status(out, CMD_ERROR); return false }
             }
         }
@@ -626,6 +655,8 @@ class MockPs4DebugServer(
             val d = debug ?: return
             debug = null
             runCatching { d.events.close() }
+            d.stepping = false
+            d.pendingExecPacket = null
             if (d.stopped) { d.stopped = false; gameResumes.incrementAndGet() } // PT_DETACH resumes a stopped process
             d.resume.release(1000) // never leave the "game" blocked
         }
@@ -649,34 +680,81 @@ class MockPs4DebugServer(
             val typeOk = when (w.breakType) { 1 -> write; 3 -> true; else -> false }
             typeOk && address < w.address + w.size && w.address < address + size
         } ?: return false
+        val regs = regBlock(registers, rip + length)
+        report(d, packet(d, threadName, regs, 1L shl slot), regs, timeoutMs)
+        return true
+    }
+
+    private fun regBlock(registers: Map<String, Long>, rip: Long): ByteArray {
         val regs = le(176)
         val gpr = listOf("r15", "r14", "r13", "r12", "r11", "r10", "r9", "r8", "rdi", "rsi", "rbp", "rbx", "rdx", "rcx", "rax")
         for (n in gpr) regs.putLong(registers[n] ?: 0L)
         regs.putInt(1).putShort(0).putShort(0).putInt(0).putShort(0).putShort(0)
-        regs.putLong(rip + length).putLong(0x43).putLong(0x202).putLong(registers["rsp"] ?: 0x7EFF000L).putLong(0x3B)
+        regs.putLong(rip).putLong(0x43).putLong(0x202).putLong(registers["rsp"] ?: 0x7EFF000L).putLong(0x3B)
+        return regs.array()
+    }
+
+    private fun packet(d: DebugState, threadName: String, regs: ByteArray, dr6: Long): ByteArray {
         val pkt = le(0x4A0)
-        pkt.putInt(100001).putInt((5 shl 8) or 0x7F)
+        pkt.putInt(gameLwpid).putInt((5 shl 8) or 0x7F)
         pkt.put(fixed(threadName, 40))
-        pkt.put(regs.array())
+        pkt.put(regs)
         pkt.position(48 + 176 + 832)
         for (i in 0 until 16) pkt.putLong(
             when (i) {
                 in 0..3 -> d.watch[i]?.address ?: 0L
-                6 -> 1L shl slot
+                6 -> dr6
                 else -> 0L
             },
         )
-        d.stoppedRegs = regs.array()
+        return pkt.array()
+    }
+
+    /** Reports a stop on the interrupt channel and blocks the game thread until CONTINUE / STEP / detach. */
+    private fun report(d: DebugState, pkt: ByteArray, currentRegs: ByteArray, timeoutMs: Long) {
+        d.stoppedRegs = currentRegs
         synchronized(d) {
             d.stopped = true
             try {
-                synchronized(d.events) { d.events.getOutputStream().apply { write(pkt.array()); flush() } }
+                synchronized(d.events) { d.events.getOutputStream().apply { write(pkt); flush() } }
             } catch (e: IOException) {
                 // The interrupt connection is gone; the game stays paused until CONTINUE / DETACH (as on the PS4).
             }
         }
         d.resume.tryAcquire(timeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-        return true
+    }
+
+    /**
+     * Test hook: the game thread is about to execute the instruction at [rip]. An enabled execution breakpoint
+     * (watchpoint slot with breaktype 0) at that address is remembered; the stop is reported by [gameStepDone] after the
+     * instruction ran, with the registers from before it — what ps4debug-NG's interrupt handler does (debug.c: clear
+     * DR7 for the slot, PT_STEP, wait, restore DR7, send the packet read earlier).
+     */
+    fun gameStep(pid: Int, rip: Long, registers: Map<String, Long>, threadName: String = "GameMain") {
+        val d = debug?.takeIf { it.pid == pid } ?: return
+        val slot = d.watch.indices.firstOrNull { i -> d.watch[i]?.let { it.breakType == 0 && it.address == rip } == true } ?: return
+        d.pendingExecPacket = packet(d, threadName, regBlock(registers, rip), 1L shl slot)
+    }
+
+    /**
+     * Test hook: the game thread finished an instruction and is now at [rip]. Reports the pending execution-breakpoint
+     * stop, or the single-step stop when CMD_DEBUG_STEP(_THREAD) was requested (DR6.BS). A step that lands on an
+     * enabled execution breakpoint is stepped over once more before it is reported (same interrupt-handler path).
+     */
+    fun gameStepDone(pid: Int, rip: Long, registers: Map<String, Long>, threadName: String = "GameMain", timeoutMs: Long = 5000) {
+        val d = debug?.takeIf { it.pid == pid } ?: return
+        val now = regBlock(registers, rip)
+        d.pendingExecPacket?.let { pkt ->
+            d.pendingExecPacket = null
+            d.stepping = false
+            report(d, pkt, now, timeoutMs)
+            return
+        }
+        if (!d.stepping) return
+        d.stepping = false
+        val onExec = d.watch.indices.firstOrNull { i -> d.watch[i]?.let { it.breakType == 0 && it.address == rip } == true }
+        if (onExec != null) { d.pendingExecPacket = packet(d, threadName, now, (1L shl 14) or (1L shl onExec)); return }
+        report(d, packet(d, threadName, now, 1L shl 14), now, timeoutMs)
     }
 
     private inner class NgScan {
@@ -998,6 +1076,8 @@ class MockPs4DebugServer(
         const val TURBO_END = 0xBDAACC14.toInt()
         const val TURBO_CANCEL = 0xBDAACC17.toInt()
         const val AUTH_MAGIC = 0xBB40E64D.toInt()
+        const val CMD_DEBUG_STEP = 0xBDBB0012.toInt()
+        const val CMD_DEBUG_STEP_THREAD = 0xBDBB0013.toInt()
         const val CMD_PROC_ALLOC = 0xBDAA000B.toInt()
         const val CMD_PROC_FREE = 0xBDAA000C.toInt()
         const val CMD_PROC_ALLOC_HINTED = 0xBDAA000E.toInt()

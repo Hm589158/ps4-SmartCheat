@@ -204,6 +204,59 @@ class DebugSession private constructor(
     }
 
     /**
+     * Hardware execution breakpoint in debug-register [slot] (CMD_DEBUG_SET_WATCHPOINT with breaktype 0 =
+     * DBREG_DR7_EXEC and length code 0, as x86 requires). When a thread reaches [address], ps4debug-NG's interrupt
+     * handler steps it past the instruction itself and then reports the stop with the registers from before the
+     * instruction (debug.c: `rw_bits == 0` path), so a plain [resume] never hits the same breakpoint again. No code
+     * bytes are modified (unlike CMD_DEBUG_SET_BREAKPOINT, which is not used).
+     */
+    suspend fun setExecBreakpoint(slot: Int, address: Long) {
+        require(slot in 0 until DebugProtocol.MAX_WATCHPOINTS) { "slot must be 0..3" }
+        command("set execution breakpoint", DebugProtocol.CMD_DEBUG_SET_WATCHPOINT,
+            LE.bytes32(slot.toLong()) + LE.bytes32(1) + LE.bytes32(0) + LE.bytes32(DebugProtocol.BREAK_EXEC.toLong()) + LE.bytes64(address),
+            closesOnError = true)
+        armedSlots += slot
+    }
+
+    /**
+     * CMD_DEBUG_STEP_THREAD: the stopped thread [lwpid] executes one instruction and stops again (reported on the
+     * interrupt channel with DR6.BS). Returns true for `CMD_SUCCESS`; `CMD_ERROR` (PT_STEP failed, e.g. the process
+     * is not stopped) keeps the connection and leaves the game as it was.
+     */
+    suspend fun stepThread(lwpid: Int): Boolean {
+        val st = command("single step", DebugProtocol.CMD_DEBUG_STEP_THREAD, LE.bytes32(lwpid.toLong()), closesOnError = false, throwOnError = false)
+        val ok = st == Ps4DebugProtocol.CMD_SUCCESS
+        if (ok) pendingStop = false // running until the step's stop arrives
+        else events.log(EventLevel.WARN, EventCategory.PROCESS, "debugger step refused", "pid" to pid, "status" to Ps4DebugProtocol.statusName(st))
+        return ok
+    }
+
+    /**
+     * CMD_DEBUG_GETREGS: current registers of the stopped thread [lwpid]. After an execution-breakpoint stop this is
+     * the state *after* the breakpoint instruction (the packet carried the state before it). The server closes the
+     * connection when PT_GETREGS fails, which ends the session ([DebuggerSessionLostException] on the next command).
+     */
+    suspend fun readRegisters(lwpid: Int): Registers {
+        if (!alive) throw DebuggerSessionLostException()
+        return try {
+            t.exclusive("read registers", COMMAND_TIMEOUT_MS) { w ->
+                if (t.connectionEpoch != epoch) throw SessionMovedAbort()
+                w.send(w.header(DebugProtocol.CMD_DEBUG_GETREGS, DebugProtocol.GETREGS_PACKET_SIZE), LE.bytes32(lwpid.toLong()))
+                val st = w.readU32()
+                if (st != Ps4DebugProtocol.CMD_SUCCESS) {
+                    w.invalidate()
+                    throw DebuggerException("PS4 rejected reading the registers: ${Ps4DebugProtocol.statusName(st)}", st)
+                }
+                Registers.parse(w.readExactly(DebugProtocol.REG64_SIZE))
+            }
+        } catch (e: SessionMovedAbort) {
+            throw DebuggerSessionLostException()
+        } catch (e: com.ps4smartcheat.core.backend.ConnectionInterruptedException) {
+            throw DebuggerSessionLostException("The connection dropped while reading the registers.")
+        }
+    }
+
+    /**
      * CMD_DEBUG_CONTINUE (stop = 0) with the server's answer checked. Returns true only for `CMD_SUCCESS`; the
      * server answers `CMD_ERROR` without closing the connection when `PT_CONTINUE` fails, e.g. because the process
      * is not stopped (debug.c `debug_continue_handle` returns 0). Throws [DebuggerException] when the request could
