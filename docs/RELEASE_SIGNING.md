@@ -31,8 +31,8 @@ GitHub → repository → Settings → Secrets and variables → Actions → New
 |---|---|
 | `SMARTCHEAT_KEYSTORE_BASE64` | content of `smartcheat-release.jks.b64` |
 | `SMARTCHEAT_KEYSTORE_PASSWORD` | keystore password |
-| `SMARTCHEAT_KEY_ALIAS` | `smartcheat` (the `-alias` above) |
-| `SMARTCHEAT_KEY_PASSWORD` | key password (same as the keystore password if you pressed Enter) |
+| `SMARTCHEAT_KEY_ALIAS` | `smartcheat` (the `-alias` above). Optional when the keystore holds a single key: the release workflow then uses that key |
+| `SMARTCHEAT_KEY_PASSWORD` | key password (same as the keystore password if you pressed Enter). Optional: defaults to the keystore password |
 
 Delete the `.b64` file afterwards.
 

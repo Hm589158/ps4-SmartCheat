@@ -329,7 +329,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.HELP -> "Guide"
     Routes.CODE -> "Code"
     Routes.WATCH -> "Watchpoint"
-    Routes.DEBUGGER -> "Breakpoint & trace"
+    Routes.DEBUGGER -> "Debugger"
     Routes.INJECT -> "Code injection"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"

@@ -20,6 +20,13 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 - Protocol additions verified in ps4debug-NG 1.3.4 `debug.c`: `CMD_DEBUG_STEP_THREAD`, `CMD_DEBUG_GETREGS` and the
   execute path of `CMD_DEBUG_SET_WATCHPOINT` (docs/PROTOCOL.md, docs/WATCHPOINTS.md).
 
+### Signed releases
+- The release workflow signs with the repository's release key. `SMARTCHEAT_KEY_ALIAS` and `SMARTCHEAT_KEY_PASSWORD`
+  are now optional: with one key in the keystore its alias is used, and the key password defaults to the keystore
+  password (PKCS12). Missing or wrong secrets stop the release with a message naming the secret; no secret value is
+  printed. A signed build installs as `com.ps4smartcheat.app` (uninstall the debug-signed `…app.debug` build once if
+  you want only one copy).
+
 ### Saved code caves: the ON/OFF switches and the session check now agree (fix)
 - **Cause:** the two checks computed the addresses differently. "Check after restart" resolved every saved part
   through its own module reference (`executable+0xF010`), but the "Code patches" ON/OFF card resolved all parts through

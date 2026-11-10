@@ -2,7 +2,8 @@ name: Release
 
 # Publishes an APK to GitHub Releases.
 #  - Signed release APK when the signing secrets are configured:
-#      SMARTCHEAT_KEYSTORE_BASE64, SMARTCHEAT_KEYSTORE_PASSWORD, SMARTCHEAT_KEY_ALIAS, SMARTCHEAT_KEY_PASSWORD
+#      SMARTCHEAT_KEYSTORE_BASE64, SMARTCHEAT_KEYSTORE_PASSWORD (required); SMARTCHEAT_KEY_ALIAS (optional when the
+#      keystore holds one key), SMARTCHEAT_KEY_PASSWORD (optional: defaults to the keystore password)
 #  - Otherwise a clearly labelled, debug-signed beta/test build published as a pre-release.
 # An existing release with the same tag is never overwritten.
 # Triggers: a pushed v* tag, a manual run, or a successful CI run on the default branch.
@@ -108,10 +109,35 @@ jobs:
           SMARTCHEAT_KEY_PASSWORD: ${{ secrets.SMARTCHEAT_KEY_PASSWORD }}
         run: |
           export SMARTCHEAT_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
-          echo "$SMARTCHEAT_KEYSTORE_BASE64" | base64 -d > "$SMARTCHEAT_KEYSTORE_FILE"
+          trap 'rm -f "$SMARTCHEAT_KEYSTORE_FILE"' EXIT
+          # Secrets pasted with line breaks (base64 -w76) or a trailing newline still decode.
+          printf '%s' "$SMARTCHEAT_KEYSTORE_BASE64" | tr -d ' \r\n' | base64 -d > "$SMARTCHEAT_KEYSTORE_FILE" || {
+            echo "::error::SMARTCHEAT_KEYSTORE_BASE64 is not valid base64 (encode the .jks/.keystore file with: base64 -w0 release.jks)"; exit 1; }
+          if [ -z "$SMARTCHEAT_KEYSTORE_PASSWORD" ]; then
+            echo "::error::Repository secret SMARTCHEAT_KEYSTORE_PASSWORD is missing or empty"; exit 1
+          fi
+          # Which keys does the keystore hold? (Values of secrets are never printed.)
+          if ! ENTRIES=$(keytool -list -keystore "$SMARTCHEAT_KEYSTORE_FILE" -storepass:env SMARTCHEAT_KEYSTORE_PASSWORD 2>&1); then
+            echo "::error::The keystore could not be opened: wrong SMARTCHEAT_KEYSTORE_PASSWORD, or SMARTCHEAT_KEYSTORE_BASE64 is not a keystore"; exit 1
+          fi
+          ALIASES=$(printf '%s\n' "$ENTRIES" | grep -i 'PrivateKeyEntry' | cut -d, -f1 | sed 's/[[:space:]]*$//')
+          COUNT=$(printf '%s\n' "$ALIASES" | grep -c . || true)
+          echo "The keystore holds $COUNT private key(s)."
+          if [ -z "$SMARTCHEAT_KEY_ALIAS" ]; then
+            # The alias secret is optional when the keystore holds exactly one key.
+            if [ "$COUNT" = "1" ]; then
+              export SMARTCHEAT_KEY_ALIAS="$ALIASES"
+              echo "SMARTCHEAT_KEY_ALIAS is not set: using the keystore's only key."
+            else
+              echo "::error::Repository secret SMARTCHEAT_KEY_ALIAS is missing and the keystore holds $COUNT keys — set it to the alias to sign with"; exit 1
+            fi
+          elif ! printf '%s\n' "$ALIASES" | grep -qixF "$SMARTCHEAT_KEY_ALIAS"; then
+            echo "::error::SMARTCHEAT_KEY_ALIAS does not match any key in the keystore ($COUNT key(s) found)"; exit 1
+          fi
+          # PKCS12 keystores use the store password for the key as well.
+          [ -n "$SMARTCHEAT_KEY_PASSWORD" ] || { export SMARTCHEAT_KEY_PASSWORD="$SMARTCHEAT_KEYSTORE_PASSWORD"; echo "SMARTCHEAT_KEY_PASSWORD is not set: using the keystore password."; }
           export SMARTCHEAT_VERSION_NAME="$VERSION_NAME" SMARTCHEAT_VERSION_CODE="${{ github.run_number }}"
           ./gradlew --no-daemon :app:assembleRelease
-          rm -f "$SMARTCHEAT_KEYSTORE_FILE"
           APK=$(ls app/build/outputs/apk/release/*.apk | head -n1)
           BT=$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -n1)
           "$ANDROID_HOME/build-tools/$BT/apksigner" verify --print-certs "$APK"
