@@ -39,7 +39,9 @@ jobs:
       TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
       RELEASE_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       GH_TOKEN: ${{ github.token }}
-      HAS_SIGNING: ${{ secrets.SMARTCHEAT_KEYSTORE_BASE64 != '' }}
+      # Signing needs at least the keystore and its password; with only one of them the debug-signed beta is built.
+      HAS_SIGNING: ${{ secrets.SMARTCHEAT_KEYSTORE_BASE64 != '' && secrets.SMARTCHEAT_KEYSTORE_PASSWORD != '' }}
+      SIGNING_INCOMPLETE: ${{ (secrets.SMARTCHEAT_KEYSTORE_BASE64 != '') != (secrets.SMARTCHEAT_KEYSTORE_PASSWORD != '') }}
     defaults:
       run:
         working-directory: android
@@ -99,6 +101,11 @@ jobs:
       - name: Tests (release gate)
         if: env.SKIP_RELEASE != 'true'
         run: ./gradlew --no-daemon :core:test :app:testDebugUnitTest :app:lintDebug
+
+      - name: Report incomplete signing secrets
+        if: env.SKIP_RELEASE != 'true' && env.SIGNING_INCOMPLETE == 'true'
+        run: |
+          echo "::warning::Release signing needs both repository secrets SMARTCHEAT_KEYSTORE_BASE64 and SMARTCHEAT_KEYSTORE_PASSWORD; only one is set. Building the debug-signed beta instead."
 
       - name: Build signed release APK
         if: env.SKIP_RELEASE != 'true' && env.HAS_SIGNING == 'true'
