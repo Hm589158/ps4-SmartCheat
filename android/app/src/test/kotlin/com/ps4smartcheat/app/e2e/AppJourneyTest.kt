@@ -528,8 +528,11 @@ class AppJourneyTest {
         tag("codeAddress").performTextInput(Address.format(DemoGame.SUB_ONE))
         press("codeGo")
         waitText("sub eax, 1")
+        // The rows are below the instruction card in the lazy list: scroll to the store's row before looking for it.
+        compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("codeList").performScrollToNode(hasTestTag("asm_" + java.lang.Long.toHexString(DemoGame.STORE_COINS))) }.isSuccess }
         waitText("mov [0x500120], eax")
         shot("41_disassembly")
+        compose.onNodeWithTag("codeList").performScrollToNode(hasTestTag("codeSource"))
 
         step("preview nop")
         tag("codeSource").performTextClearance()
