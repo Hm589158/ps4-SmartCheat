@@ -106,14 +106,8 @@ object SessionValidator {
         val off = c.originalBytes?.let { Hex.decode(it) }
             ?: return ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.INVALID, "original bytes unknown")
         val address = base + module.offset
-        val state = if (regions.regionFor(address, on.size)?.isReadable != true) PatchState.UNMAPPED else {
-            val now = backend.readMemory(pid, address, on.size)
-            when {
-                now.contentEquals(off) -> PatchState.OFF
-                now.contentEquals(on) -> PatchState.ON
-                else -> PatchState.MISMATCH
-            }
-        }
+        // Same comparison as the library ON/OFF switches (GoldHenImport.check): one implementation, one answer.
+        val state = com.ps4smartcheat.core.cheat.GoldHenImport.inspect(backend, pid, 0, c.name, module.name, address, on, off, regions).state
         return when (state) {
             PatchState.OFF -> ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.VALID, "original code found (OFF)", address)
             PatchState.ON -> ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.ACTIVE, "patched code found (ON)", address)

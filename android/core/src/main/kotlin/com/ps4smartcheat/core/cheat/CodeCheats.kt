@@ -22,8 +22,14 @@ object CodeCheats {
                     module == null -> { problems += "${c.name}: absolute address — save patches from the game executable"; null }
                     !ModuleResolver.sameModule(module.name, profile.processName) -> { problems += "${c.name}: in ${module.name}, not ${profile.processName}"; null }
                     c.originalBytes.isNullOrBlank() -> { problems += "${c.name}: original bytes unknown"; null }
-                    else -> GhPatch(module.offset, Hex.decode(c.patchBytes!!), Hex.decode(c.originalBytes))
+                    else -> GhPatch(module.offset, Hex.decode(c.patchBytes!!), Hex.decode(c.originalBytes), module, c.name)
                 }
+            }
+            // Two parts of one mod at the same bytes cannot both match: the usual cause is a cheat saved twice under
+            // one name (e.g. an injection that was edited and saved again before this version replaced the old parts).
+            val sorted = list.sortedBy { it.offset }
+            sorted.zipWithNext().firstOrNull { (a, b) -> a.module?.name == b.module?.name && a.offset + a.on.size > b.offset }?.let { (a, b) ->
+                problems += "\"${a.label}\" and \"${b.label}\" overlap — the cheat was saved twice; delete the older entries"
             }
             GhImportMod(name, "checkbox", list, problems)
         }
@@ -71,6 +77,17 @@ object InjectionEntries {
             assembly = inj.source, group = g, signature = inj.signature,
         )
         return out
+    }
+
+    /**
+     * Parts of an injection saved earlier in [profile] under the same [name] and group: they are replaced when the
+     * injection is saved again (edited Target Code), otherwise one mod would hold two caves and two jumps with
+     * different bytes at the same addresses and could never match memory.
+     */
+    fun previousParts(profile: CheatProfile?, name: String, group: String?): List<CheatEntry> {
+        val n = name.trim()
+        val g = group?.trim()?.ifEmpty { null } ?: n
+        return profile?.cheats.orEmpty().filter { it.isPatch && it.group == g && (it.name == "$n · jump" || it.name.startsWith("$n · cave ")) }
     }
 
     /** Address ranges of caves stored in [profile] (so a new injection does not reuse them). */

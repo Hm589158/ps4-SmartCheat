@@ -12,8 +12,14 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
-/** One `memory` entry: bytes at executable-relative [offset]. */
-data class GhPatch(val offset: Long, val on: ByteArray, val off: ByteArray)
+/**
+ * One `memory` entry: bytes at executable-relative [offset].
+ *
+ * Patches built from the cheat library also carry the saved [module] reference (the map name the address was in when
+ * it was saved, e.g. `executable`) and are resolved through it — exactly like the session check — instead of through
+ * the process name. [label] names the part in the UI ("… · cave 1/1", "… · jump").
+ */
+data class GhPatch(val offset: Long, val on: ByteArray, val off: ByteArray, val module: ModuleRef? = null, val label: String? = null)
 
 /** One `mods` entry. [problems] non-empty → the mod cannot be applied (it is still listed). */
 data class GhImportMod(val name: String, val type: String, val patches: List<GhPatch>, val problems: List<String>) {
@@ -31,6 +37,13 @@ data class GhImportFile(
     val notes: List<String>,
 )
 
+/** Content identity of a file's mods (names, locations, bytes): two files with the same fingerprint check the same. */
+fun GhImportFile.fingerprint(): String = process + "|" + mods.joinToString("|") { m ->
+    m.name + ":" + m.problems.size + ":" + m.patches.joinToString(",") { p ->
+        "${p.module?.name}+${p.offset}=${Hex.encode(p.on)}/${Hex.encode(p.off)}"
+    }
+}
+
 enum class PatchState(val label: String) {
     /** Memory holds the "off" bytes: the cheat is not active and the file matches this game build. */
     OFF("off"),
@@ -41,7 +54,35 @@ enum class PatchState(val label: String) {
     UNMAPPED("address not mapped"),
 }
 
-data class ModCheck(val mod: GhImportMod, val addresses: List<Long>, val states: List<PatchState>) {
+/** What was found for one patch of a mod: where it was looked for, what was expected and what memory holds. */
+class PartCheck(
+    val index: Int,
+    val label: String,
+    /** How the address was computed, e.g. `executable+0x2006` (base 0x000400000). */
+    val location: String,
+    /** -1 when the module is not loaded. */
+    val address: Long,
+    val state: PatchState,
+    val on: ByteArray,
+    val off: ByteArray,
+    /** Bytes read now (null when unmapped). */
+    val actual: ByteArray?,
+) {
+    /** Why this part is not simply ON or OFF; null when it is. */
+    val reason: String? get() = when (state) {
+        PatchState.ON, PatchState.OFF -> null
+        PatchState.UNMAPPED -> if (address == -1L) "the module is not loaded in this process" else "the address is not mapped (readable) in this process"
+        PatchState.MISMATCH -> {
+            val a = actual ?: ByteArray(0)
+            val firstOn = a.indices.firstOrNull { a[it] != on.getOrNull(it) }
+            val firstOff = a.indices.firstOrNull { a[it] != off.getOrNull(it) }
+            "memory holds neither the saved ON nor the OFF bytes (first difference: byte ${firstOff ?: 0} from OFF, byte ${firstOn ?: 0} from ON). " +
+                "Another game version, another patch at this address, or the cheat was saved again with different code."
+        }
+    }
+}
+
+data class ModCheck(val mod: GhImportMod, val addresses: List<Long>, val states: List<PatchState>, val parts: List<PartCheck> = emptyList()) {
     val state: PatchState? get() = states.distinct().singleOrNull()
     private val known: Boolean get() = mod.applicable && states.isNotEmpty() && states.all { it == PatchState.OFF || it == PatchState.ON }
     /**
@@ -136,20 +177,35 @@ object GoldHenImport {
      * The executable base is the lowest mapping of [GhImportFile.process].
      */
     suspend fun check(backend: DebugBackend, pid: Int, file: GhImportFile, mod: GhImportMod, regions: List<MemoryRegion>): ModCheck {
-        val base = ModuleResolver.baseOf(file.process, regions)
-        val addresses = ArrayList<Long>()
-        val states = ArrayList<PatchState>()
-        for (p in mod.patches) {
-            val a = base?.plus(p.offset)
-            addresses += a ?: -1L
-            if (a == null || regions.regionFor(a, p.on.size)?.isReadable != true) { states += PatchState.UNMAPPED; continue }
-            val now = backend.readMemory(pid, a, p.on.size)
-            states += when {
-                now.contentEquals(p.off) -> PatchState.OFF
-                now.contentEquals(p.on) -> PatchState.ON
-                else -> PatchState.MISMATCH
-            }
+        val parts = mod.patches.mapIndexed { i, p ->
+            // Library patches: the saved module reference (same resolution as SessionValidator). GoldHEN files: the
+            // game image of the file's process.
+            val moduleName = p.module?.name ?: file.process
+            val base = if (p.module != null) ModuleResolver.baseOf(p.module.name, regions) else ModuleResolver.imageBaseOf(file.process, regions)
+            val offset = p.module?.offset ?: p.offset
+            val location = "$moduleName+0x${java.lang.Long.toHexString(offset).uppercase()}" +
+                (base?.let { " (base ${com.ps4smartcheat.core.util.Address.format(it)})" } ?: "")
+            inspect(backend, pid, i, p.label ?: "patch ${i + 1}", location, base?.plus(offset), p.on, p.off, regions)
         }
-        return ModCheck(mod, addresses, states)
+        return ModCheck(mod, parts.map { it.address }, parts.map { it.state }, parts)
+    }
+
+    /**
+     * Reads `on.size` bytes at [address] and classifies them. The one place where saved code bytes are compared with
+     * memory: used by the library switches, by imported GoldHEN files and by [com.ps4smartcheat.core.validate.SessionValidator].
+     */
+    suspend fun inspect(
+        backend: DebugBackend, pid: Int, index: Int, label: String, location: String, address: Long?,
+        on: ByteArray, off: ByteArray, regions: List<MemoryRegion>,
+    ): PartCheck {
+        if (address == null) return PartCheck(index, label, location, -1L, PatchState.UNMAPPED, on, off, null)
+        if (regions.regionFor(address, on.size)?.isReadable != true) return PartCheck(index, label, location, address, PatchState.UNMAPPED, on, off, null)
+        val now = backend.readMemory(pid, address, on.size)
+        val state = when {
+            now.contentEquals(off) -> PatchState.OFF
+            now.contentEquals(on) -> PatchState.ON
+            else -> PatchState.MISMATCH
+        }
+        return PartCheck(index, label, location, address, state, on, off, now)
     }
 }

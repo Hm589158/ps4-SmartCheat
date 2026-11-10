@@ -117,6 +117,19 @@ class CheatRepository(
      * Reads the library file back from storage and checks that [cheatId] is in profile [profileId] and that the whole
      * file still passes validation (a file that fails it would be set aside at the next start). Does not change state.
      */
+    /**
+     * Removes the entries [removeIds] and adds [entries] to profile [profileId] in one atomic write — used when a
+     * cheat made of several parts (a code-cave injection) is saved again under the same name, so that the old parts
+     * never stay next to the new ones.
+     */
+    suspend fun replaceCheats(profileId: String, removeIds: Set<String>, entries: List<CheatEntry>) = mutate { list ->
+        require(list.any { it.id == profileId }) { "Unknown profile $profileId" }
+        list.map { p ->
+            if (p.id != profileId) p
+            else p.copy(cheats = p.cheats.filterNot { it.id in removeIds } + entries, updatedAtMillis = clock())
+        }
+    }
+
     suspend fun verifyStored(profileId: String, cheatId: String): Boolean = verifyStored(profileId, listOf(cheatId))
 
     /** [verifyStored] for several entries: true only when all of them are in the stored file. */

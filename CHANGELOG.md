@@ -20,6 +20,23 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 - Protocol additions verified in ps4debug-NG 1.3.4 `debug.c`: `CMD_DEBUG_STEP_THREAD`, `CMD_DEBUG_GETREGS` and the
   execute path of `CMD_DEBUG_SET_WATCHPOINT` (docs/PROTOCOL.md, docs/WATCHPOINTS.md).
 
+### Saved code caves: the ON/OFF switches and the session check now agree (fix)
+- **Cause:** the two checks computed the addresses differently. "Check after restart" resolved every saved part
+  through its own module reference (`executable+0xF010`), but the "Code patches" ON/OFF card resolved all parts through
+  the *process name* (`eboot.bin`). On a map where the game image is `executable` and another mapping carries the
+  process name, the card read the wrong addresses and reported "does not match this game build" for the same group
+  the session check showed as OK.
+- Now both use the saved module reference and one shared comparison (`GoldHenImport.inspect`). Imported GoldHEN files
+  (which have only an offset) use the game image, `executable` first.
+- The card shows **every part on its own**: ON / OFF / MISMATCH / UNMAPPED, the address and how it was computed
+  (`executable+0x2006 (base …)`), and on a mismatch the reason with the expected OFF, expected ON and actual bytes.
+- No stale results: the card is rebuilt from the profile as stored now whenever the library changes or the Cheats
+  screen is shown again, and a switch refuses to write when the profile changed since the card was drawn.
+- Saving an injection again under the same name **replaces** its old parts in one write; a group that already contains
+  two copies is flagged ("saved twice") instead of showing a mismatch.
+- Safety checks are unchanged: a part is only written from exactly the other state; MISMATCH and UNMAPPED block both
+  switches. Tests cover ON, OFF, partial, mismatch, unloaded module, GoldHEN files and the saved-twice case.
+
 ## 1.0.2
 
 ### Code caves: Source Code → Target Code (new — verified against the simulated server only)

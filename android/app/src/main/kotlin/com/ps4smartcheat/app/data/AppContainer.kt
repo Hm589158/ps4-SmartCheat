@@ -443,10 +443,20 @@ class AppContainer(context: Context) {
         }
         val entries = com.ps4smartcheat.core.cheat.InjectionEntries.build(inj, name, group, regions) { cheats.newId() }
             .map { it.copy(discoveredPid = sel.pid) }
-        val profile = storeCheats(entries, profileId, newProfileName, gameVersion, sel)
+        // Saved again under the same name (edited code): the old parts are replaced in the same write, never kept
+        // next to the new ones — two caves/jumps at the same addresses in one mod could never match memory.
+        val old = profileId?.let { com.ps4smartcheat.core.cheat.InjectionEntries.previousParts(cheats.profile(it), name, group) }.orEmpty()
+        val profile = if (profileId != null && old.isNotEmpty()) {
+            cheats.replaceCheats(profileId, old.map { it.id }.toSet(), entries)
+            if (!cheats.verifyStored(profileId, entries.map { it.id })) throw IllegalStateException("The cheat library was written, but the entries could not be read back from storage.")
+            cheats.profile(profileId)!!
+        } else {
+            storeCheats(entries, profileId, newProfileName, gameVersion, sel)
+        }
         val ref = entries.last().module!!
-        log.event(EventLevel.INFO, EventCategory.CHEAT, "code injection saved", "profile" to profile.name, "hook" to "${ref.name}+0x${java.lang.Long.toHexString(ref.offset)}", "caveBytes" to inj.caveOn.size)
-        return "Saved injection \"${name.trim()}\" in \"${profile.name}\" (${entries.size} parts, group \"${entries.last().group}\")"
+        log.event(EventLevel.INFO, EventCategory.CHEAT, "code injection saved", "profile" to profile.name, "hook" to "${ref.name}+0x${java.lang.Long.toHexString(ref.offset)}", "caveBytes" to inj.caveOn.size, "replacedParts" to old.size)
+        return "Saved injection \"${name.trim()}\" in \"${profile.name}\" (${entries.size} parts, group \"${entries.last().group}\")" +
+            if (old.isNotEmpty()) " — replaced the ${old.size} part(s) saved before under this name" else ""
     }
 
     /** Disconnect requested by the user (button or notification): no automatic reconnect afterwards. */

@@ -129,6 +129,17 @@ object ModuleResolver {
         }
     }
 
+    /**
+     * Base of the game image for a GoldHEN file that names [process] (offsets in such files are relative to the start
+     * of the executable). On a PS4 the image is mapped as [MAIN_EXECUTABLE]; other mappings may carry the process
+     * name without being the image, so `executable` wins when both exist. Saved library entries do not use this:
+     * they resolve through their own [ModuleRef] with [baseOf].
+     */
+    fun imageBaseOf(process: String, regions: List<MemoryRegion>): Long? {
+        fun lowest(n: String) = regions.filter { it.name == n && it.isValid }.minOfOrNull { it.start }
+        return if (isExecutableFileName(process)) lowest(MAIN_EXECUTABLE) ?: lowest(process) else baseOf(process, regions)
+    }
+
     /** Computes a module-relative reference when [address] lies inside a module image. */
     fun refFor(address: Long, regions: List<MemoryRegion>): ModuleRef? {
         val region = regions.firstOrNull { it.contains(address) } ?: return null

@@ -52,6 +52,7 @@ import com.ps4smartcheat.core.cheat.CheatEntry
 import com.ps4smartcheat.core.cheat.CheatFormatException
 import com.ps4smartcheat.core.cheat.CheatProfile
 import com.ps4smartcheat.core.cheat.GoldHenExporter
+import com.ps4smartcheat.core.cheat.fingerprint
 import com.ps4smartcheat.core.cheat.ProfileCheck
 import com.ps4smartcheat.core.cheat.ProfileValidator
 import com.ps4smartcheat.core.edit.EditDeniedException
@@ -173,7 +174,30 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    fun closeGoldHen() { _gh.value = null; _ghChecks.value = emptyMap(); _ghMismatch.value = null; _ghLibrary.value = false }
+    fun closeGoldHen() { _gh.value = null; _ghChecks.value = emptyMap(); _ghMismatch.value = null; _ghLibrary.value = false; ghProfileId = null }
+
+    /** Profile whose code patches the ON/OFF card shows (library mode). */
+    private var ghProfileId: String? = null
+
+    init {
+        // The card must never show a profile as it was when it was opened: a cheat saved, edited or deleted meanwhile
+        // changes the bytes that are compared with memory.
+        viewModelScope.launch {
+            c.cheats.profiles.collect { if (_ghLibrary.value && ghProfileId != null) checkGoldHen() }
+        }
+    }
+
+    /** Rebuilds the card's mods from the profile as it is stored now. False when it has no code patches any more. */
+    private fun reloadLibraryFile(): Boolean {
+        val id = ghProfileId ?: return true
+        val f = c.cheats.profile(id)?.let { com.ps4smartcheat.core.cheat.CodeCheats.asGoldHenFile(it) }
+        if (f == null) { closeGoldHen(); return false }
+        if (f.fingerprint() != _gh.value?.fingerprint()) { _gh.value = f; _ghChecks.value = emptyMap() }
+        return true
+    }
+
+    /** Called whenever the Cheats screen is shown: an open ON/OFF card is checked against memory again. */
+    fun onShown() { if (_gh.value != null) checkGoldHen() }
 
     private val _ghLibrary = MutableStateFlow(false)
     /** True when the ON/OFF card shows code patches of a saved profile (not an opened GoldHEN file). */
@@ -184,6 +208,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         val f = com.ps4smartcheat.core.cheat.CodeCheats.asGoldHenFile(p) ?: run { _error.value = "This profile has no code patches"; return }
         _gh.value = f
         _ghLibrary.value = true
+        ghProfileId = p.id
         _ghChecks.value = emptyMap()
         _error.value = null
         checkGoldHen()
@@ -213,6 +238,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
 
     /** Reads the bytes of every applicable mod in the selected game (read-only). */
     fun checkGoldHen() {
+        if (_ghLibrary.value && !reloadLibraryFile()) return
         val f = _gh.value ?: return
         val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: run { _ghMismatch.value = "Select the running game to check this file."; return }
         _ghMismatch.value = com.ps4smartcheat.core.cheat.GoldHenImport.mismatch(f, sel.titleId, sel.name)
@@ -230,6 +256,12 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun prepareGoldHenToggle(index: Int, enable: Boolean) {
+        if (_ghLibrary.value) {
+            // The profile changed since the card was drawn: show the current mods instead of writing by an old index.
+            val before = _gh.value?.fingerprint()
+            if (!reloadLibraryFile()) return
+            if (_gh.value?.fingerprint() != before) { _error.value = "The profile changed — the switches were refreshed. Check and try again."; checkGoldHen(); return }
+        }
         val f = _gh.value ?: return
         val sel = c.selectedProcess.value ?: return
         viewModelScope.launch {
@@ -238,7 +270,8 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
                 val check = com.ps4smartcheat.core.cheat.GoldHenImport.check(c.backend, sel.pid, f, f.mods[index], regions)
                 _ghChecks.value = _ghChecks.value + (index to check)
                 if (if (enable) !check.canEnable else !check.canDisable) {
-                    _error.value = "\"${f.mods[index].name}\" is ${check.states.joinToString { it.label }} — nothing written."
+                    _error.value = "\"${f.mods[index].name}\" cannot be switched ${if (enable) "on" else "off"}: " +
+                        check.parts.joinToString("; ") { "${it.label} is ${it.state.label}" } + " — nothing written."
                     return@launch
                 }
                 // ON in file order, OFF in reverse (an injection's jump goes last ON and first OFF); patches already in
@@ -375,6 +408,8 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
 @Composable
 fun CheatsScreen() {
     val vm = appViewModel { CheatsViewModel(it) }
+    // Coming back to this screen (e.g. after injecting or removing code elsewhere): never show an old check.
+    androidx.compose.runtime.LaunchedEffect(Unit) { vm.onShown() }
     val profiles by vm.profiles.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val checks by vm.checks.collectAsStateWithLifecycle()
@@ -687,10 +722,51 @@ private fun GoldHenCard(
                 if (ck != null && ck.canEnable) Button(onClick = { onToggle(i, true) }, enabled = canWrite, modifier = Modifier.testTag("ghEnable-$i")) { Text("Enable") }
                 if (ck != null && ck.canDisable) OutlinedButton(onClick = { onToggle(i, false) }, enabled = canWrite, modifier = Modifier.testTag("ghDisable-$i")) { Text("Disable") }
             }
+            // Every part on its own: where it was looked for, its state and — when it does not match — the bytes.
+            if (ck != null && (ck.parts.size > 1 || ck.parts.any { it.reason != null })) PartList(ck, i)
         }
     }
 }
 
+
+/** The parts of one mod (e.g. cave + jump of an injection): location, state, and expected/actual bytes on a mismatch. */
+@Composable
+private fun PartList(ck: com.ps4smartcheat.core.cheat.ModCheck, modIndex: Int) {
+    val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+    val dim = MaterialTheme.colorScheme.onSurfaceVariant
+    fun hex(b: ByteArray?) = b?.let { com.ps4smartcheat.core.util.Hex.encode(it, " ") } ?: "—"
+    Column(Modifier.fillMaxWidth().padding(start = 8.dp).testTag("ghParts-$modIndex"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        ck.parts.forEach { part ->
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val tone = when (part.state) {
+                    com.ps4smartcheat.core.cheat.PatchState.ON -> com.ps4smartcheat.app.ui.components.Tone.GOOD
+                    com.ps4smartcheat.core.cheat.PatchState.OFF -> com.ps4smartcheat.app.ui.components.Tone.NEUTRAL
+                    else -> com.ps4smartcheat.app.ui.components.Tone.BAD
+                }
+                com.ps4smartcheat.app.ui.components.StatusPill(
+                    when (part.state) {
+                        com.ps4smartcheat.core.cheat.PatchState.ON -> "ON"
+                        com.ps4smartcheat.core.cheat.PatchState.OFF -> "OFF"
+                        com.ps4smartcheat.core.cheat.PatchState.MISMATCH -> "MISMATCH"
+                        com.ps4smartcheat.core.cheat.PatchState.UNMAPPED -> "UNMAPPED"
+                    },
+                    tone, modifier = Modifier.testTag("ghPart-$modIndex-${part.index}"),
+                )
+                Text(part.label, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+            }
+            Text(
+                (if (part.address == -1L) "" else com.ps4smartcheat.core.util.Address.format(part.address) + " = ") + part.location,
+                style = mono, color = dim,
+            )
+            part.reason?.let { why ->
+                Text(why, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+                Text("expected OFF  ${hex(part.off)}", style = mono)
+                Text("expected ON   ${hex(part.on)}", style = mono)
+                Text("in memory     ${hex(part.actual)}", style = mono, color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("ghActual-$modIndex-${part.index}"))
+            }
+        }
+    }
+}
 
 @Composable
 private fun ValidationCard(p: CheatProfile, r: com.ps4smartcheat.core.validate.ValidationReport, onClose: () -> Unit) {
