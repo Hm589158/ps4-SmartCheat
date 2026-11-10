@@ -839,6 +839,70 @@ class AppJourneyTest {
         waitText("Patch at " + Address.format(DemoGame.UPDATE + 4))
     }
 
+    /** The mock game runs its loop once a breakpoint is armed. */
+    private fun runGameWhenArmed(times: Int = 1) = Thread {
+        val until = System.currentTimeMillis() + 20_000
+        while (server.watchpoints().none { it != null } && System.currentTimeMillis() < until) Thread.sleep(10)
+        repeat(times) { DemoGame.spendCoin(server); Thread.sleep(20) }
+    }.apply { isDaemon = true; start() }
+
+    private fun dbgPress(t: String) {
+        compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("debugList").performScrollToNode(hasTestTag(t)) }.isSuccess }
+        press(t)
+    }
+
+    @Test fun breakpointRegisterTraceAndManualStepping() {
+        server.stopTimeoutMs = 60_000 // the UI test may take a while between a stop and the next command
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        compose.onNodeWithContentDescription("Code").performClick()
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.UPDATE))
+        press("codeGo")
+        waitText("push rbp")
+        press("codeDebug")
+        waitTag("dbgAddress")
+
+        step("register trace")
+        dbgPress("dbgMode-TRACE")
+        dbgPress("dbgStart")
+        confirmDialog()
+        var game = runGameWhenArmed()
+        waitMock(30_000) { !server.debugAttached && server.steps.get() > 0 }
+        game.join(10_000)
+        assertEquals(false, game.isAlive)
+        assertEquals(4999, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS)) // the routine ran while being stepped over
+        compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("debugList").performScrollToNode(hasTestTag("dbgReleased")) }.isSuccess }
+        waitText("6 instruction(s), the function returned")
+        compose.onNodeWithTag("debugList").performScrollToNode(hasTestTag("dbgHit"))
+        waitText("call rax") // the caller, from the call stack at the hit
+        compose.onNodeWithTag("debugList").performScrollToNode(hasTestTag("dbgStepRow-3"))
+        waitText("after call")
+        waitText("0x0000000000001387 (4999)") // rax changed by the stepped-over routine, hex and decimal
+        shot("60_register_trace")
+        dbgPress("dbgCopy")
+        val clip = compose.activity.getSystemService(android.content.ClipboardManager::class.java).primaryClip!!.getItemAt(0).text.toString()
+        assertEquals(6, clip.lines().size)
+        assertEquals(true, clip.lines().first().startsWith("#0  " + Address.format(DemoGame.UPDATE)) && clip.lines().first().endsWith("push rbp"))
+
+        step("break and step")
+        dbgPress("dbgMode-MANUAL")
+        dbgPress("dbgStart")
+        confirmDialog()
+        val stepsBefore = server.steps.get()
+        game = runGameWhenArmed()
+        waitMock(30_000) { server.gamePaused }
+        dbgPress("dbgStep")
+        waitMock { server.steps.get() == stepsBefore + 1 && server.gamePaused }
+        compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("debugList").performScrollToNode(hasTestTag("dbgStepRow-2")) }.isSuccess }
+        shot("61_break_and_step")
+        dbgPress("dbgResume")
+        waitMock(30_000) { !server.debugAttached && !server.gamePaused }
+        game.join(10_000)
+        assertEquals(false, game.isAlive)
+        assertEquals(4998, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS))
+    }
+
     @Test fun payloadBelowCapability12DisablesWatchpoints() {
         server.faults.capability("1.1") // a released ps4debug-NG without the configurable interrupt port
         connect()

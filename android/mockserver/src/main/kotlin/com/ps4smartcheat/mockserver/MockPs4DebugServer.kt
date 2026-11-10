@@ -542,6 +542,8 @@ class MockPs4DebugServer(
         @Volatile var pendingExecPacket: ByteArray? = null
     }
 
+    /** How long the mock game waits at a breakpoint / step stop for CONTINUE or STEP before it gives up waiting. */
+    @Volatile var stopTimeoutMs = 5000L
     /** Thread id of the mock game's only thread. */
     val gameLwpid: Int = 100001
     /** Number of CMD_DEBUG_STEP / CMD_DEBUG_STEP_THREAD requests accepted (for tests). */
@@ -741,7 +743,7 @@ class MockPs4DebugServer(
      * stop, or the single-step stop when CMD_DEBUG_STEP(_THREAD) was requested (DR6.BS). A step that lands on an
      * enabled execution breakpoint is stepped over once more before it is reported (same interrupt-handler path).
      */
-    fun gameStepDone(pid: Int, rip: Long, registers: Map<String, Long>, threadName: String = "GameMain", timeoutMs: Long = 5000) {
+    fun gameStepDone(pid: Int, rip: Long, registers: Map<String, Long>, threadName: String = "GameMain", timeoutMs: Long = stopTimeoutMs) {
         val d = debug?.takeIf { it.pid == pid } ?: return
         val now = regBlock(registers, rip)
         d.pendingExecPacket?.let { pkt ->

@@ -110,9 +110,39 @@ tail calls that leave no return address behind. This is the same heuristic as Ch
 to open the caller in the disassembler; **Copy** puts the stack on the clipboard. Saved sessions keep each frame's
 module offset.
 
-An execute breakpoint ("capture the call stack when this instruction runs") is possible with ps4debug-NG's watchpoint
-command (`breaktype` 0 = `DBREG_DR7_EXEC`). It is **not** offered yet: resuming from an instruction breakpoint needs
-the x86 resume flag, and without hardware tests that could make the game stop on the same instruction forever.
+## Execution breakpoints, single-step and register trace
+
+**Code → tap an instruction → Breakpoint / trace…** uses the same debugger session for code instead of data.
+Verified against the simulated server only; not yet run on a PS4.
+
+| Mode | What happens | Game paused |
+|---|---|---|
+| Breakpoint | The first time the instruction runs: registers right before it, and the call stack | a moment |
+| Register trace | From the breakpoint, the next 8–256 instructions, each with the registers the previous one changed | while the steps are recorded (one round trip per instruction) |
+| Break and step | Pauses at the breakpoint; **Step**, **Step over**, **Trace N**, **Resume** by hand | until Resume, or 60 s without input |
+
+How it works:
+
+* The breakpoint is a **hardware execution breakpoint** (a debug register, `CMD_DEBUG_SET_WATCHPOINT` with breaktype 0).
+  No game code is changed; ps4debug-NG's software breakpoints (`int3`) are not used.
+* When a thread reaches it, ps4debug-NG's interrupt handler steps the thread past the instruction itself and then
+  reports the stop with the registers from *before* the instruction (`debug.c`, `rw_bits == 0`). The app removes the
+  breakpoint at this first hit, reads the registers after the instruction (`CMD_DEBUG_GETREGS`) and the stack for the
+  call stack. Because the breakpoint is gone, neither stepping nor resuming can meet it again.
+* A step is `CMD_DEBUG_STEP_THREAD` for the thread that hit; its next stop is one row of the trace. **Step over** runs a
+  `call` to its return address with a temporary breakpoint in a second debug register (a recursive call reaching that
+  address deeper in the stack is recognised by `rsp` and skipped). A trace can end early when the function returns.
+* Rows show the instruction *about to run* and the registers changed by the one before it, in hex and decimal. Tap a row
+  for all registers or to open it in the disassembler; **Copy** puts the trace on the clipboard.
+
+Limits and risks:
+
+* While paused or tracing, the whole game is stopped (sound, timers, network of the game). Every way out — finished,
+  stopped, error, leaving the screen — ends with the verified release (resume, clear debug registers, detach).
+* A step that does not report within 2 s (the thread waits in a system call) or a stepped-over call that does not
+  return within 3 s ends the trace; the game is running again in that case.
+* Other threads keep running during a step; ps4debug-NG resumes their stops without reporting them.
+* Only one debugger session exists per console, so a watchpoint and a breakpoint session cannot run together.
 
 ## Reading the results
 

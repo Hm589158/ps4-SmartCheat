@@ -68,6 +68,7 @@ private val sections = listOf(
         listOf(
             "Address list → open an entry → \"What writes?\" (or from Code). The PS4 debugger sets a hardware watchpoint; play until the value changes. Each instruction is listed with its hit count and registers; open it in Code to patch it.",
             "Needs ps4debug-NG with capability level 1.2 (configurable interrupt port, Pharaoh2k/ps4debug-NG pull request #1). The app checks the level when it connects (Diagnostics shows it) and sets everything up itself: no root and no extra computer.",
+            "Code → tap an instruction → Breakpoint / trace: see the registers and callers when that instruction runs (Breakpoint), record the following instructions with the registers each one changes (Register trace), or pause there and step by hand (Break and step; the game resumes by itself after 60 s without input). The breakpoint is a debug register: no game code is changed.",
             "Capture once (default) pauses the game a single time and records the first instruction with its registers. Monitor lists every instruction; it stops by itself after 1000 hits, 2 minutes or when hits come too fast. Each pause is resumed with a verified CONTINUE and the debugger is always released; finished sessions are saved under Saved results.",
         ),
     ),

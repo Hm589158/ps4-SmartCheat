@@ -146,6 +146,8 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
   monitor every instruction that writes/reads an address, with hit count, thread and registers. Every pause is
   resumed with a verified CONTINUE and the session is always released; results are saved and open later in the
   disassembler
+- **Execution breakpoints, single-step and register trace**: registers and callers when an instruction runs, or the
+  following instructions with the registers each one changes; hardware breakpoints, no code changed
 - **Check after restart**: address list, pointers, value cheats and code patches; moved code is found again by its
   signature. **Pointer candidates** ranked by how often they survive restarts
 - No root and no relay: the app picks a high port for the debugger automatically. Needs ps4debug-NG with

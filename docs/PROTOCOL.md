@@ -235,13 +235,24 @@ writes, single-stepping and FS/GS writes are not used.
   this to release a session the PS4 still holds after the app's connection was lost. `CONTINUE` answers `CMD_ERROR`
   when `PT_CONTINUE` fails (e.g. the process is not stopped) and keeps the connection (handler returns 0); `DETACH`
   without a session answers `CMD_ERROR` and closes it.
+* **Execution breakpoint.** `CMD_DEBUG_SET_WATCHPOINT` with `breaktype` 0 (`DBREG_DR7_EXEC`) and length code 0. In
+  `debug.c`'s interrupt handler a stop whose RIP equals an enabled DR0–3 with R/W bits 0 is handled on the PS4: the
+  slot is disabled in DR7, the thread is stepped once (`PT_STEP`, `wait4`), DR7 is restored and only then the
+  interrupt packet — read *before* that step — is sent. So the packet's registers are those before the instruction,
+  the thread is one instruction further, and `CMD_DEBUG_CONTINUE` does not hit the breakpoint again.
+* **Single step.** `CMD_DEBUG_STEP_THREAD = 0xBDBB0013` (`debug_step_thread_handle`): body `u32 lwpid`; `PT_STEP` for
+  that thread, `CMD_SUCCESS`/`CMD_ERROR`, connection kept. While it is pending, stops of other threads are continued
+  by the server without a packet (`g_stepping_lwpid`). The step's stop arrives on the interrupt channel (DR6 bit 14).
+  `CMD_DEBUG_STEP = 0xBDBB0012` (no thread) is verified but not used.
+* **Registers of a stopped thread.** `CMD_DEBUG_GETREGS = 0xBDBB0008` (`debug_getregs_handle`): body `u32 lwpid`;
+  `CMD_SUCCESS` + 176 bytes (`__reg64`); a failing `PT_GETREGS` answers `CMD_ERROR` and closes the connection.
 * **Resume a stopped process.** Without a session, `CMD_DEBUG_PROCESS_STOP` with state 0 sends `SIGCONT` (signal 19
   on FreeBSD) to the pid — offered in Diagnostics when a game looks frozen.
 
 ## Not implemented on purpose
 
-Kernel read/write (`0xBDCC…`), RPC/ELF loading, protection changes (`CMD_PROC_PROTECT`), breakpoints, register
-writes, single-stepping, server-side AOB scans (`0xBDAA0501/0502`; pattern search runs on the phone), console
+Kernel read/write (`0xBDCC…`), RPC/ELF loading, protection changes (`CMD_PROC_PROTECT`), software breakpoints
+(`CMD_DEBUG_SET_BREAKPOINT`, which writes `int3` into the code), register writes, server-side AOB scans (`0xBDAA0501/0502`; pattern search runs on the phone), console
 reboot, Turbo snapshot (Phase B) scans.
 
 ## Limits applied by the client

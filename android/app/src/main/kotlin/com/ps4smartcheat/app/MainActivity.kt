@@ -55,6 +55,7 @@ import com.ps4smartcheat.app.ui.appContainer
 import com.ps4smartcheat.app.ui.screens.AddressesScreen
 import com.ps4smartcheat.app.ui.screens.CodeScreen
 import com.ps4smartcheat.app.ui.screens.WatchScreen
+import com.ps4smartcheat.app.ui.screens.DebuggerScreen
 import com.ps4smartcheat.app.ui.screens.InjectScreen
 import com.ps4smartcheat.app.ui.screens.CheatsScreen
 import com.ps4smartcheat.app.ui.screens.ConnectionScreen
@@ -92,7 +93,7 @@ class MainActivity : ComponentActivity() {
 }
 
 /** Screens opened on top of a tab: they show a back arrow. */
-private val backRoutes = setOf(Routes.EDITOR, Routes.HEX, Routes.PATTERN, Routes.POINTER, Routes.DIAGNOSTICS, Routes.HELP, Routes.CODE, Routes.WATCH, Routes.INJECT)
+private val backRoutes = setOf(Routes.EDITOR, Routes.HEX, Routes.PATTERN, Routes.POINTER, Routes.DIAGNOSTICS, Routes.HELP, Routes.CODE, Routes.WATCH, Routes.INJECT, Routes.DEBUGGER)
 
 private data class Tab(val route: String, val label: String, val icon: ImageVector)
 
@@ -119,6 +120,9 @@ object Routes {
     const val HELP = "help"
     const val CODE = "code"
     const val WATCH = "watch"
+    const val DEBUGGER = "debugger"
+
+    fun debugger(address: Long): String = DEBUGGER + "?address=" + java.lang.Long.toHexString(address)
     const val INJECT = "inject"
 
     fun inject(address: Long): String = INJECT + "?address=" + java.lang.Long.toHexString(address)
@@ -262,7 +266,15 @@ private fun AppRoot() {
                     onViewMemory = { a -> nav.navigate(Routes.hex(a)) },
                     onWatch = { a, size, writes -> nav.navigate(Routes.watch(a, size, writes)) },
                     onInject = { a -> nav.navigate(Routes.inject(a)) },
+                    onDebug = { a -> nav.navigate(Routes.debugger(a)) },
                 )
+            }
+            composable(
+                Routes.DEBUGGER + "?address={address}",
+                arguments = listOf(navArgument("address") { type = NavType.StringType; nullable = true; defaultValue = null }),
+            ) { entry ->
+                val address = entry.arguments?.getString("address")?.takeIf { it.isNotBlank() }?.let { Address.parse(it) }
+                DebuggerScreen(address, onOpenCode = { a -> nav.navigate(Routes.code(a)) })
             }
             composable(
                 Routes.INJECT + "?address={address}",
@@ -317,6 +329,7 @@ private fun titleFor(route: String?): String = when (route) {
     Routes.HELP -> "Guide"
     Routes.CODE -> "Code"
     Routes.WATCH -> "Watchpoint"
+    Routes.DEBUGGER -> "Breakpoint & trace"
     Routes.INJECT -> "Code injection"
     Routes.CHEATS -> "Saved cheats"
     Routes.ADDRESSES -> "Address list"

@@ -2,6 +2,24 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.3
+
+### Execution breakpoints, single-step and register trace (new — verified against the simulated server only)
+- **Code → tap an instruction → Breakpoint / trace…** opens the new debugger screen with three modes:
+  **Breakpoint** (registers right before the instruction and the call stack, the first time it runs),
+  **Register trace** (the next 8–256 instructions, each with the registers the previous one changed, in hex and
+  decimal) and **Break and step** (pause there; Step, Step over, Trace N, Resume).
+- Hardware execution breakpoints only (debug registers): no game code is changed. ps4debug-NG steps the thread past
+  the breakpoint instruction itself; the app removes the breakpoint at the first hit, so stepping and resuming can
+  never meet it again.
+- **Step over** runs calls with a temporary breakpoint at the return address (recursion is recognised by `rsp`);
+  traces can end when the function returns. Steps that do not report in time end the trace instead of hanging.
+- A paused game is resumed automatically after 60 s without input; every way out of a session ends with the verified
+  release (resume, clear debug registers, detach). Trace rows open in the disassembler with their registers; **Copy**
+  puts the trace on the clipboard.
+- Protocol additions verified in ps4debug-NG 1.3.4 `debug.c`: `CMD_DEBUG_STEP_THREAD`, `CMD_DEBUG_GETREGS` and the
+  execute path of `CMD_DEBUG_SET_WATCHPOINT` (docs/PROTOCOL.md, docs/WATCHPOINTS.md).
+
 ## 1.0.2
 
 ### Code caves: Source Code → Target Code (new — verified against the simulated server only)

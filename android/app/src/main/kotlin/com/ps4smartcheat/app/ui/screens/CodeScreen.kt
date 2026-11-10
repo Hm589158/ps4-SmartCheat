@@ -335,7 +335,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
 }
 
 @Composable
-fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Long, Int, Boolean) -> Unit, onInject: (Long) -> Unit = {}) {
+fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Long, Int, Boolean) -> Unit, onInject: (Long) -> Unit = {}, onDebug: (Long) -> Unit = {}) {
     val vm = appViewModel { CodeViewModel(it) }
     LaunchedEffect(Unit) { vm.init(initialAddress) }
     val selected by vm.selected.collectAsStateWithLifecycle()
@@ -432,11 +432,14 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                             Text("${ins.text}   (${Hex.encode(ins.bytes, " ")})", style = mono)
                             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 ins.branchTarget?.let { t -> OutlinedButton(onClick = { vm.follow(t) }) { Text("Follow → ${Address.format(t)}") } }
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                 OutlinedButton(onClick = { onInject(ins.address) }, enabled = ins.valid, modifier = Modifier.testTag("codeInject")) { Text("Inject code…") }
+                                OutlinedButton(onClick = { onDebug(ins.address) }, enabled = ins.valid && ng, modifier = Modifier.testTag("codeDebug")) { Text("Breakpoint / trace…") }
                             }
                             Text(
-                                "Inject code: jump from here to a code cave with your own instructions (the original ones still run). " +
-                                    "Patch below: overwrite the instruction in place.",
+                                "Inject code: jump from here to a code cave with your own instructions. Breakpoint / trace: see the registers and " +
+                                    "callers when this instruction runs, or step through the code after it. Patch below: overwrite it in place.",
                                 style = MaterialTheme.typography.bodySmall, color = dim,
                             )
                             (ins.ripTarget)?.let { t ->
