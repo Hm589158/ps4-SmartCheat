@@ -179,14 +179,6 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     /** Profile whose code patches the ON/OFF card shows (library mode). */
     private var ghProfileId: String? = null
 
-    init {
-        // The card must never show a profile as it was when it was opened: a cheat saved, edited or deleted meanwhile
-        // changes the bytes that are compared with memory.
-        viewModelScope.launch {
-            c.cheats.profiles.collect { if (_ghLibrary.value && ghProfileId != null) checkGoldHen() }
-        }
-    }
-
     /** Rebuilds the card's mods from the profile as it is stored now. False when it has no code patches any more. */
     private fun reloadLibraryFile(): Boolean {
         val id = ghProfileId ?: return true
@@ -202,6 +194,16 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     private val _ghLibrary = MutableStateFlow(false)
     /** True when the ON/OFF card shows code patches of a saved profile (not an opened GoldHEN file). */
     val ghLibrary = _ghLibrary.asStateFlow()
+
+    // Declared after _ghLibrary on purpose: init blocks run in declaration order.
+    init {
+        // The card must never show a profile as it was when it was opened: a cheat saved, edited or deleted meanwhile
+        // changes the bytes that are compared with memory.
+        viewModelScope.launch {
+            c.cheats.profiles.collect { if (_ghLibrary.value && ghProfileId != null) checkGoldHen() }
+        }
+    }
+
 
     /** Shows the profile's code patches as ON/OFF switches (same checks and verified writes as GoldHEN mods). */
     fun openCodePatches(p: CheatProfile) {
