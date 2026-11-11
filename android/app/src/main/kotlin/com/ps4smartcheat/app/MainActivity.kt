@@ -1,9 +1,9 @@
 package com.ps4smartcheat.app
 
-import android.app.Activity
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.layout.Box
@@ -39,7 +39,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -113,7 +112,7 @@ private fun AppRoot() {
     val snackbar = remember { SnackbarHostState() }
     var page by rememberSaveable { mutableStateOf(Page.TAB) }
     val holder = rememberSaveableStateHolder()
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
     val open: (Tool, ToolArgs) -> Unit = { tool, args -> page = Page.TAB; tabs.open(tool, args) }
 
     LaunchedEffect(Unit) {
