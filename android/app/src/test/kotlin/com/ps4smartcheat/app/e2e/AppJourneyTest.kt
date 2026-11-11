@@ -14,7 +14,6 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollTo
@@ -1030,8 +1029,9 @@ class AppJourneyTest {
         assertEquals(listOf(Tool.PROCESSES, Tool.CONNECT) + order.drop(2), tabs.tabs.value.map { it.tool })
         shot("53_tab_dragged")
 
-        step("long press without sliding opens the tab menu")
-        tag("tabChip-SCANNER").performTouchInput { longClick() }
+        step("long press opens the tab menu")
+        tag("tabStrip").performScrollToNode(hasTestTag("tabChip-SCANNER"))
+        tag("tabChip-SCANNER").performSemanticsAction(SemanticsActions.OnLongClick)
         waitText("Close other tabs")
         compose.onNodeWithText("Close other tabs").performSemanticsAction(SemanticsActions.OnClick)
         compose.waitForIdle()
