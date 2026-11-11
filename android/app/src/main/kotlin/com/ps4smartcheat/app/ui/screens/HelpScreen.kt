@@ -19,6 +19,15 @@ private data class HelpSection(val title: String, val steps: List<String>)
 
 private val sections = listOf(
     HelpSection(
+        "Tabs",
+        listOf(
+            "Every tool opens in its own tab, like a browser. Tap a tab to switch to it; your work in the other tabs (scan results, disassembly, a running watch) is kept.",
+            "+ opens the new-tab page with every tool. Links such as View memory or What writes? open the tool in a new tab next to the current one.",
+            "Long-press a tab to move it, duplicate it or close the others. The counter in the toolbar shows all tabs: tap one to switch, use the arrows to reorder, × to close.",
+            "All tabs use the same PS4 connection and the same selected game. Back returns to the tab you used before.",
+        ),
+    ),
+    HelpSection(
         "1. Connect",
         listOf(
             "On the PS4 (jailbroken, GoldHEN): send ps4debug-NG to the payload loader (port 9020 or 9021, depending on the jailbreak). Download: github.com/Pharaoh2k/ps4debug-NG/releases. ps4debug-NG is required for scanning and editing.",

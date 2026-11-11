@@ -28,6 +28,27 @@ plain JVM (locally and in CI). `app` is a thin MVVM layer over `core`.
 | `debug` | `DebugSession` (attach with interrupt listener, watchpoints, continue, detach, SIGCONT), `InterruptListener`/`InterruptChannel` (port-755 connection from the PS4), `AccessMonitor` (what writes / accesses) |
 | `validate` | `SessionValidator` (after restart: address list, pointers, value cheats, code patches with signature search) |
 | `diag` | `LinkDiagnostics` (latency), `ErrorAdvisor` (cause + next steps), `ProcessActivity` (running vs stopped) |
+| `tabs` | `TabManager` (open tool tabs: order, active tab, use history for Back, single- vs multi-instance tools), `Tool`, `ToolArgs`, `TabSpec` |
+
+## App window: tabs
+
+The app is organised like a browser. `AppContainer.tabs` (a `core.tabs.TabManager`) is the single place that opens,
+focuses, reorders, duplicates and closes tool tabs; the tab list is saved in SharedPreferences (`TabStore`) and
+restored at the next start.
+
+* Every tool screen is opened as a tab with `ToolArgs` (address, value type, size, write/access). Links between tools
+  ("view memory", "disassemble", "what writes?") open a tab next to the current one; the same tool at the same address
+  is focused instead of opened twice.
+* Tools that show app-wide state (Connection, Processes, Scanner, Addresses, Cheats, Pattern search, Settings,
+  Diagnostics, Guide) are single-instance. Editor, Memory viewer, Code, Code cave, Watch, Debugger and Pointer scan
+  can be open several times, each tab with its own work.
+* Each tab has its own `ViewModelStore` (`TabViewModelStores`, kept for the process lifetime and cleared when the tab
+  closes, so e.g. a watch session is released) and its own `SaveableStateHolder` entry, so switching tabs never loses
+  a tool's state. Only the active tab is composed.
+* All tabs share the container: one PS4 connection, one selected process, one scan session, one cheat library and the
+  same safety checks. Nothing about reading, writing or confirmation changed with the tabs.
+* Back returns to the tab used before; the new-tab page lists every tool, the overview (tab counter) shows all tabs
+  with reorder and close.
 
 ## Key decisions
 

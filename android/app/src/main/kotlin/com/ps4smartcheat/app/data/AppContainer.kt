@@ -68,6 +68,20 @@ class AppContainer(context: Context) {
     @Volatile private var userDisconnected = false
     val log = AppLog()
     val settings = SettingsStore(context)
+
+    // ------------------------------------------------------------ tabs (central window management)
+
+    private val tabStore = com.ps4smartcheat.app.ui.tabs.TabStore(context)
+    /** One view-model store per tab: a tab keeps its work while other tabs are used. */
+    val tabStores = com.ps4smartcheat.app.ui.tabs.TabViewModelStores()
+    /** Open tool tabs; every tool shares this container (one PS4 connection, one selected process). */
+    val tabs: com.ps4smartcheat.core.tabs.TabManager = tabStore.load().let { (list, active) ->
+        com.ps4smartcheat.core.tabs.TabManager(
+            initial = list, initialActive = active,
+            onChange = { l, a -> tabStore.save(l, a) },
+            onClosed = { id -> tabStores.clear(id) },
+        )
+    }
     private val client = Ps4DebugClient(events = log)
     val backend: DebugBackend = client
 

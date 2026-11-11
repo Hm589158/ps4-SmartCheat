@@ -81,7 +81,7 @@ can also build it from source with the project's `build.sh`. The output is `ps4d
     <td align="center"><img src="docs/images/guide.png" width="190" alt="In-app guide"><br><sub><b>In-app guide</b></sub></td>
   </tr>
 </table>
-<details><summary><b>Tablet layout</b></summary><br><img src="docs/images/tablet.png" width="820" alt="Tablet layout with navigation rail"></details>
+<details><summary><b>Tablet layout</b></summary><br><img src="docs/images/tablet.png" width="820" alt="Tablet layout with tool tabs"></details>
 <sub>Screenshots from the automated UI tests, which run against a simulated ps4debug-NG server (not a real PS4).</sub>
 </div>
 

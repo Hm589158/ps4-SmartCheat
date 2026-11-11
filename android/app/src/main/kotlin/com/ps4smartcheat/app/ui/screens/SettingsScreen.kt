@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -98,8 +99,8 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
     var confirmSystem by remember { mutableStateOf(false) }
     var confirmNonLocal by remember { mutableStateOf(false) }
 
-    var showLog by remember { mutableStateOf(false) }
-    var advancedScan by remember { mutableStateOf(false) }
+    var showLog by rememberSaveable { mutableStateOf(false) }
+    var advancedScan by rememberSaveable { mutableStateOf(false) }
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {

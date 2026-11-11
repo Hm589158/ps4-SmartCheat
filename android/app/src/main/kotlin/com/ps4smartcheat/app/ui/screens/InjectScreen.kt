@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -448,8 +449,8 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
     val saveState by vm.saveState.collectAsStateWithLifecycle()
     val connected = connection is ConnectionState.Connected
     val ng = (connection as? ConnectionState.Connected)?.info?.capabilities?.isNg == true
-    var saving by remember { mutableStateOf(false) }
-    var group by remember { mutableStateOf("") }
+    var saving by rememberSaveable { mutableStateOf(false) }
+    var group by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(saveState) { if (saveState is SaveState.Saved) saving = false }
     val dim = MaterialTheme.colorScheme.onSurfaceVariant
     val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)

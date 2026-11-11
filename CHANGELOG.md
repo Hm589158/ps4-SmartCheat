@@ -4,6 +4,19 @@ All hardware-related items remain **unverified on a real PS4** unless stated oth
 
 ## 1.0.4
 
+### Tabs: every tool in its own tab (new layout)
+- The app window now works like a browser: a strip of tool tabs under the toolbar replaces the bottom navigation bar
+  (and the side rail on tablets). Memory scanner, Disassembler, Code cave, Pointer scan, Cheats and every other tool
+  open in their own tab; switching tabs keeps each tool's work (view models and form fields are kept per tab).
+- Editor, Memory viewer, Code, Code cave, Watch, Debugger and Pointer scan can be open several times (e.g. two
+  disassemblers at different addresses); tools that show app-wide state (Connection, Processes, Scanner, Addresses,
+  Cheats, Settings…) have one tab that is switched to.
+- **+** opens the new-tab page with all tools; the tab counter opens an overview of all tabs (switch, reorder, close);
+  long-press a tab to move it, duplicate it or close the other tabs. Back returns to the tab used before. Open tabs
+  are restored when the app starts again.
+- Central tab management in `core.tabs.TabManager` (unit-tested); all tabs share the one PS4 connection and selected
+  process. Only the layout and navigation changed: every tool, its logic and its safety checks are unchanged.
+
 ### Signing with a PKCS#12 key without a password
 - Release builds can now be signed with a PKCS#12 keystore that has **no password**, using only the
   `SMARTCHEAT_KEYSTORE_BASE64` secret. The Android Gradle plugin needs a keystore password and Java does not list

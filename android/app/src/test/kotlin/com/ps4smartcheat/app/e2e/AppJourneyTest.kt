@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -23,6 +24,7 @@ import com.github.takahirom.roborazzi.captureScreenRoboImage
 import org.junit.rules.TestWatcher
 import org.junit.runner.Description
 import com.ps4smartcheat.app.MainActivity
+import com.ps4smartcheat.core.tabs.Tool
 import com.ps4smartcheat.core.util.Address
 import com.ps4smartcheat.mockserver.DemoGame
 import com.ps4smartcheat.mockserver.MockPs4DebugServer
@@ -111,7 +113,30 @@ class AppJourneyTest {
 
     private fun tag(t: String): SemanticsNodeInteraction = compose.onNodeWithTag(t, useUnmergedTree = true)
 
-    private fun tab(label: String) = compose.onAllNodesWithText(label)[0].performClick()
+    /**
+     * Switches to the tab of a tool (by its label, e.g. "Scanner"); a tool without a tab is opened from the new-tab
+     * page. The tab strip and the new-tab page are lazy lists: the item is scrolled into view first.
+     */
+    private fun tab(label: String) {
+        val tool = Tool.entries.first { it.label == label }
+        val chip = hasTestTag("tabChip-${tool.name}")
+        if (runCatching { tag("tabStrip").performScrollToNode(chip) }.isSuccess) {
+            compose.onAllNodes(chip)[0].performClick()
+        } else {
+            tag("newTab").performClick()
+            waitTag("toolLauncher")
+            tag("toolLauncher").performScrollToNode(hasTestTag("tool-${tool.name}"))
+            tag("tool-${tool.name}").performClick()
+        }
+        compose.waitForIdle()
+    }
+
+    private fun chips(tool: Tool) = compose.onAllNodesWithTag("tabChip-${tool.name}").fetchSemanticsNodes().size
+
+    private fun backPress() {
+        compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+    }
 
     /** Snackbars sit above the bottom of the content; wait until the auto-select notice is gone before tapping there. */
     private fun waitNoSnackbar(text: String = "Detected game", timeoutMs: Long = 20_000) {
@@ -923,8 +948,74 @@ class AppJourneyTest {
         shot("48_watchpoints_need_level_12")
     }
 
+    @Test fun toolsOpenInTabsThatKeepTheirWork() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        val tabs = c().tabs
+        val start = tabs.tabs.value.size
+
+        step("disassembler tab")
+        compose.onNodeWithContentDescription("Code").performClick()
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
+        press("codeGo")
+        waitText("What writes?")
+        assertEquals(1, chips(Tool.CODE))
+
+        step("second disassembler from the new-tab page")
+        tag("newTab").performClick()
+        waitTag("toolLauncher")
+        shot("50_new_tab_page")
+        tag("toolLauncher").performScrollToNode(hasTestTag("tool-CODE"))
+        tag("tool-CODE").performClick()
+        waitTag("codeAddress")
+        assertEquals(2, chips(Tool.CODE))
+        assertEquals(start + 2, tabs.tabs.value.size)
+        assertEquals(true, compose.onAllNodesWithText("What writes?").fetchSemanticsNodes().isEmpty()) // its own, empty state
+
+        step("switching tabs keeps each tool's work")
+        tab("Scanner")
+        waitTag("scanValue")
+        tag("scanValue").performTextInput("5000")
+        tag("firstScan").performClick()
+        waitText("Scan 1: ")
+        tag("tabStrip").performScrollToNode(hasTestTag("tabChip-CODE"))
+        compose.onAllNodesWithTag("tabChip-CODE")[0].performClick()
+        waitText("What writes?") // the first disassembler still shows its code
+        shot("51_tabs_keep_state")
+        tab("Scanner")
+        waitText("Scan 1: ") // the scan is still there
+
+        step("back returns to the tab used before")
+        backPress()
+        waitText("What writes?")
+        assertEquals(Tool.CODE, tabs.active.tool)
+
+        step("overview: reorder and close")
+        tag("tabCount").performClick()
+        waitTag("tabOverview")
+        shot("52_tab_overview")
+        val before = tabs.tabs.value.map { it.id }
+        val firstCode = tabs.tabs.value.indexOfFirst { it.tool == Tool.CODE }
+        compose.onAllNodesWithContentDescription("Move Code left")[0].performClick()
+        compose.waitForIdle()
+        assertEquals(before[firstCode], tabs.tabs.value[firstCode - 1].id)
+        compose.onAllNodesWithContentDescription("Close Code")[1].performClick()
+        compose.waitForIdle()
+        assertEquals(1, tabs.tabs.value.count { it.tool == Tool.CODE })
+        compose.onAllNodesWithTag("overviewCard-SCANNER")[0].performClick()
+        waitText("Scan 1: ")
+
+        step("tab strip: close a tab")
+        tag("tabStrip").performScrollToNode(hasTestTag("tabClose-CODE"))
+        compose.onAllNodesWithTag("tabClose-CODE", useUnmergedTree = true)[0].performClick()
+        compose.waitForIdle()
+        assertEquals(0, tabs.tabs.value.count { it.tool == Tool.CODE })
+        assertEquals(start, tabs.tabs.value.size)
+    }
+
     @Config(qualifiers = "w1280dp-h800dp-land-xhdpi")
-    @Test fun tabletLayoutUsesNavigationRail() {
+    @Test fun tabletLayoutShowsTabsAndWideContent() {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
         tab("Scanner")

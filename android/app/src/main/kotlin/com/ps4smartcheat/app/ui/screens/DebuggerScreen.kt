@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -319,7 +320,7 @@ fun DebuggerScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
     val portOk = info?.capabilities?.attachPort == true
     val running = phase !in setOf(DebugPhase.IDLE, DebugPhase.DONE, DebugPhase.FAILED)
     var confirm by remember { mutableStateOf(false) }
-    var allRegs by remember { mutableStateOf(false) }
+    var allRegs by rememberSaveable { mutableStateOf(false) }
     var expanded by remember { mutableStateOf<Int?>(null) }
     val context = androidx.compose.ui.platform.LocalContext.current
     val dim = MaterialTheme.colorScheme.onSurfaceVariant

@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -358,13 +359,13 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
     val saveState by vm.saveState.collectAsStateWithLifecycle()
     val regs by vm.registers.collectAsStateWithLifecycle()
     val operand by vm.operand.collectAsStateWithLifecycle()
-    var allRegs by remember { mutableStateOf(false) }
+    var allRegs by rememberSaveable { mutableStateOf(false) }
     val connected = connection is ConnectionState.Connected
     val ng = (connection as? ConnectionState.Connected)?.info?.capabilities?.isNg == true
-    var saving by remember { mutableStateOf(false) }
+    var saving by rememberSaveable { mutableStateOf(false) }
     // Close the save form only after the library confirmed the save.
     LaunchedEffect(saveState) { if (saveState is SaveState.Saved) saving = false }
-    var group by remember { mutableStateOf("") }
+    var group by rememberSaveable { mutableStateOf("") }
     val context = androidx.compose.ui.platform.LocalContext.current
     fun copy(style: com.ps4smartcheat.core.asm.Listing.Style) {
         vm.copyText(style)?.let { com.ps4smartcheat.app.ui.components.copyText(context, "Assembly", it) }

@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -277,7 +278,7 @@ fun AddressesScreen(
     val importLauncher = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) vm.importFrom(resolver, uri)
     }
-    var showAdd by remember { mutableStateOf(false) }
+    var showAdd by rememberSaveable { mutableStateOf(false) }
 
     LazyColumn(Modifier.fillMaxSize().testTag("addressList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -402,9 +403,9 @@ private fun WatchRowView(
 
 @Composable
 private fun AddAddressForm(onAdd: (String, ValueType, String) -> Unit) {
-    var address by remember { mutableStateOf("") }
-    var type by remember { mutableStateOf(ValueType.INT32) }
-    var label by remember { mutableStateOf("") }
+    var address by rememberSaveable { mutableStateOf("") }
+    var type by rememberSaveable { mutableStateOf(ValueType.INT32) }
+    var label by rememberSaveable { mutableStateOf("") }
     SectionCard("Add address") {
         OutlinedTextField(address, { address = it.trim() }, label = { Text("Address (hex)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("watchAddress"))
         Selector("Value type", ValueType.entries, type, { it.label }, { type = it })

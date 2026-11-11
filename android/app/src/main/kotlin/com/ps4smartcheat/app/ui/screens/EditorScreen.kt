@@ -21,6 +21,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -258,7 +259,7 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
     val journal by vm.journal.collectAsStateWithLifecycle()
     val frozen by vm.frozen.collectAsStateWithLifecycle()
     val freezeStop by vm.freezeStop.collectAsStateWithLifecycle()
-    var showSave by remember { mutableStateOf(false) }
+    var showSave by rememberSaveable { mutableStateOf(false) }
     val undoStack by vm.undoStack.collectAsStateWithLifecycle()
     val redoStack by vm.redoStack.collectAsStateWithLifecycle()
     val step by vm.step.collectAsStateWithLifecycle()

@@ -83,8 +83,9 @@ screenshot per step (`app/build/outputs/roborazzi/`). CI publishes the screensho
 `ci-screenshots` branch (see its README.md). Further tests: refused connection is reported and recoverable;
 public addresses are blocked; address list survives a game restart (module-relative) without duplicates; byte
 pattern search; "Value between" scan; undo/redo and memory-viewer byte patches inside the journey; address entry
-saved as a cheat; connection diagnostics latency test and guide; tablet layout (1280 dp landscape) with a navigation
-rail; pointer scan from an address-list entry finds the static chain, and the
+saved as a cheat; connection diagnostics latency test and guide; tablet layout (1280 dp landscape) with the tab
+strip; tools open in tabs that keep their work (two disassemblers, scan kept while switching, Back along the tab
+history, overview reorder/close); pointer scan from an address-list entry finds the static chain, and the
 added pointer entry follows the object when the mock game moves it; an Assembly ON/OFF patch (disassemble, assemble
 `nop` on the mock, ON/OFF with confirmation, the demo routine stops/starts spending coins, save, switch from the
 library, session check); "What writes?" lists the store instruction with its hit count, stops and detaches; game

@@ -26,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -108,14 +109,13 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
     val selected by vm.selected.collectAsStateWithLifecycle()
     val st by vm.state.collectAsStateWithLifecycle()
     val message by vm.message.collectAsStateWithLifecycle()
-    var target by remember { mutableStateOf(initialAddress?.let { Address.format(it) } ?: st.target?.let { Address.format(it) } ?: "") }
-    var type by remember { mutableStateOf(initialType ?: st.type) }
-    var depth by remember { mutableStateOf(3) }
-    var maxOffset by remember { mutableStateOf(0x1000) }
-    var newTarget by remember { mutableStateOf("") }
+    var target by rememberSaveable { mutableStateOf(initialAddress?.let { Address.format(it) } ?: st.target?.let { Address.format(it) } ?: "") }
+    var type by rememberSaveable { mutableStateOf(initialType ?: st.type) }
+    var depth by rememberSaveable { mutableStateOf(3) }
+    var maxOffset by rememberSaveable { mutableStateOf(0x1000) }
+    var newTarget by rememberSaveable { mutableStateOf("") }
     val connected = connection is ConnectionState.Connected
     val alive = selected?.exited == false
-    LaunchedEffect(initialAddress) { if (initialAddress != null) target = Address.format(initialAddress) }
     LaunchedEffect(selected?.pid) { vm.loadCandidates() }
     var confirmedAddress by remember { mutableStateOf("") }
 
