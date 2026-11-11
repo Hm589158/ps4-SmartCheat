@@ -131,8 +131,6 @@ class AppJourneyTest {
         compose.waitForIdle()
     }
 
-    private fun chips(tool: Tool) = compose.onAllNodesWithTag("tabChip-${tool.name}").fetchSemanticsNodes().size
-
     private fun backPress() {
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
         compose.waitForIdle()
@@ -960,7 +958,7 @@ class AppJourneyTest {
         tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
         press("codeGo")
         waitText("What writes?")
-        assertEquals(1, chips(Tool.CODE))
+        assertEquals(1, tabs.tabs.value.count { it.tool == Tool.CODE })
 
         step("second disassembler from the new-tab page")
         tag("newTab").performClick()
@@ -969,7 +967,7 @@ class AppJourneyTest {
         tag("toolLauncher").performScrollToNode(hasTestTag("tool-CODE"))
         tag("tool-CODE").performClick()
         waitTag("codeAddress")
-        assertEquals(2, chips(Tool.CODE))
+        assertEquals(2, tabs.tabs.value.count { it.tool == Tool.CODE })
         assertEquals(start + 2, tabs.tabs.value.size)
         assertEquals(true, compose.onAllNodesWithText("What writes?").fetchSemanticsNodes().isEmpty()) // its own, empty state
 
