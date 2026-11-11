@@ -2,6 +2,15 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.4
+
+### Signing with a PKCS#12 key without a password
+- Release builds can now be signed with a PKCS#12 keystore that has **no password**, using only the
+  `SMARTCHEAT_KEYSTORE_BASE64` secret. The Android Gradle plugin needs a keystore password and Java does not list
+  the keys of an unprotected PKCS#12 file, so CI converts it with OpenSSL into a temporary keystore with a random,
+  masked password for that build only — the key and certificate are not changed and no new key is created. The alias
+  (`android-release`) is taken from the file. Keystores with a password keep working as before.
+
 ## 1.0.3
 
 ### Execution breakpoints, single-step and register trace (new — verified against the simulated server only)

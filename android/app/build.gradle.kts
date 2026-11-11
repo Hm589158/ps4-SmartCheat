@@ -6,7 +6,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 
-// Release signing comes exclusively from environment variables (GitHub Secrets in CI).
+// Release signing comes exclusively from environment variables (GitHub Secrets in CI): SMARTCHEAT_KEYSTORE_FILE plus
+// optional password / alias (default alias "android-release", key password = store password).
 // Nothing secret is stored in the repository.
 val releaseKeystore: String? = System.getenv("SMARTCHEAT_KEYSTORE_FILE")
 val hasReleaseSigning = releaseKeystore != null && file(releaseKeystore).exists()
@@ -30,9 +31,12 @@ android {
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseKeystore!!)
-                storePassword = System.getenv("SMARTCHEAT_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("SMARTCHEAT_KEY_ALIAS")
-                keyPassword = System.getenv("SMARTCHEAT_KEY_PASSWORD")
+                // CI passes a password even for a PKCS#12 file without one (.github/scripts/prepare-keystore.sh
+                // converts it); for local builds an empty password is passed through as such.
+                val storePw = System.getenv("SMARTCHEAT_KEYSTORE_PASSWORD").orEmpty()
+                storePassword = storePw
+                keyAlias = System.getenv("SMARTCHEAT_KEY_ALIAS")?.ifBlank { null } ?: "android-release"
+                keyPassword = System.getenv("SMARTCHEAT_KEY_PASSWORD")?.ifBlank { null } ?: storePw
             }
         }
     }

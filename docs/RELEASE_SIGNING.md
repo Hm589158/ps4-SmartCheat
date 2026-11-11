@@ -30,11 +30,14 @@ GitHub → repository → Settings → Secrets and variables → Actions → New
 | Secret | Value |
 |---|---|
 | `SMARTCHEAT_KEYSTORE_BASE64` | content of `smartcheat-release.jks.b64` |
-| `SMARTCHEAT_KEYSTORE_PASSWORD` | keystore password |
+| `SMARTCHEAT_KEYSTORE_PASSWORD` | keystore password. **Leave it out for a PKCS#12 file without a password**: CI then converts the file (same key and certificate) into a temporary keystore with a random password for that build only — see `.github/scripts/prepare-keystore.sh` |
 | `SMARTCHEAT_KEY_ALIAS` | `smartcheat` (the `-alias` above). Optional when the keystore holds a single key: the release workflow then uses that key |
 | `SMARTCHEAT_KEY_PASSWORD` | key password (same as the keystore password if you pressed Enter). Optional: defaults to the keystore password |
 
 Delete the `.b64` file afterwards.
+
+A PKCS#12 file without a password needs only `SMARTCHEAT_KEYSTORE_BASE64`; its key alias (e.g. `android-release`) is
+read from the file.
 
 ## 3. Publish
 
