@@ -287,7 +287,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                     CaveSpace(a.address, a.length, CaveKind.ALLOCATED, c.backend.readMemory(sel.pid, a.address, a.length))
                 }
             }
-            val inj = InjectionPlanner.plan(hook, hookBytes, region, space, src, _replaceBytes.value) { text, at ->
+            val inj = InjectionPlanner.plan(hook, hookBytes, region, space, src, _replaceBytes.value, known = c.knownPatches(sel, regions)) { text, at ->
                 c.codeTools.assemble(text, at).bytes
             }
             val id = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(inj.caveAddress)}"

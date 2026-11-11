@@ -108,6 +108,36 @@ The library uses the same order: a saved injection is the cave parts followed by
 switches them ON in that order and OFF in reverse. A mod left half-applied by an interrupted toggle can be finished
 (Enable) or undone (Disable). Parts already in the target state are skipped. Parts in any other state block both.
 
+## Original bytes (OFF) and the GoldHEN safety check
+
+An injection's OFF bytes are the hook's bytes read from memory when the injection is built. If another patch is ON at
+that address — typically an earlier injection that was edited and built again, or a patch enabled by GoldHEN — those
+bytes are that patch's jump, not the game's code. Saved as OFF, the jump would be written back later with nothing
+behind it (the old cave is empty in a fresh game), and the new cave would copy the jump as an "original" instruction.
+
+* **Building is refused** while a known patch is ON at the hook or the cave: library entries of the game's profiles
+  and this session's injections (`AppliedPatches`). The same applies to code patches in the disassembler. Switch the
+  other patch OFF (or restart the game) first.
+* **Before a GoldHEN export and before a library switch**, every mod passes `GoldHenSafety` (no game connection
+  needed). A mod is left out of the file (and its switch is blocked) when:
+  - OFF of a jump or code patch is a jump into a code cave, or starts with a `jmp rel32` saved at a hook (an earlier
+    injection), or is a 64-bit absolute jump;
+  - ON or OFF of code ends in the middle of an instruction or holds invalid instructions;
+  - the hook's ON is not `jmp` to this mod's cave followed only by whole `nop`s;
+  - the cave code, followed path by path from its start, runs past its end into padding, jumps into the instructions
+    the hook replaced, never leaves the cave, stops the game (`int3`) or uses a 64-bit absolute jump (its target is this
+    session's address);
+  - the cave's OFF is not unused padding (`00`/`CC`), its parts are not contiguous, or the mod has a cave without a
+    jump (or a jump without its cave);
+  - two mods write the same bytes with different original bytes, or two injections share code.
+  Two value mods at the same address with the same original bytes are exported with a warning (enable only one).
+* The written file is read back and compared with what was meant (offsets as hex without `0x`, `on`/`off` as whole
+  upper-case hex bytes of equal length, fields as in the GoldHEN cheat repository).
+
+What GoldHEN itself does when its cheat menu opens is not documented (its loader is closed source) and has not been
+observed with these files on hardware; the checks make sure that writing any `on` or `off` of an exported mod leaves
+the game's code consistent.
+
 ## Known risks
 
 * **The jump is not written atomically.** ps4debug writes memory with a kernel copy. A game thread executing those

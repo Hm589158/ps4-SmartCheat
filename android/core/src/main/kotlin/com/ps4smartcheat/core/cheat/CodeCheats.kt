@@ -13,7 +13,8 @@ object CodeCheats {
         if (patches.isEmpty()) return null
         val units = LinkedHashMap<String, MutableList<CheatEntry>>()
         for (c in patches) units.getOrPut(c.group?.trim()?.ifEmpty { null }?.let { "g:$it" } ?: "c:${c.id}") { ArrayList() } += c
-        val mods = units.map { (key, members) ->
+        val safetyParts = ArrayList<Pair<Int, List<GoldHenSafety.Part>>>()
+        val mods = units.entries.mapIndexed { index, (key, members) ->
             val name = if (key.startsWith("g:")) key.removePrefix("g:") else members.single().name
             val problems = ArrayList<String>()
             val list = members.mapNotNull { c ->
@@ -31,7 +32,15 @@ object CodeCheats {
             sorted.zipWithNext().firstOrNull { (a, b) -> a.module?.name == b.module?.name && a.offset + a.on.size > b.offset }?.let { (a, b) ->
                 problems += "\"${a.label}\" and \"${b.label}\" overlap — the cheat was saved twice; delete the older entries"
             }
+            if (problems.isEmpty()) {
+                safetyParts += index to members.zip(list).map { (c, p) -> GoldHenSafety.Part(c.name, p.offset, p.on, p.off, GoldHenSafety.kindOf(c, members)) }
+            }
             GhImportMod(name, "checkbox", list, problems)
+        }.toMutableList()
+        // The same safety check as the GoldHEN export: a mod whose OFF bytes are not the original code is never switched.
+        val report = GoldHenSafety.check(safetyParts.map { (i, parts) -> GoldHenSafety.Mod(mods[i].name, parts) })
+        safetyParts.forEachIndexed { k, (i, _) ->
+            if (!report.safe(k)) mods[i] = mods[i].copy(problems = mods[i].problems + report.errors[k].map { "unsafe: $it" })
         }
         return GhImportFile(profile.name, profile.titleId.orEmpty(), profile.gameVersion.orEmpty(), profile.processName, mods, emptyList(), emptyList())
     }

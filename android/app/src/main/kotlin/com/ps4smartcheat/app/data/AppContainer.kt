@@ -497,6 +497,15 @@ class AppContainer(context: Context) {
         }
     }
 
+    /**
+     * Patches the app knows in the selected game: the library entries of its profiles and this session's injections.
+     * A new code patch or injection is never planned over one of them while it is ON (its bytes are not original code).
+     */
+    fun knownPatches(sel: SelectedProcess, regions: List<MemoryRegion>): List<com.ps4smartcheat.core.asm.AppliedPatch> =
+        cheats.profiles.value.filter { it.processName == sel.name && (it.titleId == null || it.titleId == sel.titleId) }
+            .flatMap { com.ps4smartcheat.core.asm.AppliedPatches.fromProfile(it, regions) } +
+            _injections.value.filter { it.pid == sel.pid }.flatMap { com.ps4smartcheat.core.asm.AppliedPatches.of(it.name, it.injection) }
+
     fun updateRegions(regions: List<MemoryRegion>) {
         _selected.value = _selected.value?.copy(regions = regions)
     }

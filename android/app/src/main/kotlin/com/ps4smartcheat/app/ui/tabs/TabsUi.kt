@@ -2,7 +2,22 @@ package com.ps4smartcheat.app.ui.tabs
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.scrollBy
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -118,8 +133,10 @@ fun Tool.blurb(): String = when (this) {
 fun TabSpec.label(): String = tool.label + (args.describe()?.let { " · " + it.removePrefix("0x").trimStart('0').ifEmpty { "0" } } ?: "")
 
 /**
- * The tab strip under the toolbar: one chip per tab (tap = switch, × = close, long press = move / duplicate / close
- * others), and + for a new tab. Scrolls horizontally and keeps the active tab in view.
+ * The tab strip under the toolbar: one chip per tab (tap = switch, × = close), and + for a new tab. Long-press a tab
+ * and slide to move it, then let go where it should stay; a long press without sliding opens its menu (duplicate,
+ * close others). Scrolls horizontally, keeps the active tab in view and scrolls by itself while a tab is dragged to
+ * an edge. Works the same in right-to-left layouts.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -128,7 +145,7 @@ fun TabStrip(
     activeId: String,
     onSelect: (String) -> Unit,
     onClose: (String) -> Unit,
-    onMove: (String, Int) -> Unit,
+    onMoveTo: (String, Int) -> Unit,
     onDuplicate: (String) -> Unit,
     onCloseOthers: (String) -> Unit,
     onNewTab: () -> Unit,
@@ -136,23 +153,96 @@ fun TabStrip(
 ) {
     val cs = MaterialTheme.colorScheme
     val state = rememberLazyListState()
+    val scope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val activeIndex = tabs.indexOfFirst { it.id == activeId }
     LaunchedEffect(activeId, tabs.size) { if (activeIndex >= 0) state.animateScrollToItem(activeIndex) }
+
+    // Drag state: the dragged tab and how far it is from its slot (logical px: + = towards the end of the strip).
+    var dragging by remember { mutableStateOf<String?>(null) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var moved by remember { mutableStateOf(false) }
+    /** After a move, the index the dragged tab will have once the strip is laid out again. */
+    var expectIndex by remember { mutableStateOf<Int?>(null) }
+    val moveTo by rememberUpdatedState(onMoveTo)
+    val edge = with(density) { 40.dp.toPx() }
+    val step = with(density) { 14.dp.toPx() }
+
+    fun dragBy(id: String, dx: Float) {
+        dragOffset += if (rtl) -dx else dx
+        if (kotlin.math.abs(dragOffset) > step / 2) moved = true
+        val info = state.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.key == id } ?: return
+        if (expectIndex != null && item.index != expectIndex) return // the last move is not laid out yet
+        expectIndex = null
+        val center = item.offset + dragOffset + item.size / 2f
+        val next = info.visibleItemsInfo.firstOrNull { it.index == item.index + 1 }
+        val prev = info.visibleItemsInfo.firstOrNull { it.index == item.index - 1 }
+        if (next != null && center > next.offset + next.size / 2f) {
+            moveTo(id, next.index)
+            expectIndex = next.index
+            dragOffset -= (next.offset + next.size - item.size - item.offset).toFloat() // its new slot
+        } else if (prev != null && center < prev.offset + prev.size / 2f) {
+            moveTo(id, prev.index)
+            expectIndex = prev.index
+            dragOffset -= (prev.offset - item.offset).toFloat()
+        }
+        // Near an edge: scroll the strip so tabs out of view can be reached.
+        val left = item.offset + dragOffset
+        val by = when {
+            left + item.size > info.viewportEndOffset - edge -> step
+            left < info.viewportStartOffset + edge -> -step
+            else -> 0f
+        }
+        if (by != 0f) scope.launch { dragOffset += state.scrollBy(by) }
+    }
+
     Row(modifier.fillMaxWidth().padding(start = 8.dp, end = 4.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         LazyRow(Modifier.weight(1f).testTag("tabStrip"), state = state, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             itemsIndexed(tabs, key = { _, t -> t.id }) { index, t ->
                 val selected = t.id == activeId
+                val isDragged = dragging == t.id
                 var menu by remember { mutableStateOf(false) }
-                Box {
+                val count = tabs.size
+                Box(
+                    if (isDragged) {
+                        Modifier.zIndex(1f).graphicsLayer {
+                            translationX = if (rtl) -dragOffset else dragOffset
+                            scaleX = 1.06f; scaleY = 1.06f
+                            shadowElevation = 8.dp.toPx()
+                        }
+                    } else {
+                        Modifier.animateItem()
+                    },
+                ) {
                     Surface(
                         shape = RoundedCornerShape(12.dp),
-                        color = if (selected) cs.primaryContainer else cs.surfaceContainerHigh,
-                        contentColor = if (selected) cs.onPrimaryContainer else cs.onSurfaceVariant,
+                        color = if (selected || isDragged) cs.primaryContainer else cs.surfaceContainerHigh,
+                        contentColor = if (selected || isDragged) cs.onPrimaryContainer else cs.onSurfaceVariant,
                         border = if (selected) BorderStroke(1.dp, cs.primary.copy(alpha = 0.6f)) else null,
                         modifier = Modifier
                             .heightIn(min = 36.dp)
-                            .semantics { this.selected = selected }
-                            .combinedClickable(onClick = { onSelect(t.id) }, onLongClick = { menu = true })
+                            .pointerInput(t.id) {
+                                detectDragGesturesAfterLongPress(
+                                    onDragStart = { dragging = t.id; dragOffset = 0f; moved = false; expectIndex = null },
+                                    onDrag = { change, amount -> change.consume(); dragBy(t.id, amount.x) },
+                                    onDragEnd = {
+                                        if (!moved) menu = true
+                                        dragging = null; dragOffset = 0f; expectIndex = null
+                                    },
+                                    onDragCancel = { dragging = null; dragOffset = 0f; expectIndex = null },
+                                )
+                            }
+                            .clickable { onSelect(t.id) }
+                            .semantics {
+                                this.selected = selected
+                                onLongClick("Tab options") { menu = true; true }
+                                customActions = listOfNotNull(
+                                    if (index > 0) CustomAccessibilityAction("Move left") { moveTo(t.id, index - 1); true } else null,
+                                    if (index < count - 1) CustomAccessibilityAction("Move right") { moveTo(t.id, index + 1); true } else null,
+                                )
+                            }
                             .testTag("tabChip-${t.tool.name}"),
                     ) {
                         Row(Modifier.padding(start = 10.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -169,8 +259,6 @@ fun TabStrip(
                         }
                     }
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                        DropdownMenuItem(text = { Text("Move left") }, enabled = index > 0, onClick = { menu = false; onMove(t.id, -1) })
-                        DropdownMenuItem(text = { Text("Move right") }, enabled = index < tabs.size - 1, onClick = { menu = false; onMove(t.id, 1) })
                         if (!t.tool.singleInstance) DropdownMenuItem(text = { Text("Duplicate") }, onClick = { menu = false; onDuplicate(t.id) })
                         DropdownMenuItem(text = { Text("Close other tabs") }, enabled = tabs.size > 1, onClick = { menu = false; onCloseOthers(t.id) })
                         DropdownMenuItem(text = { Text("Close") }, onClick = { menu = false; onClose(t.id) })

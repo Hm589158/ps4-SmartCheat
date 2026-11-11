@@ -2,6 +2,31 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.6
+
+### GoldHEN export: original bytes and safety check (fix)
+- **Root cause found:** an injection took its OFF bytes from memory at the hook. Built while another patch was ON
+  there (an edited injection built again, or a patch enabled by GoldHEN), OFF became that patch's `jmp` and the new
+  cave copied the `jmp` as an "original" instruction. Writing such OFF later jumps into an empty cave and crashes the
+  game. Building an injection or a code patch over a known patch that is ON is now refused (switch it OFF or restart
+  the game first).
+- **Safety check before every GoldHEN export and library switch** (docs/CODE_CAVES.md): OFF that is a jump into a
+  cave or an earlier injection's jump, code cut in the middle of an instruction, a hook that does not jump to its cave,
+  cave code that runs into padding, jumps into the replaced instructions or never returns, 64-bit absolute jumps,
+  caves whose OFF is not padding, and two mods with different original bytes at the same address. Unsafe mods are left
+  out with the reason (shown in the export dialog) and cannot be switched; the file is read back and compared.
+- The file layout was compared with the 1883 files of the GoldHEN cheat repository (fields, hex offsets without
+  `0x`, `checkbox` mods, zero-filled cave OFF). What GoldHEN does when its menu opens was not observed on hardware.
+
+### Faster writes and ON/OFF
+- A write or an injection switch read the game's whole memory map once per part (a 1 KiB cave: 17 times). The map is
+  now read once per operation (injections, library switches); typed and byte writes accept the map already read.
+
+### Tabs
+- Move a tab by long-pressing it and sliding it left or right; let go where it should stay (the strip scrolls at the
+  edges; right-to-left layouts work the same). A long press without sliding opens the tab's menu.
+- The toolbar keeps only Settings and the tab counter; the editor, disassembler and guide are on the new-tab page (+).
+
 ## 1.0.5
 
 ### Tabs: every tool in its own tab (new layout)

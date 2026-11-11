@@ -13,9 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Build
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -154,16 +151,8 @@ private fun AppRoot() {
                         }
                     },
                     actions = {
+                        // Every tool is on the new-tab page (+); only Settings and the tab counter stay here.
                         val tool = active.tool.takeIf { page == Page.TAB }
-                        if (tool != Tool.EDITOR && tool != Tool.HEX) {
-                            IconButton(onClick = { open(Tool.EDITOR, ToolArgs()) }) { Icon(Icons.Filled.Edit, contentDescription = "Memory editor") }
-                        }
-                        if (tool != Tool.CODE) {
-                            IconButton(onClick = { open(Tool.CODE, ToolArgs()) }) { Icon(Icons.Filled.Build, contentDescription = "Code") }
-                        }
-                        if (tool != Tool.HELP) {
-                            IconButton(onClick = { open(Tool.HELP, ToolArgs()) }) { Icon(Icons.Filled.Info, contentDescription = "Guide") }
-                        }
                         if (tool != Tool.SETTINGS) {
                             IconButton(onClick = { open(Tool.SETTINGS, ToolArgs()) }) { Icon(Icons.Filled.Settings, contentDescription = "Settings") }
                         }
@@ -175,7 +164,7 @@ private fun AppRoot() {
                     activeId = if (page == Page.TAB) active.id else "",
                     onSelect = { page = Page.TAB; tabs.focus(it) },
                     onClose = { tabs.close(it) },
-                    onMove = { id, d -> tabs.move(id, d) },
+                    onMoveTo = { id, i -> tabs.moveTo(id, i) },
                     onDuplicate = { page = Page.TAB; tabs.duplicate(it) },
                     onCloseOthers = { page = Page.TAB; tabs.closeOthers(it) },
                     onNewTab = { page = Page.NEW_TAB },

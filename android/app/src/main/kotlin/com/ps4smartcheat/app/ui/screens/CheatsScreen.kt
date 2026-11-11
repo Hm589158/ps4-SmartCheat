@@ -280,7 +280,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
                 // the target state (an interrupted toggle) are skipped.
                 val plans = check.writeOrder(enable).map { i ->
                     val p = check.mod.patches[i]
-                    c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.on else p.off)
+                    c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.on else p.off, regions)
                 }
                 _ghToggle.value = GhToggle(index, enable, plans)
             } catch (e: EditDeniedException) {
@@ -387,7 +387,9 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
         pendingGoldHen = json
         pendingGoldHenName = pre.fileName
-        _message.value = "GoldHEN export: ${r.exported} mod(s) → ${pre.fileName}" + if (r.skipped.isNotEmpty()) "; skipped:\n" + r.skipped.joinToString("\n") else ""
+        _message.value = "GoldHEN export: ${r.exported} mod(s) → ${pre.fileName}" +
+            (if (r.skipped.isNotEmpty()) "; skipped:\n" + r.skipped.joinToString("\n") else "") +
+            (if (r.warnings.isNotEmpty()) "\nWarnings:\n" + r.warnings.joinToString("\n") else "")
         return pre.fileName
     }
 
@@ -637,6 +639,9 @@ private fun GoldHenExportForm(p: CheatProfile, vm: CheatsViewModel, onExport: (S
             Text("Not exported (${pre.skipped.size}):", style = MaterialTheme.typography.bodySmall)
             pre.skipped.take(5).forEach { Text("• $it", style = MaterialTheme.typography.bodySmall, color = dim) }
             if (pre.skipped.size > 5) Text("• … ${pre.skipped.size - 5} more", style = MaterialTheme.typography.bodySmall, color = dim)
+        }
+        if (pre.warnings.isNotEmpty()) {
+            pre.warnings.take(5).forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.tertiary) }
         }
         pre.problems.forEach { Text("⚠ $it", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error) }
         Text(

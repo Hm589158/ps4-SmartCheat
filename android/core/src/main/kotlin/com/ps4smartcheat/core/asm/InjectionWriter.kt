@@ -40,6 +40,8 @@ class InjectionWriter(private val backend: DebugBackend, private val editor: Mem
      */
     suspend fun prepare(pid: Int, processName: String, inj: CodeInjection, enable: Boolean): List<InjectionStep> {
         val now = state(pid, inj)
+        // One map for every part (a 1 KiB cave is 16 writes): the map is the slowest request on a PS4.
+        val regions = backend.getMemoryRegions(pid)
         val steps = ArrayList<InjectionStep>()
         fun cave(on: Boolean) = (inj.caveOn.indices step MAX_PATCH_BYTES).map { off ->
             val end = minOf(off + MAX_PATCH_BYTES, inj.caveOn.size)
@@ -48,19 +50,19 @@ class InjectionWriter(private val backend: DebugBackend, private val editor: Mem
         val total = (inj.caveOn.size + MAX_PATCH_BYTES - 1) / MAX_PATCH_BYTES
         if (enable) {
             when (now) {
-                InjectionState.OFF -> cave(true).forEach { (a, b, l) -> steps += InjectionStep("$l/$total", editor.planBytes(pid, processName, a, b)) }
+                InjectionState.OFF -> cave(true).forEach { (a, b, l) -> steps += InjectionStep("$l/$total", editor.planBytes(pid, processName, a, b, regions)) }
                 InjectionState.CAVE_ONLY -> Unit // cave already verified in place: only the jump is missing
                 else -> throw EditDeniedException("The injection is ${now.label} — it can only be switched ON from \"off\". Nothing written.")
             }
-            steps += InjectionStep("jump", editor.planBytes(pid, processName, inj.hookAddress, inj.hookOn))
+            steps += InjectionStep("jump", editor.planBytes(pid, processName, inj.hookAddress, inj.hookOn, regions))
         } else {
             when (now) {
-                InjectionState.ON -> steps += InjectionStep("jump", editor.planBytes(pid, processName, inj.hookAddress, inj.hookOff))
+                InjectionState.ON -> steps += InjectionStep("jump", editor.planBytes(pid, processName, inj.hookAddress, inj.hookOff, regions))
                 InjectionState.CAVE_ONLY -> Unit
                 else -> throw EditDeniedException("The injection is ${now.label} — it can only be switched OFF from \"on\". Nothing written.")
             }
             if (inj.caveKind == CaveKind.MODULE_PADDING) {
-                cave(false).forEach { (a, b, l) -> steps += InjectionStep("$l/$total", editor.planBytes(pid, processName, a, b)) }
+                cave(false).forEach { (a, b, l) -> steps += InjectionStep("$l/$total", editor.planBytes(pid, processName, a, b, regions)) }
             }
         }
         return steps
@@ -78,9 +80,10 @@ class InjectionWriter(private val backend: DebugBackend, private val editor: Mem
             }
             // Undo the verified writes in reverse (the jump is last, so the game never reached the cave).
             var undone = 0
+            val regions = runCatching { backend.getMemoryRegions(pid) }.getOrNull()
             for (d in (done + s).asReversed()) {
                 val back = runCatching {
-                    editor.execute(editor.planBytes(pid, d.plan.target.processName, d.plan.target.address, d.plan.original))
+                    editor.execute(editor.planBytes(pid, d.plan.target.processName, d.plan.target.address, d.plan.original, regions))
                 }.getOrNull()
                 if (back is WriteOutcome.Verified) undone++
             }

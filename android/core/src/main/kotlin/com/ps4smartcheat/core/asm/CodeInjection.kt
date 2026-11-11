@@ -176,10 +176,12 @@ object InjectionPlanner {
      * @param target the Target Code (see [CaveScript])
      * @param replaceBytes overwrite at least this many bytes at the hook (whole instructions; the jump's size is the minimum)
      * @param assemble assembles typed instructions for the address they will run at (Keystone on the PS4)
+     * @param known patches the app knows (library, this session): planning over one that is ON is refused, because its
+     *   bytes would become the injection's "original" code ([AppliedPatches])
      */
     suspend fun plan(
         hook: Long, window: ByteArray, hookRegion: MemoryRegion?, cave: CaveSpace, target: String,
-        replaceBytes: Int = 0, assemble: suspend (text: String, address: Long) -> ByteArray,
+        replaceBytes: Int = 0, known: List<AppliedPatch> = emptyList(), assemble: suspend (text: String, address: Long) -> ByteArray,
     ): CodeInjection {
         if (hookRegion != null && !hookRegion.isExecutable) {
             throw CodePatchException("${Address.format(hook)} is not in executable memory (${hookRegion.name.ifBlank { "anon" }} ${hookRegion.protString()}).")
@@ -190,6 +192,8 @@ object InjectionPlanner {
         val stolenLen = stolen.sumOf { it.length }
         if (hookRegion != null && !hookRegion.contains(hook, stolenLen)) throw CodePatchException("The jump would cross the end of the code region.")
         val returnAddress = hook + stolenLen
+        AppliedPatches.covering(hook, window, stolenLen, known)?.let { throw CodePatchException(AppliedPatches.refusal(it, "The code at the hook")) }
+        AppliedPatches.covering(cave.address, cave.current, cave.capacity, known)?.let { throw CodePatchException(AppliedPatches.refusal(it, "The cave")) }
         val caveRange = cave.address until cave.address + cave.capacity
         if (hook < caveRange.last + 1 && caveRange.first < returnAddress) throw CodePatchException("The cave overlaps the hooked instructions.")
 

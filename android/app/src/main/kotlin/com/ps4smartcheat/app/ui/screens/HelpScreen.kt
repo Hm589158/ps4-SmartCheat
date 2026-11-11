@@ -22,8 +22,8 @@ private val sections = listOf(
         "Tabs",
         listOf(
             "Every tool opens in its own tab, like a browser. Tap a tab to switch to it; your work in the other tabs (scan results, disassembly, a running watch) is kept.",
-            "+ opens the new-tab page with every tool. Links such as View memory or What writes? open the tool in a new tab next to the current one.",
-            "Long-press a tab to move it, duplicate it or close the others. The counter in the toolbar shows all tabs: tap one to switch, use the arrows to reorder, × to close.",
+            "+ opens the new-tab page with every tool (editor, disassembler, guide…). Links such as View memory or What writes? open the tool in a new tab next to the current one.",
+            "Long-press a tab and slide it left or right, then let go where it should stay. A long press without sliding opens its menu (duplicate, close the others). The counter in the toolbar shows all tabs: tap one to switch, use the arrows to reorder, × to close.",
             "All tabs use the same PS4 connection and the same selected game. Back returns to the tab you used before.",
         ),
     ),

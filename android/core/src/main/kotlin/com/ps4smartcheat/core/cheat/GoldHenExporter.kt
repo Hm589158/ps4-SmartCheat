@@ -36,7 +36,14 @@ object GoldHenExporter {
         val credits: List<String>,
     )
 
-    data class Result(val json: String?, val exported: Int, val skipped: List<String>, val errors: List<String>)
+    /**
+     * @param skipped mods left out of the file, each with the reason (also every mod the safety check refused)
+     * @param warnings mods in the file that need care (e.g. two mods change the same bytes: enable only one)
+     */
+    data class Result(
+        val json: String?, val exported: Int, val skipped: List<String>, val errors: List<String>,
+        val warnings: List<String> = emptyList(),
+    )
 
     private val TITLE_ID = Regex("^[A-Z]{4}\\d{5}$")
     private val VERSION = Regex("^\\d{2}\\.\\d{2}$")
@@ -114,6 +121,8 @@ object GoldHenExporter {
         val skipped: List<String>,
         /** Blocking problems (empty → Export is allowed). */
         val problems: List<String>,
+        /** Exported, but needs care (e.g. two mods change the same bytes: enable only one). */
+        val warnings: List<String> = emptyList(),
     ) {
         val uploadPath: String? get() = fileName?.let { CHEATS_DIR + it }
         val ok: Boolean get() = problems.isEmpty() && fileName != null && exportable > 0
@@ -134,16 +143,41 @@ object GoldHenExporter {
         if (title != null && !runningTitleId.isNullOrBlank() && runningTitleId.uppercase() != title) {
             problems += "The profile is for $title but the running game is ${runningTitleId.uppercase()}."
         }
-        val units = units(profile)
-        val skipped = ArrayList<String>()
-        var exportable = 0
-        for ((key, members) in units) {
-            val r = modFor(key, members, profile.processName)
-            if (r.isSuccess) exportable++ else skipped += r.exceptionOrNull()!!.message!!
-        }
-        if (exportable == 0) problems += "No cheat in this profile can be exported to GoldHEN format."
+        val built = safeMods(profile)
+        if (built.mods.isEmpty()) problems += "No cheat in this profile can be exported to GoldHEN format."
         val name = if (title != null && version is VersionCheck.Ok && processProblem(profile.processName) == null) fileName(title, version.version, profile.processName) else null
-        return Preview(title, version, profile.processName, name, exportable, skipped, problems)
+        return Preview(title, version, profile.processName, name, built.mods.size, built.skipped, problems, built.warnings)
+    }
+
+    private class Built(val mods: List<GhMod>, val skipped: List<String>, val warnings: List<String>)
+
+    /** The mods of [profile] that GoldHEN can express and that pass [GoldHenSafety]; the others with the reason. */
+    private fun safeMods(profile: CheatProfile): Built {
+        val skipped = ArrayList<String>()
+        val built = ArrayList<Pair<GhMod, List<GoldHenSafety.Part>>>()
+        for ((key, members) in units(profile)) {
+            val r = modFor(key, members, profile.processName)
+            if (r.isSuccess) {
+                val mod = r.getOrThrow()
+                built += mod to members.zip(mod.memory).map { (c, m) ->
+                    GoldHenSafety.Part(c.name, m.offset.toLong(16), Hex.decode(m.on), Hex.decode(m.off), GoldHenSafety.kindOf(c, members))
+                }
+            } else {
+                skipped += r.exceptionOrNull()!!.message!!
+            }
+        }
+        val report = GoldHenSafety.check(built.map { (m, parts) -> GoldHenSafety.Mod(m.name, parts) })
+        val mods = ArrayList<GhMod>()
+        val warnings = ArrayList<String>()
+        built.forEachIndexed { i, (m, _) ->
+            if (report.safe(i)) {
+                mods += m
+                report.warnings[i].forEach { w -> warnings += "\"${m.name}\": $w" }
+            } else {
+                skipped += "\"${m.name}\" not exported (unsafe): " + report.errors[i].joinToString(" ")
+            }
+        }
+        return Built(mods, skipped, warnings)
     }
 
     /**
@@ -169,15 +203,45 @@ object GoldHenExporter {
         }
         if (errors.isNotEmpty()) return Result(null, 0, emptyList(), errors)
 
-        val skipped = ArrayList<String>()
-        val mods = ArrayList<GhMod>()
-        for ((key, members) in units(profile)) {
-            val r = modFor(key, members, profile.processName)
-            if (r.isSuccess) mods += r.getOrThrow() else skipped += r.exceptionOrNull()!!.message!!
-        }
-        if (mods.isEmpty()) return Result(null, 0, skipped, listOf("No cheat in this profile can be exported to GoldHEN format."))
+        // Safety check of every mod before anything is written to a file (see GoldHenSafety).
+        val built = safeMods(profile)
+        val mods = built.mods
+        val skipped = built.skipped
+        val warnings = built.warnings
+        if (mods.isEmpty()) return Result(null, 0, skipped, listOf("No cheat in this profile can be exported to GoldHEN format."), warnings)
         val file = GhFile(gameName.trim(), titleId!!, version!!, profile.processName, mods, credits.map { it.trim() }.filter { it.isNotEmpty() })
-        return Result(json.encodeToString(GhFile.serializer(), file), mods.size, skipped, emptyList())
+        val text = json.encodeToString(GhFile.serializer(), file)
+        formatProblems(text, file).takeIf { it.isNotEmpty() }?.let { return Result(null, 0, skipped, it, warnings) }
+        return Result(text, mods.size, skipped, emptyList(), warnings)
+    }
+
+    private val HEX = Regex("^[0-9A-F]+$")
+
+    /**
+     * The written JSON in the layout of the GoldHEN cheat repository (checked against its 1883 files: top-level name,
+     * id, version, process, mods, credits; each mod name, type "checkbox", memory; each memory offset without "0x",
+     * on, off as upper-case hex of equal length) and read back to the same bytes.
+     */
+    internal fun formatProblems(text: String, file: GhFile): List<String> {
+        val out = ArrayList<String>()
+        file.mods.forEach { m ->
+            if (m.name.isBlank()) out += "A mod has no name."
+            if (m.memory.isEmpty()) out += "\"${m.name}\" has no memory entries."
+            m.memory.forEach { e ->
+                if (!HEX.matches(e.offset)) out += "\"${m.name}\": offset \"${e.offset}\" is not hexadecimal."
+                if (!HEX.matches(e.on) || e.on.length % 2 != 0) out += "\"${m.name}\": \"on\" is not whole hex bytes."
+                if (!HEX.matches(e.off) || e.off.length % 2 != 0) out += "\"${m.name}\": \"off\" is not whole hex bytes."
+                if (e.on.length != e.off.length) out += "\"${m.name}\": \"on\" and \"off\" differ in length."
+            }
+        }
+        val back = runCatching { GoldHenImport.parse(text) }.getOrElse { return out + "The file does not read back: ${it.message}" }
+        val same = back.mods.size == file.mods.size && back.mods.zip(file.mods).all { (b, m) ->
+            b.name == m.name && b.patches.size == m.memory.size && b.patches.zip(m.memory).all { (p, e) ->
+                p.offset == e.offset.toLongOrNull(16) && Hex.encode(p.on) == e.on && Hex.encode(p.off) == e.off
+            }
+        }
+        if (!same) out += "The file does not read back to the same patches."
+        return out
     }
 
     /** Cheats grouped into mods, in profile order of first appearance (ungrouped cheats are their own mod). */

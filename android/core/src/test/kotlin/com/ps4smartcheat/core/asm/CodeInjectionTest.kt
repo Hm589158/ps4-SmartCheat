@@ -479,4 +479,59 @@ class CodeInjectionTest {
         assertEquals(listOf(inj.caveAddress - DemoGame.TEXT_START, inj.caveAddress - DemoGame.TEXT_START + 64, DemoGame.SUB_ONE - DemoGame.TEXT_START), back.patches.map { it.offset })
         assertNull(GoldHenImport.mismatch(GoldHenImport.parse(export.json!!), "MOCK00001", "eboot.bin"))
     }
+
+    @Test fun planningOverAPatchThatIsOnIsRefused() = runBlocking {
+        connect()
+        val inj = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE), "mov eax, 1000")
+        assertTrue(switch(inj, true).ok)
+        val regions = client.getMemoryRegions(pid)
+        val window = client.readMemory(pid, DemoGame.SUB_ONE, InjectionPlanner.HOOK_WINDOW)
+        assertEquals(0xE9.toByte(), window[0]) // the hook now holds the jump
+        suspend fun replan(known: List<AppliedPatch>) =
+            InjectionPlanner.plan(DemoGame.SUB_ONE, window, regions.regionFor(DemoGame.SUB_ONE), moduleCave(DemoGame.SUB_ONE + 0x40), "nop\njmp return", known = known, assemble = nop)
+
+        // Known as this session's injection, or as library entries: refused, nothing planned.
+        try { replan(AppliedPatches.of("Coins", inj)); fail() } catch (e: CodePatchException) {
+            assertTrue(e.message!!, e.message!!.contains("currently changed by \"Coins (jump)\""))
+        }
+        var n = 0
+        val saved = CheatProfile("p", "Demo", "MOCK00001", "01.00", "eboot.bin", cheats = InjectionEntries.build(inj, "Coins", null, regions) { "e${++n}" })
+        try { replan(AppliedPatches.fromProfile(saved, regions)); fail() } catch (e: CodePatchException) {
+            assertTrue(e.message!!, e.message!!.contains("Coins · jump"))
+        }
+        // Code patches too.
+        try {
+            CodePatchPlanner.plan(DemoGame.SUB_ONE, window, Hex.decode("90"), "nop", regions.regionFor(DemoGame.SUB_ONE), AppliedPatches.of("Coins", inj)); fail()
+        } catch (e: CodePatchException) { assertTrue(e.message!!.contains("currently changed")) }
+
+        // Unknown to the app (e.g. enabled by GoldHEN): the plan takes the jump as "original" — and the export refuses it.
+        val bad = replan(emptyList())
+        assertEquals(0xE9.toByte(), bad.hookOff[0])
+        val entries = InjectionEntries.build(bad, "Coins again", null, regions) { "f${++n}" }
+        val export = GoldHenExporter.export(CheatProfile("q", "Demo", "CUSA12345", "01.00", "eboot.bin", cheats = entries), "Demo", emptyList())
+        assertNull(export.json)
+        assertTrue(export.skipped.toString(), export.skipped.single().contains("OFF (the original code)"))
+
+        // Switched OFF, the original code is back and the hook can be planned again.
+        assertTrue(switch(inj, false).ok)
+        val fresh = client.readMemory(pid, DemoGame.SUB_ONE, InjectionPlanner.HOOK_WINDOW)
+        InjectionPlanner.plan(DemoGame.SUB_ONE, fresh, regions.regionFor(DemoGame.SUB_ONE), moduleCave(DemoGame.SUB_ONE), "nop\njmp return", known = AppliedPatches.of("Coins", inj), assemble = nop)
+        Unit
+    }
+
+    @Test fun anInjectionReadsTheMemoryMapOncePerSwitch() = runBlocking {
+        connect()
+        val counting = object : com.ps4smartcheat.core.backend.DebugBackend by client {
+            var maps = 0
+            override suspend fun getMemoryRegions(pid: Int) = client.getMemoryRegions(pid).also { maps++ }
+        }
+        val countingWriter = InjectionWriter(counting, MemoryEditor(counting, { EditPolicy(editingEnabled = true, allowNonWritableRegions = true) }))
+        // 15 × 5 bytes of code + the original instructions: a cave of two chunks.
+        val inj = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE), (List(14) { "mov eax, 1" } + "mov eax, 300").joinToString("\n"))
+        val steps = countingWriter.prepare(pid, "eboot.bin", inj, true)
+        assertEquals(listOf("cave 1/2", "cave 2/2", "jump"), steps.map { it.label })
+        assertEquals(1, counting.maps) // was one per part
+        assertTrue(countingWriter.execute(pid, inj, steps, true).ok)
+        assertEquals(1, counting.maps)
+    }
 }

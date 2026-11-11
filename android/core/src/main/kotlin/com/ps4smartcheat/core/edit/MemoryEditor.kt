@@ -111,22 +111,27 @@ class MemoryEditor(
         return Snapshot(backend.readMemory(pid, address, type.size), region)
     }
 
-    /** Validates and prepares a write. Throws [EditDeniedException] when policy forbids it. */
-    suspend fun plan(target: EditTarget, valueText: String): WritePlan {
+    /**
+     * Validates and prepares a write. Throws [EditDeniedException] when policy forbids it.
+     *
+     * @param regions the process's memory map when the caller has just read it (one operation of several writes
+     *   reads the map once instead of once per write — on a PS4 the map is the slowest request); null = read it now.
+     */
+    suspend fun plan(target: EditTarget, valueText: String, regions: List<MemoryRegion>? = null): WritePlan {
         checkPolicy(target)
         val replacement = ValueCodec.encode(ValueCodec.parse(target.type, valueText))
-        return planChecked(target.copy(length = target.type.size), replacement, valueText.trim())
+        return planChecked(target.copy(length = target.type.size), replacement, valueText.trim(), regions)
     }
 
     /**
      * Validates and prepares a raw byte patch (1..[MAX_PATCH_BYTES] bytes) at [address], e.g. from the memory
      * viewer. Same policy, region and confirmation rules as typed writes.
      */
-    suspend fun planBytes(pid: Int, processName: String, address: Long, bytes: ByteArray): WritePlan {
+    suspend fun planBytes(pid: Int, processName: String, address: Long, bytes: ByteArray, regions: List<MemoryRegion>? = null): WritePlan {
         if (bytes.isEmpty() || bytes.size > MAX_PATCH_BYTES) throw EditDeniedException("Patch 1..$MAX_PATCH_BYTES bytes at a time")
         val target = EditTarget(pid, processName, address, ValueType.INT8, bytes.size)
         checkPolicy(target)
-        return planChecked(target, bytes, Hex.encode(bytes, " "))
+        return planChecked(target, bytes, Hex.encode(bytes, " "), regions)
     }
 
     private fun checkPolicy(target: EditTarget) {
@@ -137,9 +142,9 @@ class MemoryEditor(
         }
     }
 
-    private suspend fun planChecked(target: EditTarget, replacement: ByteArray, text: String): WritePlan {
+    private suspend fun planChecked(target: EditTarget, replacement: ByteArray, text: String, map: List<MemoryRegion>?): WritePlan {
         val p = policy()
-        val regions = backend.getMemoryRegions(target.pid)
+        val regions = map ?: backend.getMemoryRegions(target.pid)
         val region = regions.regionFor(target.address, target.length)
             ?: throw EditDeniedException("${Address.format(target.address)} is not mapped in pid ${target.pid}.")
         val warnings = ArrayList<String>()

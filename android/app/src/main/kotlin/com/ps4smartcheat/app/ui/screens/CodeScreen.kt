@@ -224,7 +224,10 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
                 var window = c.backend.readMemory(sel.pid, ins.address, len)
                 // If this app already patched here, plan against the journaled original bytes, not the patch.
                 c.editor.originalFor(sel.pid, ins.address)?.original?.let { o -> if (o.size <= window.size) window = o + window.copyOfRange(o.size, window.size) }
-                val p = CodePatchPlanner.plan(ins.address, window, bytes, if (_assembly.value) _source.value else null, region)
+                val p = CodePatchPlanner.plan(
+                    ins.address, window, bytes, if (_assembly.value) _source.value else null, region,
+                    known = c.knownPatches(sel, sel.regions),
+                )
                 _preview.value = p
                 _state.value = p.stateOf(c.backend.readMemory(sel.pid, p.address, p.length))
                 _error.value = null

@@ -54,7 +54,10 @@ object CodePatchPlanner {
      * @param window bytes read at [address] (at least `newBytes.size + 15`, see [WINDOW_BYTES])
      * @param region the mapping containing [address], when known
      */
-    fun plan(address: Long, window: ByteArray, newBytes: ByteArray, source: String?, region: MemoryRegion?): CodePatch {
+    fun plan(
+        address: Long, window: ByteArray, newBytes: ByteArray, source: String?, region: MemoryRegion?,
+        known: List<AppliedPatch> = emptyList(),
+    ): CodePatch {
         if (newBytes.isEmpty()) throw CodePatchException("The new code is empty.")
         if (newBytes.size > MAX_PATCH_BYTES) throw CodePatchException("The new code is ${newBytes.size} bytes; at most $MAX_PATCH_BYTES bytes can be patched at once.")
         if (region != null) {
@@ -76,6 +79,7 @@ object CodePatchPlanner {
         }
         if (covered > MAX_PATCH_BYTES) throw CodePatchException("Replacing whole instructions needs $covered bytes (max $MAX_PATCH_BYTES).")
         if (region != null && !region.contains(address, covered)) throw CodePatchException("The patch would cross the end of the code region.")
+        AppliedPatches.covering(address, window, covered, known)?.let { throw CodePatchException(AppliedPatches.refusal(it, "The code")) }
         val off = window.copyOfRange(0, covered)
         val on = newBytes + X86.nops(covered - newBytes.size)
         if (on.contentEquals(off)) throw CodePatchException("The new code is identical to the original — nothing to patch.")

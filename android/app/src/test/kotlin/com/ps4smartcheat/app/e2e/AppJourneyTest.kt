@@ -14,6 +14,9 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performTextClearance
@@ -530,7 +533,7 @@ class AppJourneyTest {
         waitTag("pingResult", timeoutMs = 20_000)
         waitText("avg")
         shot("38_diagnostics")
-        compose.onNodeWithContentDescription("Guide").performClick()
+        tab("Guide")
         waitTag("help")
         waitText("Find a value")
         shot("39_guide")
@@ -546,7 +549,7 @@ class AppJourneyTest {
         assertEquals(true, c().settings.value.editingEnabled && c().settings.value.allowNonWritableRegions)
 
         step("disassemble")
-        compose.onNodeWithContentDescription("Code").performClick()
+        tab("Code")
         waitTag("codeAddress")
         tag("codeAddress").performTextInput(Address.format(DemoGame.SUB_ONE))
         press("codeGo")
@@ -639,7 +642,7 @@ class AppJourneyTest {
         assertEquals(true, c().settings.value.editingEnabled && c().settings.value.allowNonWritableRegions)
 
         step("disassemble and open Inject")
-        compose.onNodeWithContentDescription("Code").performClick()
+        tab("Code")
         waitTag("codeAddress")
         tag("codeAddress").performTextInput(Address.format(DemoGame.SUB_ONE))
         press("codeGo")
@@ -755,7 +758,7 @@ class AppJourneyTest {
         waitText("eboot.bin (77)", timeoutMs = 20_000)
 
         step("open code at the store")
-        compose.onNodeWithContentDescription("Code").performClick()
+        tab("Code")
         waitTag("codeAddress")
         tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
         press("codeGo")
@@ -799,7 +802,7 @@ class AppJourneyTest {
     @Test fun captureOnceSavesTheFirstWriterForLater() {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
-        compose.onNodeWithContentDescription("Code").performClick()
+        tab("Code")
         waitTag("codeAddress")
         tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
         press("codeGo")
@@ -881,7 +884,7 @@ class AppJourneyTest {
         server.stopTimeoutMs = 60_000 // the UI test may take a while between a stop and the next command
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
-        compose.onNodeWithContentDescription("Code").performClick()
+        tab("Code")
         waitTag("codeAddress")
         tag("codeAddress").performTextInput(Address.format(DemoGame.UPDATE))
         press("codeGo")
@@ -933,7 +936,7 @@ class AppJourneyTest {
         server.faults.capability("1.1") // a released ps4debug-NG without the configurable interrupt port
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)
-        compose.onNodeWithContentDescription("Code").performClick()
+        tab("Code")
         waitTag("codeAddress")
         tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
         press("codeGo")
@@ -953,7 +956,7 @@ class AppJourneyTest {
         val start = tabs.tabs.value.size
 
         step("disassembler tab")
-        compose.onNodeWithContentDescription("Code").performClick()
+        tab("Code")
         waitTag("codeAddress")
         tag("codeAddress").performTextInput(Address.format(DemoGame.STORE_COINS))
         press("codeGo")
@@ -1010,6 +1013,29 @@ class AppJourneyTest {
         compose.waitForIdle()
         assertEquals(0, tabs.tabs.value.count { it.tool == Tool.CODE })
         assertEquals(start, tabs.tabs.value.size)
+
+        step("long-press and slide a tab to move it")
+        val order = tabs.tabs.value.map { it.tool }
+        assertEquals(Tool.CONNECT, order[0])
+        tag("tabStrip").performScrollToNode(hasTestTag("tabChip-CONNECT"))
+        val chip = tag("tabChip-PROCESSES")
+        val width = chip.fetchSemanticsNode().size.width.toFloat()
+        chip.performTouchInput {
+            down(center)
+            advanceEventTime(viewConfiguration.longPressTimeoutMillis + 200)
+            repeat(12) { moveBy(androidx.compose.ui.geometry.Offset(-width / 8, 0f)); advanceEventTime(16) }
+            up()
+        }
+        compose.waitForIdle()
+        assertEquals(listOf(Tool.PROCESSES, Tool.CONNECT) + order.drop(2), tabs.tabs.value.map { it.tool })
+        shot("53_tab_dragged")
+
+        step("long press without sliding opens the tab menu")
+        tag("tabChip-SCANNER").performTouchInput { longClick() }
+        waitText("Close other tabs")
+        compose.onNodeWithText("Close other tabs").performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        assertEquals(listOf(Tool.SCANNER), tabs.tabs.value.map { it.tool })
     }
 
     @Config(qualifiers = "w1280dp-h800dp-land-xhdpi")
