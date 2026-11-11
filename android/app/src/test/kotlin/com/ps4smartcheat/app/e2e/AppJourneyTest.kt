@@ -133,6 +133,11 @@ class AppJourneyTest {
         compose.waitForIdle()
     }
 
+    /** Scrolls [list] to the row tagged [row], waiting until the row exists (results can appear after the summary). */
+    private fun scrollTo(list: String, row: String, timeoutMs: Long = 20_000) {
+        compose.waitUntil(timeoutMs) { runCatching { compose.onNodeWithTag(list).performScrollToNode(hasTestTag(row)) }.isSuccess }
+    }
+
     private fun backPress() {
         compose.runOnUiThread { compose.activity.onBackPressedDispatcher.onBackPressed() }
         compose.waitForIdle()
@@ -407,14 +412,14 @@ class AppJourneyTest {
         tag("firstScan").performClick()
         waitText("Scan 1: ")
         val coins = Address.format(DemoGame.COINS_ADDRESS)
-        compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("add-$coins"))
+        scrollTo("scannerList", "add-$coins")
         tag("add-$coins").performClick()
         waitText("to the address list")
         tab("Addresses")
         waitWatchValue(COINS_LABEL, "5000")
         // Adding again does not duplicate the entry.
         tab("Scanner")
-        compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("add-$coins"))
+        scrollTo("scannerList", "add-$coins")
         tag("add-$coins").performClick()
         waitText("Already in the address list")
         // The game is closed and started again (new pid): the saved entry resolves in the new process.
