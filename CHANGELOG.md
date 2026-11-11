@@ -2,6 +2,25 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.7
+
+### Processes screen no longer keeps loading
+- The list appears at once (names), then fills in process details with games first and system processes last. Reading
+  details is limited to 15 s per listing and stops when a request hangs and ends the session; processes not read yet
+  keep their name-only kind instead of the screen waiting.
+- The list was read again every time the Processes tab was shown and every time a process was selected, and taps were
+  disabled meanwhile. It is now read when the screen is first shown, on Refresh, or when the selected game exits;
+  selecting a process has its own progress and no longer waits for a list refresh.
+- Simulated with a server that answers slowly or never answers a process request (tests); not observed on a PS4.
+
+### Faster checks
+- Checking a saved injection (library switches, session check) read every 64-byte part separately; parts that lie
+  back to back are now read with one request (a 1 KiB cave: 1 read instead of 16).
+
+### Code quality
+- One shared grouping of cheats into mods for the GoldHEN export and the library switches; compiler warnings fixed;
+  UI tests wait for result rows before scrolling to them.
+
 ## 1.0.6
 
 ### GoldHEN export: original bytes and safety check (fix)

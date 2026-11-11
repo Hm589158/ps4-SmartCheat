@@ -177,7 +177,7 @@ object GoldHenImport {
      * The executable base is the lowest mapping of [GhImportFile.process].
      */
     suspend fun check(backend: DebugBackend, pid: Int, file: GhImportFile, mod: GhImportMod, regions: List<MemoryRegion>): ModCheck {
-        val parts = mod.patches.mapIndexed { i, p ->
+        val located = mod.patches.map { p ->
             // Library patches: the saved module reference (same resolution as SessionValidator). GoldHEN files: the
             // game image of the file's process.
             val moduleName = p.module?.name ?: file.process
@@ -185,9 +185,49 @@ object GoldHenImport {
             val offset = p.module?.offset ?: p.offset
             val location = "$moduleName+0x${java.lang.Long.toHexString(offset).uppercase()}" +
                 (base?.let { " (base ${com.ps4smartcheat.core.util.Address.format(it)})" } ?: "")
-            inspect(backend, pid, i, p.label ?: "patch ${i + 1}", location, base?.plus(offset), p.on, p.off, regions)
+            location to base?.plus(offset)
+        }
+        val current = readContiguous(backend, pid, mod.patches.map { it.on.size }, located.map { it.second }, regions)
+        val parts = mod.patches.mapIndexed { i, p ->
+            inspect(backend, pid, i, p.label ?: "patch ${i + 1}", located[i].first, located[i].second, p.on, p.off, regions, current[i])
         }
         return ModCheck(mod, parts.map { it.address }, parts.map { it.state }, parts)
+    }
+
+    /** Largest single read that joins neighbouring parts. */
+    private const val MAX_JOINED_READ = 64 * 1024
+
+    /**
+     * Bytes of parts that lie back to back in one readable region (a cave saved in 64-byte chunks), read with one
+     * request per run instead of one per part. Parts read alone are left out (null): [inspect] reads them.
+     */
+    private suspend fun readContiguous(
+        backend: DebugBackend, pid: Int, sizes: List<Int>, addresses: List<Long?>, regions: List<MemoryRegion>,
+    ): List<ByteArray?> {
+        val out = arrayOfNulls<ByteArray>(sizes.size)
+        val order = addresses.indices.filter { addresses[it] != null && sizes[it] > 0 }.sortedBy { addresses[it] }
+        var run = ArrayList<Int>()
+        suspend fun flush() {
+            if (run.size > 1) {
+                val start = addresses[run.first()]!!
+                val length = addresses[run.last()]!! + sizes[run.last()] - start
+                if (length <= MAX_JOINED_READ && regions.regionFor(start, length.toInt())?.isReadable == true) {
+                    val bytes = backend.readMemory(pid, start, length.toInt())
+                    for (j in run) {
+                        val from = (addresses[j]!! - start).toInt()
+                        out[j] = bytes.copyOfRange(from, from + sizes[j])
+                    }
+                }
+            }
+            run = ArrayList()
+        }
+        for (i in order) {
+            val last = run.lastOrNull()
+            if (last != null && addresses[i] != addresses[last]!! + sizes[last]) flush()
+            run += i
+        }
+        flush()
+        return out.toList()
     }
 
     /**
@@ -197,10 +237,12 @@ object GoldHenImport {
     suspend fun inspect(
         backend: DebugBackend, pid: Int, index: Int, label: String, location: String, address: Long?,
         on: ByteArray, off: ByteArray, regions: List<MemoryRegion>,
+        /** Bytes already read at [address] (a joined read), or null to read them now. */
+        current: ByteArray? = null,
     ): PartCheck {
         if (address == null) return PartCheck(index, label, location, -1L, PatchState.UNMAPPED, on, off, null)
         if (regions.regionFor(address, on.size)?.isReadable != true) return PartCheck(index, label, location, address, PatchState.UNMAPPED, on, off, null)
-        val now = backend.readMemory(pid, address, on.size)
+        val now = current ?: backend.readMemory(pid, address, on.size)
         val state = when {
             now.contentEquals(off) -> PatchState.OFF
             now.contentEquals(on) -> PatchState.ON

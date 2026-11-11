@@ -27,12 +27,49 @@ sealed interface ProcessEvent {
     data class Restarted(override val identity: ProcessIdentity, val replacement: ProcessDetails) : ProcessEvent
 }
 
-/** Reads the process list and classifies every process (one CMD_PROC_INFO per process). */
-suspend fun DebugBackend.listProcessDetails(): List<ProcessDetails> =
-    getProcesses().distinctBy { it.pid }.sortedBy { it.pid }.map { e ->
-        val info = try { getProcessInfo(e.pid) } catch (ex: BackendException) { null }
-        GameDetector.classify(e, info)
+/** Time limit for reading the details (CMD_PROC_INFO) of all processes in one listing. */
+const val PROCESS_INFO_BUDGET_MS = 15_000L
+
+/**
+ * Reads the process list and classifies every process (one CMD_PROC_INFO per process).
+ *
+ * The listing can never hang the caller: the names are reported first ([onProgress]), then the details are read
+ * with games and other programs first and system processes (named Sce…, recognised without details) last; reading
+ * stops when [budgetMs] is used up or the connection is lost (a request that times out ends the session), and the
+ * processes not read yet keep their name-only classification. A process whose details fail is shown without them.
+ */
+suspend fun DebugBackend.listProcessDetails(
+    budgetMs: Long = PROCESS_INFO_BUDGET_MS,
+    clock: () -> Long = System::currentTimeMillis,
+    onProgress: ((List<ProcessDetails>) -> Unit)? = null,
+): List<ProcessDetails> {
+    val entries = getProcesses().distinctBy { it.pid }.sortedBy { it.pid }
+    val out = entries.map { GameDetector.classify(it, null).copy(reason = "details not read yet") }.toMutableList()
+    onProgress?.invoke(out.toList())
+    val deadline = clock() + budgetMs
+    val order = entries.indices.sortedBy { if (GameDetector.classify(entries[it], null).kind == ProcessKind.SYSTEM) 1 else 0 }
+    for ((n, i) in order.withIndex()) {
+        if (clock() > deadline) {
+            order.drop(n).forEach { j -> out[j] = GameDetector.classify(entries[j], null).copy(reason = "details not read (time limit)") }
+            break
+        }
+        val info = try {
+            getProcessInfo(entries[i].pid)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: BackendException) {
+            if (state.value !is ConnectionState.Connected) {
+                order.drop(n).forEach { j -> out[j] = GameDetector.classify(entries[j], null).copy(reason = "details not read (connection lost)") }
+                break
+            }
+            null
+        }
+        out[i] = GameDetector.classify(entries[i], info)
+        onProgress?.invoke(out.toList())
     }
+    onProgress?.invoke(out.toList())
+    return out
+}
 
 /**
  * Polls the process list while a process is selected and reports when it exits or restarts.

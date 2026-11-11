@@ -451,8 +451,10 @@ class CodeInjectionTest {
         val file = CodeCheats.asGoldHenFile(stored)!!
         val mod = file.mods.single()
         assertEquals(3, mod.patches.size)
+        val readsBefore = server.readRequests.get()
         var check = GoldHenImport.check(client, pid, file, mod, regions)
         assertTrue(check.canEnable)
+        assertEquals(2, server.readRequests.get() - readsBefore) // the two cave chunks in one read, the jump in another
         assertEquals(listOf(0, 1, 2), check.writeOrder(true))
 
         // Interrupted toggle: only the first cave chunk written → partial; Enable completes only what is missing.

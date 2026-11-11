@@ -23,6 +23,8 @@ import kotlin.concurrent.thread
  * the unwinder works on real return addresses read while the game is paused.
  */
 class CallStackTest {
+    private val lenientJson = Json { ignoreUnknownKeys = true }
+
     private val server = MockPs4DebugServer().also { DemoGame.install(it); it.faults.enableNg() }
     private val client = Ps4DebugClient()
 
@@ -122,7 +124,7 @@ class CallStackTest {
         assertEquals(frames, RegisterSnapshot.of(r).callStack)
         assertEquals(frames, RegisterSnapshot.of(back, r.instructionAddress, 0).callStack)
         // Old saved files without call stacks still load.
-        val old = Json { ignoreUnknownKeys = true }.decodeFromString(SavedAccess.serializer(), """{"instructionAddress":"0x402009","count":1,"thread":"T"}""")
+        val old = lenientJson.decodeFromString(SavedAccess.serializer(), """{"instructionAddress":"0x402009","count":1,"thread":"T"}""")
         assertTrue(old.callStack.isEmpty())
     }
 

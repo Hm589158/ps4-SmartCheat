@@ -241,7 +241,7 @@ class AppJourneyTest {
         tag("scanValue").performTextInput("4200")
         tag("nextScan").performClick()
         waitText("Scan 2: ")
-        compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("result-$coins"))
+        scrollTo("scannerList", "result-$coins")
         waitTag("result-$coins")
         waitText("eboot.bin+0x120") // region shown on the result row
         shot("06_refined")
@@ -270,7 +270,7 @@ class AppJourneyTest {
         compose.waitUntil(20_000) { exists("scannerList") || exists("newValue") }
         if (!exists("newValue")) {
             // Tab navigation showed the scanner (not the restored editor): open the result again.
-            compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("result-$coins"))
+            scrollTo("scannerList", "result-$coins")
             tag("result-$coins").performClick()
         }
         waitTag("newValue")
@@ -478,7 +478,7 @@ class AppJourneyTest {
         tag("firstScan").performClick()
         waitText("Scan 1: ")
         val coins = Address.format(DemoGame.COINS_ADDRESS)
-        compose.onNodeWithTag("scannerList").performScrollToNode(hasTestTag("result-$coins"))
+        scrollTo("scannerList", "result-$coins")
         waitTag("result-$coins")
         waitText("Chunked scan (Android)") // range modes are not offloaded to the PS4
         shot("35_range_scan")
@@ -509,7 +509,7 @@ class AppJourneyTest {
         tag("pointerStart").performClick()
         val chain = "[eboot.bin+0x100200]+0x48"
         compose.waitUntil(30_000) { c().pointerScan.state.value.let { !it.running && it.chains.isNotEmpty() } }
-        compose.onNodeWithTag("pointerList").performScrollToNode(hasTestTag("chain-$chain"))
+        scrollTo("pointerList", "chain-$chain")
         waitTag("chain-$chain", timeoutMs = 30_000)
         shot("36_pointer_scan")
         waitNoSnackbar()

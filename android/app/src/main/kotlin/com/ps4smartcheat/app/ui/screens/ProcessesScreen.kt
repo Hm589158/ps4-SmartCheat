@@ -67,6 +67,11 @@ class ProcessesViewModel(private val c: AppContainer) : ViewModel() {
 
     fun setQuery(q: String) { _query.value = q }
 
+    private val _selecting = MutableStateFlow(false)
+    /** A process is being selected (its memory map is read). */
+    val selecting = _selecting.asStateFlow()
+    private var seenSelection: Pair<Int?, Boolean?>? = null
+
     fun refresh() {
         if (c.backend.state.value !is ConnectionState.Connected) { _error.value = "Connect to the PS4 first"; return }
         if (_loading.value) return
@@ -74,8 +79,10 @@ class ProcessesViewModel(private val c: AppContainer) : ViewModel() {
             _loading.value = true
             _error.value = null
             try {
+                // Names first, then details (games first); bounded in time, so the list never keeps loading.
+                val show: (List<ProcessDetails>) -> Unit = { _processes.value = it }
                 // One retry: process enumeration can race with a game starting or exiting.
-                val list = try { c.backend.listProcessDetails() } catch (e: BackendException) { c.backend.listProcessDetails() }
+                val list = try { c.backend.listProcessDetails(onProgress = show) } catch (e: BackendException) { c.backend.listProcessDetails(onProgress = show) }
                 _processes.value = list
                 val sel = c.selectedProcess.value
                 if (sel != null && !sel.exited && list.none { it.pid == sel.pid && it.name == sel.name }) {
@@ -89,16 +96,28 @@ class ProcessesViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    /**
+     * Reloads the list only when the selected game exited or another one was selected elsewhere — not every time the
+     * tab is shown (that re-read every process each time and blocked taps meanwhile).
+     */
+    fun onSelectionChanged(pid: Int?, exited: Boolean?) {
+        val key = pid to exited
+        val before = seenSelection
+        seenSelection = key
+        if (before != null && before != key && (exited == true || before.first != pid && _processes.value.none { it.pid == pid })) refresh()
+    }
+
     fun select(details: ProcessDetails) {
+        if (_selecting.value) return
         viewModelScope.launch {
-            _loading.value = true
+            _selecting.value = true
             _error.value = null
             try {
                 c.selectDetails(details)
             } catch (e: BackendException) {
                 _error.value = "Could not inspect ${details.name}: ${e.message}"
             } finally {
-                _loading.value = false
+                _selecting.value = false
             }
         }
     }
@@ -120,6 +139,7 @@ fun ProcessesScreen(onOpenScanner: () -> Unit) {
     val connection by vm.connection.collectAsStateWithLifecycle()
     val processes by vm.processes.collectAsStateWithLifecycle()
     val loading by vm.loading.collectAsStateWithLifecycle()
+    val selecting by vm.selecting.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
     val selected by vm.selected.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
@@ -131,7 +151,7 @@ fun ProcessesScreen(onOpenScanner: () -> Unit) {
         if (connected && processes.isEmpty()) vm.refresh()
     }
     // Refresh when the selected process exits or is replaced, so the list reflects the console.
-    LaunchedEffect(selected?.pid, selected?.exited) { if (connected) vm.refresh() }
+    LaunchedEffect(selected?.pid, selected?.exited) { if (connected) vm.onSelectionChanged(selected?.pid, selected?.exited) }
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
@@ -140,7 +160,7 @@ fun ProcessesScreen(onOpenScanner: () -> Unit) {
                 val sel = selected
                 if (sel != null && !sel.exited) OutlinedButton(onClick = onOpenScanner) { Text("Scan ${sel.name}") }
             }
-            if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+            if (loading || selecting) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("processesLoading"))
             ErrorText(error)
             if (!connected) Text("Not connected.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
@@ -153,7 +173,7 @@ fun ProcessesScreen(onOpenScanner: () -> Unit) {
                 SectionCard("Detected game") {
                     Text("${game.titleId ?: "no title ID"} — ${game.name} (pid ${game.pid})", modifier = Modifier.testTag("detectedGame"))
                     Text(game.reason, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Button(onClick = { vm.select(game) }, enabled = !loading) { Text("Select game") }
+                    Button(onClick = { vm.select(game) }, enabled = !selecting) { Text("Select game") }
                 }
             }
         }
@@ -187,7 +207,7 @@ fun ProcessesScreen(onOpenScanner: () -> Unit) {
                         else -> {}
                     }
                 },
-                modifier = Modifier.testTag("process-${p.name}").clickable(enabled = !loading) { vm.select(p) },
+                modifier = Modifier.testTag("process-${p.name}").clickable(enabled = !selecting) { vm.select(p) },
             )
             HorizontalDivider()
         }

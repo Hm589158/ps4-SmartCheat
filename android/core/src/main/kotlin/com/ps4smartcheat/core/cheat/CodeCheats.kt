@@ -11,11 +11,10 @@ object CodeCheats {
     fun asGoldHenFile(profile: CheatProfile): GhImportFile? {
         val patches = profile.cheats.filter { it.isPatch }
         if (patches.isEmpty()) return null
-        val units = LinkedHashMap<String, MutableList<CheatEntry>>()
-        for (c in patches) units.getOrPut(c.group?.trim()?.ifEmpty { null }?.let { "g:$it" } ?: "c:${c.id}") { ArrayList() } += c
         val safetyParts = ArrayList<Pair<Int, List<GoldHenSafety.Part>>>()
-        val mods = units.entries.mapIndexed { index, (key, members) ->
-            val name = if (key.startsWith("g:")) key.removePrefix("g:") else members.single().name
+        val mods = CheatGroups.of(patches).mapIndexed { index, g ->
+            val members = g.members
+            val name = g.name
             val problems = ArrayList<String>()
             val list = members.mapNotNull { c ->
                 val module = c.module

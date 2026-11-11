@@ -18,12 +18,12 @@ plain JVM (locally and in CI). `app` is a thin MVVM layer over `core`.
 | `protocol` | `Ps4DebugClient` (standard ps4debug), constants, local-network policy |
 | `scan` | `ValueCodec`, `Matcher`, `ScanEngine` (Android chunked scan + link measurement), `ServerScanner` (ps4debug-NG iterative + Turbo), `ScanController` (backend selection/fallback, per-process sessions, cancellation, pagination, stats), snapshots |
 | `edit` | `MemoryEditor` (policy checks, original journal, verified write, restore), `ProcessSafety` |
-| `cheat` | Models, `CheatJson` (format + validation), `CheatRepository` (atomic JSON file), `ProfileValidator`, `GoldHenExporter` |
+| `cheat` | Models, `CheatGroups`, `GoldHenSafety`, `CheatJson` (format + validation), `CheatRepository` (atomic JSON file), `ProfileValidator`, `GoldHenExporter` |
 | `live` | `FreezeManager` (client-side periodic writes while connected) |
 | `tools` | `MemoryViewer`/`HexDump` (mapped-only display reads, change diff), `ScanResultsCsv`, `BytePattern`/`PatternSearch` (AOB and text search) |
 | `watch` | Per-game address list: `WatchRepository` (atomic JSON keyed by title ID), `WatchResolver` (module-relative / same session / earlier session / unmapped), `WatchReader` (batched reads within one region) |
 | `pointer` | `PointerScanner` (pointer map as two sorted primitive arrays, bounded backward search to static module data, restart filter), `PointerResolver` (follows a chain reading mapped memory only), `PointerChain`, `PointerStability`/`PointerCandidateStore` (candidates ranked by restarts survived) |
-| `process` | `GameDetector`, `ProcessWatcher` (exit/restart detection) |
+| `process` | `GameDetector`, `ProcessWatcher` (exit/restart detection), `listProcessDetails` (names first, details with games first, time-limited) |
 | `asm` | `X86` (iced-x86 decode/format, instruction before a trap RIP, signatures with wildcarded constants), `CodeTools` (ps4debug-NG assembler and reference search), `CodePatchPlanner`/`CodePatch` (whole-instruction ON/OFF patches) |
 | `debug` | `DebugSession` (attach with interrupt listener, watchpoints, continue, detach, SIGCONT), `InterruptListener`/`InterruptChannel` (port-755 connection from the PS4), `AccessMonitor` (what writes / accesses) |
 | `validate` | `SessionValidator` (after restart: address list, pointers, value cheats, code patches with signature search) |

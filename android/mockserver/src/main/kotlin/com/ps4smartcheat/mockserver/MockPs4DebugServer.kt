@@ -77,6 +77,10 @@ class MockPs4DebugServer(
         @Volatile var dropReadAfterBytes: Int? = null
         /** Artificial delay per CMD_PROC_READ in ms. */
         @Volatile var readDelayMs = 0L
+        /** Artificial delay per CMD_PROC_INFO in ms. */
+        @Volatile var procInfoDelayMs = 0L
+        /** Never answer CMD_PROC_INFO for this pid (the client must time out). */
+        @Volatile var stallProcInfoPid: Int? = null
 
         // ---- ps4debug-NG emulation (off by default: the mock then behaves like a classic server) ----
         /** CMD_BRANDING reply (text before the NUL); null = command unsupported (no reply). */
@@ -318,6 +322,13 @@ class MockPs4DebugServer(
             CMD_PROC_INFO -> {
                 if (body.capacity() < 4) { status(out, CMD_DATA_NULL); return true }
                 val pid = body.int
+                if (faults.procInfoDelayMs > 0) Thread.sleep(faults.procInfoDelayMs)
+                if (faults.stallProcInfoPid == pid) {
+                    // Keep the socket open but never answer (like a kernel call that does not return).
+                    val until = System.currentTimeMillis() + 60_000
+                    while (running && System.currentTimeMillis() < until) Thread.sleep(20)
+                    return false
+                }
                 val p = process(pid)
                 status(out, CMD_SUCCESS)
                 // Real server answers even for unknown pids (with zeroed fields).

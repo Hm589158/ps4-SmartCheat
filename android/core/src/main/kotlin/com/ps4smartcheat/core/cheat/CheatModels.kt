@@ -150,3 +150,20 @@ object ModuleResolver {
 
     fun resolve(ref: ModuleRef, regions: List<MemoryRegion>): Long? = baseOf(ref.name, regions)?.let { it + ref.offset }
 }
+
+/**
+ * Cheats grouped into mods, as they are switched and exported: entries sharing a [CheatEntry.group] form one mod,
+ * every other entry is a mod of its own; mods keep the order of their first entry.
+ */
+object CheatGroups {
+    data class Group(val name: String, val members: List<CheatEntry>, val grouped: Boolean)
+
+    fun of(entries: List<CheatEntry>): List<Group> {
+        val units = LinkedHashMap<String, MutableList<CheatEntry>>()
+        for (c in entries) units.getOrPut(c.group?.trim()?.ifEmpty { null }?.let { "g:$it" } ?: "c:${c.id}") { ArrayList() } += c
+        return units.map { (key, members) ->
+            val grouped = key.startsWith("g:")
+            Group(if (grouped) key.removePrefix("g:") else members.single().name, members, grouped)
+        }
+    }
+}

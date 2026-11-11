@@ -492,7 +492,7 @@ fun CheatsScreen() {
                     CheatRow(
                         entry = e, check = cc,
                         canApply = check != null && cc != null && check.canApply && cc.status.usable,
-                        onApply = { if (cc != null && check != null) vm.prepareApply(cc, check) },
+                        onApply = { if (cc != null) vm.prepareApply(cc, check) }, // cc comes from check: both non-null
                         onEdit = { editCheat = p to e },
                         onDelete = { vm.deleteCheat(p, e) },
                     )

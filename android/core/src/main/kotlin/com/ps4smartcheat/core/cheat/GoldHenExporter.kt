@@ -47,6 +47,7 @@ object GoldHenExporter {
 
     private val TITLE_ID = Regex("^[A-Z]{4}\\d{5}$")
     private val VERSION = Regex("^\\d{2}\\.\\d{2}$")
+    @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     private val json = Json { prettyPrint = true; prettyPrintIndent = "  " }
 
     /** Where GoldHEN reads JSON cheat files (GoldHEN_Cheat_Repository README, "Storage"). */
@@ -155,8 +156,9 @@ object GoldHenExporter {
     private fun safeMods(profile: CheatProfile): Built {
         val skipped = ArrayList<String>()
         val built = ArrayList<Pair<GhMod, List<GoldHenSafety.Part>>>()
-        for ((key, members) in units(profile)) {
-            val r = modFor(key, members, profile.processName)
+        for (g in CheatGroups.of(profile.cheats)) {
+            val members = g.members
+            val r = modFor(g, profile.processName)
             if (r.isSuccess) {
                 val mod = r.getOrThrow()
                 built += mod to members.zip(mod.memory).map { (c, m) ->
@@ -244,24 +246,18 @@ object GoldHenExporter {
         return out
     }
 
-    /** Cheats grouped into mods, in profile order of first appearance (ungrouped cheats are their own mod). */
-    private fun units(profile: CheatProfile): Map<String, List<CheatEntry>> {
-        val units = LinkedHashMap<String, MutableList<CheatEntry>>()
-        for (c in profile.cheats) units.getOrPut(c.group?.trim()?.ifEmpty { null }?.let { "g:$it" } ?: "c:${c.id}") { ArrayList() } += c
-        return units
-    }
-
     /** One mod, or a failure whose message says why it is skipped (a group is skipped as a whole). */
-    private fun modFor(key: String, members: List<CheatEntry>, processName: String): kotlin.Result<GhMod> {
+    private fun modFor(g: CheatGroups.Group, processName: String): kotlin.Result<GhMod> {
+        val members = g.members
         val memory = ArrayList<GhMemory>()
         val reasons = ArrayList<String>()
         for (c in members) {
             val r = memoryFor(c, processName)
             if (r.isSuccess) memory += r.getOrThrow() else reasons += "${c.name}: ${r.exceptionOrNull()!!.message}"
         }
-        val name = if (key.startsWith("g:")) key.removePrefix("g:") else members.single().name
+        val name = g.name
         if (reasons.isNotEmpty()) {
-            return kotlin.Result.failure(IllegalStateException(if (key.startsWith("g:")) "Group \"$name\" skipped — " + reasons.joinToString("; ") else reasons.single()))
+            return kotlin.Result.failure(IllegalStateException(if (g.grouped) "Group \"$name\" skipped — " + reasons.joinToString("; ") else reasons.single()))
         }
         val overlap = memory.sortedBy { it.offset.toLong(16) }.zipWithNext().firstOrNull { (a, b) -> a.offset.toLong(16) + a.on.length / 2 > b.offset.toLong(16) }
         if (overlap != null) return kotlin.Result.failure(IllegalStateException("\"$name\": two patches overlap at offset ${overlap.second.offset}."))
