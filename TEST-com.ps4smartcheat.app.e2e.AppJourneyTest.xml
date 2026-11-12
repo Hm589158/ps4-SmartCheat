@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.ps4smartcheat.app.e2e.AppJourneyTest" tests="19" skipped="0" failures="0" errors="0" timestamp="2026-11-12T14:08:51.600Z" hostname="runnervm7aw5e" time="98.582">
+  <properties/>
+  <testcase name="captureOnceSavesTheFirstWriterForLater" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="28.667"/>
+  <testcase name="addressListFollowsGameRestart" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="10.422"/>
+  <testcase name="pointerScanFindsChainThatFollowsMovingObject" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="4.457"/>
+  <testcase name="connectionErrorIsShownAndRecoverable" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="1.119"/>
+  <testcase name="breakpointRegisterTraceAndManualStepping" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="4.399"/>
+  <testcase name="bytePatternSearchFindsPlantedBytes" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="2.682"/>
+  <testcase name="runningGameIsAutoSelectedAndExitIsDetected" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="6.811"/>
+  <testcase name="droppedConnectionIsRecoveredAutomatically" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="2.653"/>
+  <testcase name="fullUserJourney" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="11.92"/>
+  <testcase name="codeCaveInjectionRunsInTheGameIsSavedAndSwitchedFromCheats" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="4.332"/>
+  <testcase name="payloadBelowCapability12DisablesWatchpoints" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="1.923"/>
+  <testcase name="toolsOpenInTabsThatKeepTheirWork" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="3.334"/>
+  <testcase name="assemblyOnOffPatchChangesTheGameAndIsSaved" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="3.354"/>
+  <testcase name="rangeScanFindsValueBetweenBounds" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="1.668"/>
+  <testcase name="tabletLayoutShowsTabsAndWideContent" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="2.498"/>
+  <testcase name="findWhatWritesListsTheInstructionAndDetaches" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="3.283"/>
+  <testcase name="oneShotInjectionRunsOnceAndFreesItsFlag" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="1.597"/>
+  <testcase name="nonLocalAddressIsBlocked" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="0.301"/>
+  <testcase name="diagnosticsAndGuide" classname="com.ps4smartcheat.app.e2e.AppJourneyTest" time="3.153"/>
+  <system-out><![CDATA[E2E step: capture once (default mode)
+E2E step: open the saved result without the debugger
+E2E step: register values in the disassembler
+E2E step: call stack
+E2E step: register trace
+E2E step: break and step
+E2E step: connect
+E2E step: pick process
+E2E step: first scan
+E2E step: refine
+E2E step: editor read-only
+E2E step: enable editing
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: write
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: restore
+E2E step: undo/redo
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: save cheat: type value
+E2E step: save cheat: open form
+E2E step: save cheat: fill form
+E2E step: add to address list
+E2E step: memory viewer
+E2E step: hex patch
+Roborazzi: It seems that there are multiple windows.We capture all windows using captureScreenRoboImage(). We can add a flag to disable this behavior so please let us know if you need it.
+E2E step: cheat library
+E2E step: address list
+E2E step: settings
+E2E step: disassemble and open Inject
+E2E step: copy the listing
+E2E step: write the Target Code
+E2E step: build preview
+E2E step: inject
+E2E step: save to cheats
+E2E step: remove
+E2E step: switch from Cheats
+E2E step: GoldHEN export: version format and file name
+E2E step: disassembler tab
+E2E step: second disassembler from the new-tab page
+E2E step: switching tabs keeps each tool's work
+E2E step: back returns to the tab used before
+E2E step: overview: reorder and close
+E2E step: tab strip: close a tab
+E2E step: long-press and slide a tab to move it
+E2E step: long press opens the tab menu
+E2E step: disassemble
+E2E step: preview nop
+E2E step: switch ON
+E2E step: save patch: failure keeps the form and the input
+E2E step: save patch: success
+E2E step: switch OFF
+E2E step: library switches
+E2E step: session check
+E2E step: open code at the store
+E2E step: start watching
+E2E step: stop
+E2E step: activity check
+E2E step: one-shot guard
+E2E step: build and switch ON
+E2E step: switch OFF frees the flag
+]]></system-out>
+  <system-err><![CDATA[[Robolectric] WARN: Android SDK 36 requires Java 21 (have Java 17). Tests won't be run on SDK 36 unless explicitly requested.
+]]></system-err>
+</testsuite>
