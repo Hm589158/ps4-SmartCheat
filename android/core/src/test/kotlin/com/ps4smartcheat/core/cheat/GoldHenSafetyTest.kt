@@ -128,4 +128,17 @@ class GoldHenSafetyTest {
         assertTrue(GoldHenExporter.formatProblems(r.json!!, broken).any { it.contains("not hexadecimal") })
         assertNull(GoldHenImport.mismatch(GoldHenImport.parse(r.json!!), "CUSA12345", "eboot.bin"))
     }
+
+    @Test fun creditsAreNeverEmpty() {
+        // An empty "credits" list crashed GoldHEN's cheat menu on a PS4 (owner report); the export fills in a default.
+        val none = Json.parseToJsonElement(GoldHenExporter.export(profile(injection()), "Game", emptyList()).json!!).jsonObject
+        assertEquals("[\"SmartCheat\"]", none["credits"].toString())
+        val blank = Json.parseToJsonElement(GoldHenExporter.export(profile(injection()), "Game", listOf(" ", "")).json!!).jsonObject
+        assertEquals("[\"SmartCheat\"]", blank["credits"].toString())
+        val given = Json.parseToJsonElement(GoldHenExporter.export(profile(injection()), "Game", listOf(" Hm58 ", "x")).json!!).jsonObject
+        assertEquals("[\"Hm58\",\"x\"]", given["credits"].toString())
+        val r = GoldHenExporter.export(profile(injection()), "Game", emptyList())
+        val file = Json.decodeFromString(GoldHenExporter.GhFile.serializer(), r.json!!)
+        assertTrue(GoldHenExporter.formatProblems(r.json!!, file.copy(credits = emptyList())).any { it.contains("credits") })
+    }
 }

@@ -30,6 +30,11 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import com.ps4smartcheat.core.backend.BackgroundRequest
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import java.io.EOFException
 import java.io.FilterInputStream
 import java.io.FilterOutputStream
@@ -70,6 +75,27 @@ class Ps4DebugClient(
     override val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
     private val mutex = Mutex()
+    /** User actions waiting for (or holding the turn of) the connection; background requests step aside meanwhile. */
+    private val foregroundWaiting = AtomicInteger()
+    private val _linkMillis = MutableStateFlow<Long?>(null)
+
+    /**
+     * Smoothed time of a small request (a round trip to the PS4 and back, a few KiB at most), or null before the first
+     * one: how responsive the link is. Large transfers are left out, they measure throughput instead.
+     */
+    override val linkMillis: StateFlow<Long?> = _linkMillis.asStateFlow()
+
+    private fun <T> timed(block: () -> T): T {
+        val inBefore = bytesIn.get()
+        val outBefore = bytesOut.get()
+        val t0 = System.nanoTime()
+        val r = block()
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        if (bytesIn.get() - inBefore + bytesOut.get() - outBefore <= SMALL_EXCHANGE) {
+            _linkMillis.value = _linkMillis.value?.let { (it * 3 + ms) / 4 } ?: ms
+        }
+        return r
+    }
 
     @Volatile private var socket: Socket? = null
     private var input: InputStream? = null
@@ -244,7 +270,7 @@ class Ps4DebugClient(
                 s.soTimeout = 3000
                 s.connect(InetSocketAddress(InetAddress.getByName(opts.host.trim()), opts.port), opts.connectTimeoutMs)
                 val out = s.getOutputStream()
-                out.write(header(cmd, body.size)); out.write(body); out.flush()
+                out.write(header(cmd, body.size) + body); out.flush()
                 bytesOut.addAndGet((P.CMD_PACKET_SIZE + body.size).toLong())
                 val st = ByteArray(4)
                 var n = 0
@@ -285,8 +311,34 @@ class Ps4DebugClient(
      * released only after resuming there: a request started from the UI thread kept every other request waiting
      * until the UI thread got to run that resumption.)
      */
-    private suspend fun <T> request(what: String, idempotent: Boolean = true, block: () -> T): T = withContext(ioDispatcher) {
+    private suspend fun <T> request(what: String, idempotent: Boolean = true, block: () -> T): T {
+        // User actions first: a background request (BackgroundRequest) steps aside while one is waiting — also when it
+        // already queued for the lock before the user action arrived — for at most BackgroundRequest.MAX_YIELD_MS.
+        val background = currentCoroutineContext()[com.ps4smartcheat.core.backend.BackgroundRequestKey] != null
+        val waiting = AtomicBoolean(!background)
+        if (!background) foregroundWaiting.incrementAndGet()
+        val deadline = System.currentTimeMillis() + BackgroundRequest.MAX_YIELD_MS
+        fun yieldNow() = background && foregroundWaiting.get() > 0 && System.currentTimeMillis() < deadline
+        try {
+            while (true) {
+                while (yieldNow()) delay(5)
+                val r = requestLocked(what, idempotent, { if (waiting.compareAndSet(true, false)) foregroundWaiting.decrementAndGet() }, ::yieldNow, block)
+                @Suppress("UNCHECKED_CAST")
+                if (r !== YIELDED) return r as T
+            }
+        } finally {
+            if (waiting.compareAndSet(true, false)) foregroundWaiting.decrementAndGet()
+        }
+    }
+
+    private object YIELDED
+
+    private suspend fun <T> requestLocked(
+        what: String, idempotent: Boolean, onLocked: () -> Unit, yieldNow: () -> Boolean, block: () -> T,
+    ): Any? = withContext(ioDispatcher) {
         mutex.withLock {
+            if (yieldNow()) return@withLock YIELDED // a user action is waiting: let it go first
+            onLocked()
             val opts = options ?: throw NotConnectedException()
             if (reconnectPending || socket == null) {
                 if (userDisconnecting) throw NotConnectedException()
@@ -300,7 +352,7 @@ class Ps4DebugClient(
                 }
             }
             try {
-                block().also { lastActivity = System.currentTimeMillis() }
+                timed(block).also { lastActivity = System.currentTimeMillis() }
             } catch (e: InSyncAbort) {
                 throw e
             } catch (e: CommandFailedException) {
@@ -445,10 +497,14 @@ class Ps4DebugClient(
         val s = socketFactory()
         s.tcpNoDelay = true
         s.soTimeout = options.readTimeoutMs
+        // Large buffers before connecting (they set the TCP window): big reads keep flowing on a slow, distant link.
+        runCatching { s.receiveBufferSize = SOCKET_BUFFER; s.sendBufferSize = SOCKET_BUFFER / 4 }
         s.connect(InetSocketAddress(addr, options.port), options.connectTimeoutMs)
         socket = s
         input = CountingInput(s.getInputStream(), bytesIn).buffered(64 * 1024)
-        output = CountingOutput(s.getOutputStream(), bytesOut)
+        // Buffered: a request's header, body and data leave in one packet when send() flushes (two packets per request
+        // before; on a lossy Wi-Fi each extra packet is another chance for a retransmission delay).
+        output = CountingOutput(java.io.BufferedOutputStream(s.getOutputStream(), 64 * 1024), bytesOut)
         epoch.incrementAndGet()
 
         // CMD_VERSION: no status word; u32 length + ASCII string.
@@ -557,6 +613,9 @@ class Ps4DebugClient(
     }
 
     companion object {
+        /** Requests moving at most this many bytes count as round trips for [linkMillis]. */
+        private const val SMALL_EXCHANGE = 8 * 1024L
+        private const val SOCKET_BUFFER = 1 shl 20
         const val MAX_PROCESSES = 4096L
         const val MAX_MAP_ENTRIES = 1_000_000L
 

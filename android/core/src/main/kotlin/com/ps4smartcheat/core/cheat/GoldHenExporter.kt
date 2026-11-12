@@ -50,6 +50,16 @@ object GoldHenExporter {
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
     private val json = Json { prettyPrint = true; prettyPrintIndent = "  " }
 
+    /**
+     * Credits written when none are given. A file with an empty "credits" list crashed GoldHEN's cheat menu when it
+     * opened (reported on a PS4 by the project owner: the same file loaded once credits were filled in), and only 2
+     * of the 1883 files in the GoldHEN cheat repository have an empty list.
+     */
+    val DEFAULT_CREDITS = listOf("SmartCheat")
+
+    /** [credits] trimmed, or [DEFAULT_CREDITS] when none is left: never an empty list. */
+    fun creditsOrDefault(credits: List<String>): List<String> = credits.map { it.trim() }.filter { it.isNotEmpty() }.ifEmpty { DEFAULT_CREDITS }
+
     /** Where GoldHEN reads JSON cheat files (GoldHEN_Cheat_Repository README, "Storage"). */
     const val CHEATS_DIR = "/user/data/GoldHEN/cheats/json/"
     /** Process of games without a per-process suffix in the file name. */
@@ -211,7 +221,7 @@ object GoldHenExporter {
         val skipped = built.skipped
         val warnings = built.warnings
         if (mods.isEmpty()) return Result(null, 0, skipped, listOf("No cheat in this profile can be exported to GoldHEN format."), warnings)
-        val file = GhFile(gameName.trim(), titleId!!, version!!, profile.processName, mods, credits.map { it.trim() }.filter { it.isNotEmpty() })
+        val file = GhFile(gameName.trim(), titleId!!, version!!, profile.processName, mods, creditsOrDefault(credits))
         val text = json.encodeToString(GhFile.serializer(), file)
         formatProblems(text, file).takeIf { it.isNotEmpty() }?.let { return Result(null, 0, skipped, it, warnings) }
         return Result(text, mods.size, skipped, emptyList(), warnings)
@@ -226,6 +236,7 @@ object GoldHenExporter {
      */
     internal fun formatProblems(text: String, file: GhFile): List<String> {
         val out = ArrayList<String>()
+        if (file.credits.isEmpty()) out += "\"credits\" is empty (GoldHEN's cheat menu can crash on such files)."
         file.mods.forEach { m ->
             if (m.name.isBlank()) out += "A mod has no name."
             if (m.memory.isEmpty()) out += "\"${m.name}\" has no memory entries."

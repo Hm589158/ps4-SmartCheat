@@ -21,7 +21,7 @@ class ConnectionMonitor(
 
     fun start() {
         if (job?.isActive == true) return
-        job = scope.launch {
+        job = scope.launch(com.ps4smartcheat.core.backend.BackgroundRequest) {
             while (isActive) {
                 delay(intervalMs.coerceAtLeast(100))
                 if (backend.state.value is ConnectionState.Connected && backend.idleMillis() >= intervalMs) {

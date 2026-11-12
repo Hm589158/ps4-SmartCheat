@@ -663,7 +663,12 @@ private fun GoldHenExportForm(p: CheatProfile, vm: CheatsViewModel, onExport: (S
             }
         }
         Text("Process: ${p.processName}", style = MaterialTheme.typography.bodyMedium)
-        OutlinedTextField(credits, { credits = it }, label = { Text("Credits (comma separated, optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(
+            credits, { credits = it }, label = { Text("Credits (comma separated)") }, singleLine = true,
+            placeholder = { Text(GoldHenExporter.DEFAULT_CREDITS.joinToString()) },
+            supportingText = { Text("Empty = \"${GoldHenExporter.DEFAULT_CREDITS.joinToString()}\" (GoldHEN needs at least one name)") },
+            modifier = Modifier.fillMaxWidth(),
+        )
         Text("File", style = MaterialTheme.typography.labelLarge)
         Text(pre.fileName ?: "—", style = mono, modifier = Modifier.testTag("ghxFileName"))
         Text(

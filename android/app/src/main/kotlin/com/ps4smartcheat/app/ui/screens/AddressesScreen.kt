@@ -102,14 +102,15 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     /** Reads every mapped entry; nearby entries share one request. Skipped while a read is in flight. */
-    fun refresh() {
+    /** [background]: a live refresh, which steps aside for user actions (BackgroundRequest). */
+    fun refresh(background: Boolean = false) {
         val sel = c.selectedProcess.value ?: return
         if (sel.exited || reading || c.backend.state.value !is ConnectionState.Connected) return
         val key = gameKey() ?: return
         val entries = c.addresses.entries(key)
         if (entries.isEmpty()) { _values.value = emptyMap(); _live.value = emptyList(); return }
         reading = true
-        viewModelScope.launch {
+        viewModelScope.launch(if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
             try {
                 val items = WatchResolver.resolveLive(c.backend, sel.pid, entries, sel.regions)
                 _values.value = reader.read(c.backend, sel.pid, items)
@@ -270,7 +271,7 @@ fun AddressesScreen(
     LaunchedEffect(live, connected, alive) {
         while (live && connected && alive) {
             kotlinx.coroutines.delay(vm.intervalMs)
-            vm.refresh()
+            vm.refresh(background = true)
         }
     }
 

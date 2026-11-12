@@ -53,6 +53,8 @@ sealed interface WriteStatus {
  * Implementations must never return simulated data.
  */
 interface DebugBackend {
+    /** Smoothed round-trip time of small requests in ms (null when unknown). See Ps4DebugClient.linkMillis. */
+    val linkMillis: StateFlow<Long?> get() = UNKNOWN_LINK
     val name: String
     val state: StateFlow<ConnectionState>
 
@@ -101,3 +103,5 @@ class ProtocolException(message: String, cause: Throwable? = null) : BackendExce
 
 /** The debugger answered a command with a non-success status (e.g. 0xF0000001). */
 open class CommandFailedException(val command: Long, val status: Long, message: String) : BackendException(message)
+
+private val UNKNOWN_LINK: StateFlow<Long?> = kotlinx.coroutines.flow.MutableStateFlow(null)

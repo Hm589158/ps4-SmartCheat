@@ -43,6 +43,8 @@ import kotlinx.coroutines.launch
 
 class ConnectionViewModel(private val c: AppContainer) : ViewModel() {
     val state: StateFlow<ConnectionState> = c.backend.state
+    /** Smoothed round trip of small requests (ms). */
+    val link: StateFlow<Long?> = c.backend.linkMillis
     private val _host = MutableStateFlow(c.settings.value.host)
     val host = _host.asStateFlow()
     private val _port = MutableStateFlow(c.settings.value.port.toString())
@@ -82,6 +84,7 @@ fun ConnectionScreen(onConnected: () -> Unit) {
     val host by vm.host.collectAsStateWithLifecycle()
     val port by vm.port.collectAsStateWithLifecycle()
     val error by vm.error.collectAsStateWithLifecycle()
+    val link by vm.link.collectAsStateWithLifecycle()
     val connected = state is ConnectionState.Connected
     val connecting = state is ConnectionState.Connecting || state is ConnectionState.Reconnecting
 
@@ -131,6 +134,13 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                 is ConnectionState.Failed -> Text("Connection failed: ${s.message}", color = MaterialTheme.colorScheme.error)
                 is ConnectionState.Connected -> {
                     KeyValue("Console", "${s.info.host}:${s.info.port}", mono = true)
+                    link?.let { ms -> KeyValue("Link", "$ms ms round trip · " + linkQuality(ms).first) }
+                    link?.takeIf { linkQuality(it).second }?.let {
+                        WarningBanner(
+                            "Slow link: every read and write waits for this round trip. Keep the phone near the router, use 5 GHz " +
+                                "Wi-Fi, connect the PS4 by cable if you can, and switch off live values and freezes you do not need.",
+                        )
+                    }
                     val caps = s.info.capabilities
                     KeyValue("Backend", if (caps.isNg) "ps4debug-NG (primary)" else "classic ps4debug (compatibility mode)")
                     KeyValue(
@@ -195,4 +205,11 @@ fun ConnectionScreen(onConnected: () -> Unit) {
             )
         }
     }
+}
+
+/** "good" / "fair" / "slow" for a round trip of [ms], and whether to show the advice. */
+private fun linkQuality(ms: Long): Pair<String, Boolean> = when {
+    ms <= 30 -> "good" to false
+    ms <= 100 -> "fair" to false
+    else -> "slow" to true
 }

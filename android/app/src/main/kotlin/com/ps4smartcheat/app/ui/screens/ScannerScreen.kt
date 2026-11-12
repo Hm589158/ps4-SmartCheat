@@ -108,7 +108,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     /** Live refresh tick: skipped while a scan or a page load is running. */
     fun liveTick() {
         if (c.scanner.isRunning || _rowsLoading.value) return
-        loadPage()
+        loadPage(background = true)
     }
 
     fun exportCsv(resolver: ContentResolver, uri: Uri) {
@@ -200,8 +200,9 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
         loadPage()
     }
 
-    fun loadPage() {
-        viewModelScope.launch {
+    /** [background]: a live refresh, which steps aside for user actions (BackgroundRequest). */
+    fun loadPage(background: Boolean = false) {
+        viewModelScope.launch(if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
             _rowsLoading.value = true
             try {
                 _rows.value = c.scanner.readPage(_page.value, pageSize)

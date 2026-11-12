@@ -78,7 +78,7 @@ class FreezeManager(
 
     private fun ensureRunning() {
         if (job?.isActive == true) return
-        job = scope.launch {
+        job = scope.launch(com.ps4smartcheat.core.backend.BackgroundRequest) {
             var tick = 0L
             try {
                 while (_frozen.value.isNotEmpty()) {

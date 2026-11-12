@@ -162,11 +162,12 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
         refresh()
     }
 
-    fun refresh() {
+    /** [background]: a live refresh, which steps aside for user actions (BackgroundRequest). */
+    fun refresh(background: Boolean = false) {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         val s = start ?: return
         if (_loading.value) return
-        viewModelScope.launch {
+        viewModelScope.launch(if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
             _loading.value = true
             try {
                 val w = viewer.read(sel.pid, s, WINDOW, sel.regions)
@@ -228,7 +229,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit, onDisas
     // Live refresh only while this screen is shown, connected and enabled.
     LaunchedEffect(live, connected) {
         while (live && connected && isActive) {
-            vm.refresh()
+            vm.refresh(background = true)
             delay(vm.intervalMs)
         }
     }

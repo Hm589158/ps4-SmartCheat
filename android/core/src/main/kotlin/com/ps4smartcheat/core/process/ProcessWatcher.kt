@@ -96,7 +96,7 @@ class ProcessWatcher(
         exited = false
         if (identity == null) { stop(); return }
         if (job?.isActive == true) return
-        job = scope.launch {
+        job = scope.launch(com.ps4smartcheat.core.backend.BackgroundRequest) {
             while (isActive) {
                 delay(intervalMs.coerceAtLeast(100))
                 val target = watched ?: continue

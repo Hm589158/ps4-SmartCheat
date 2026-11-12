@@ -54,6 +54,27 @@ Android-fallback refine batching on the simulated link (same dataset, "next exac
 | fixed 64 KiB spans (previous behaviour) | 20,011,480 | 3,407 |
 | adaptive break-even gap (measured 18,292 B) | 9,811,424 | 3,125 |
 
+## Responsiveness of the connection
+
+There is one TCP connection to ps4debug-NG and requests take turns, so on a weak Wi-Fi every action costs a few round
+trips (a confirmed, verified write: read the current bytes, write, read back). What the app does about it:
+
+* **One packet per request.** Header, body and data are buffered and leave with one flush (they were two TCP packets;
+  on a lossy link each packet is another chance for a retransmission delay). Both sides use `TCP_NODELAY`
+  (ps4debug-NG `server.c` sets it on every client socket), so nothing waits for Nagle.
+* **User actions first.** Keep-alive, the game-exit watcher, freezes and live values run as `BackgroundRequest`: while
+  a user action is waiting they step aside, also after they already queued for the connection, for at most 2 s (so a
+  freeze is never starved). A tap waits at most for the one request already running.
+* **Large socket buffers** (1 MiB receive) set before connecting, so big reads keep flowing on a distant link.
+* **Low-latency Wi-Fi lock** while connected (Android 10+: `WIFI_MODE_FULL_LOW_LATENCY`; older: high-performance),
+  so the phone's Wi-Fi power saving does not add its sleep delay to each answer.
+* **One memory map per operation** and joined reads of neighbouring parts (1.0.6/1.0.7).
+* **Link time shown.** The Connection screen shows the smoothed round trip of small requests (`linkMillis`) and, above
+  100 ms, what helps: phone near the router, 5 GHz, PS4 on a cable, fewer live values and freezes.
+
+Measured on the simulated server only (tests `LinkTest`): one socket write per request, a user read finishing before
+queued background reads, background work still served under constant load.
+
 ## Not yet measured
 Real PS4 (FW 11.00, GoldHEN, ps4debug-NG) scan times, console CPU load during Turbo scans, aliasing on/off
 comparison. See docs/TESTING.md for the manual procedure.

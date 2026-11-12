@@ -2,6 +2,20 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.10
+
+### GoldHEN export: credits are never empty
+- A GoldHEN file with an empty `credits` list crashed the cheat menu on a PS4 as soon as it opened (reported by the
+  project owner: the same file loaded fine with credits filled in; only 2 of the 1883 files in the GoldHEN cheat
+  repository have an empty list). The export now writes `["SmartCheat"]` when no credits are given, and the file check
+  refuses an empty list.
+
+### Faster answers from the PS4
+- User actions go first: keep-alive, game-exit watcher, freezes and live values step aside while you wait for an
+  answer (also when they queued earlier), for at most 2 s.
+- Each request leaves in one network packet (two before); larger socket buffers for big reads.
+- The Connection screen shows the link's round-trip time, with advice when it is slow. Details in docs/PERFORMANCE.md.
+
 ## 1.0.9
 
 ### One-shot injections (new — verified against the simulated server only)
