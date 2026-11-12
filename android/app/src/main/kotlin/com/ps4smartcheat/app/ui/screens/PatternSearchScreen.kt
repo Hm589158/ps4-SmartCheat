@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -140,7 +142,7 @@ fun PatternSearchScreen(onOpen: (Long) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().testTag("patternList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             val sel = selected
-            if (sel == null) WarningBanner("No process selected.")
+            if (sel == null) GameRequiredBanner()
             else Text("Process: ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
             SectionCard(null) {
                 Selector("Search for", PatternKind.entries, kind, { it.label }, { vm.kind.value = it }, enabled = !running)

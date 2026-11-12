@@ -6,6 +6,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -43,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.LocalViewModelStoreOwner
 import com.ps4smartcheat.app.ui.SmartCheatTheme
 import com.ps4smartcheat.app.ui.appContainer
+import com.ps4smartcheat.app.ui.components.LocalOpenTool
 import com.ps4smartcheat.app.ui.screens.AddressesScreen
 import com.ps4smartcheat.app.ui.screens.CheatsScreen
 import com.ps4smartcheat.app.ui.screens.CodeScreen
@@ -140,14 +148,7 @@ private fun AppRoot() {
                                 when (page) { Page.TAB -> active.tool.title; Page.NEW_TAB -> "New tab"; Page.OVERVIEW -> "Tabs" },
                                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                             )
-                            val sub = when (val c = connection) {
-                                is ConnectionState.Connected -> "● ${c.info.host}" + (selected?.let { " · ${it.name} (${it.pid})" + if (it.exited) " — exited" else "" } ?: "")
-                                is ConnectionState.Connecting -> "Connecting…"
-                                is ConnectionState.Reconnecting -> "Reconnecting ${c.attempt}/${c.maxAttempts}…"
-                                is ConnectionState.Failed -> "Connection lost"
-                                ConnectionState.Disconnected -> "Not connected"
-                            }
-                            Text(sub, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            ConnectionLine(connection, selected)
                         }
                     },
                     actions = {
@@ -194,7 +195,7 @@ private fun AppRoot() {
                     Page.TAB -> key(active.id) {
                         val owner = remember(active.id) { container.tabStores.owner(active.id) }
                         holder.SaveableStateProvider(active.id) {
-                            CompositionLocalProvider(LocalViewModelStoreOwner provides owner) {
+                            CompositionLocalProvider(LocalViewModelStoreOwner provides owner, LocalOpenTool provides { t -> open(t, ToolArgs()) }) {
                                 ToolScreen(active, open)
                             }
                         }
@@ -202,6 +203,25 @@ private fun AppRoot() {
                 }
             }
         }
+    }
+}
+
+/** Connection state under the title: a coloured dot (green connected, amber in progress, red lost) and the details. */
+@Composable
+private fun ConnectionLine(connection: ConnectionState, selected: com.ps4smartcheat.app.data.SelectedProcess?) {
+    val cs = MaterialTheme.colorScheme
+    val (dot, text) = when (connection) {
+        is ConnectionState.Connected -> Color(0xFF3FB950) to connection.info.host +
+            (selected?.let { " · ${it.name} (${it.pid})" + if (it.exited) " — exited" else "" } ?: " · no game selected")
+        is ConnectionState.Connecting -> Color(0xFFD29922) to "Connecting…"
+        is ConnectionState.Reconnecting -> Color(0xFFD29922) to "Reconnecting ${connection.attempt}/${connection.maxAttempts}…"
+        is ConnectionState.Failed -> cs.error to "Connection lost"
+        ConnectionState.Disconnected -> cs.outline to "Not connected"
+    }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).background(if (selected?.exited == true) Color(0xFFD29922) else dot, CircleShape))
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("connectionLine"))
     }
 }
 

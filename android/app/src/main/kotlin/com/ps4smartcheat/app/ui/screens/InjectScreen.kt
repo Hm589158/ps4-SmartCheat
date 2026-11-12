@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -459,7 +461,7 @@ fun InjectScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().testTag("injectList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (selected == null) WarningBanner("No process selected.")
+                GameRequiredBanner()
                 if (hook == null) WarningBanner("Open this screen from an instruction in the disassembler (Code → tap an instruction → Inject code).")
                 if (hook == null) ErrorText(error)
             }

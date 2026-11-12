@@ -145,7 +145,11 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                     )
                     KeyValue("Debugger ver.", s.info.debuggerVersion.ifBlank { "unknown" })
                     KeyValue("Branding", caps.brand ?: "not reported")
-                    KeyValue("Firmware", s.info.firmwareText ?: "unknown (not reported by payload)")
+                    KeyValue(
+                        "Firmware",
+                        s.info.firmwareText?.let { fw -> fw + (com.ps4smartcheat.core.protocol.Ps4Firmware.note(s.info.firmware)?.let { " · $it" } ?: "") }
+                            ?: "unknown (not reported by payload)",
+                    )
                     KeyValue(
                         "Scan backends",
                         buildList {
@@ -181,8 +185,9 @@ fun ConnectionScreen(onConnected: () -> Unit) {
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                "Beta: the core flow (connect, Turbo Scan, write) is reported working on FW 11.00 + GoldHEN + ps4debug-NG 1.3.3; " +
-                    "newer tools are still being verified on hardware. Report problems on GitHub.",
+                "Any firmware ps4debug-NG supports (${com.ps4smartcheat.core.protocol.Ps4Firmware.SUPPORTED_BY_PS4DEBUG_NG.size} versions, " +
+                    "${com.ps4smartcheat.core.protocol.Ps4Firmware.range}). The core flow (connect, Turbo Scan, write) is reported working on " +
+                    "a PS4 (FW 11.00); newer tools are still being verified on hardware. Report problems on GitHub.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

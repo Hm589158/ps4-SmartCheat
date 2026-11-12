@@ -140,7 +140,6 @@ jobs:
       - name: Publish GitHub release
         if: env.SKIP_RELEASE != 'true'
         run: |
-          cd dist && sha256sum *.apk > SHA256SUMS.txt && cd ..
           APK_NAME=$(basename dist/*.apk)
           BASE="${VERSION_NAME%%-*}"
           BUILD=$(echo "$VERSION_NAME" | sed -nE 's/.*(-build|-beta)\.([0-9]+)$/\2/p')
@@ -157,7 +156,7 @@ jobs:
             TITLE="PS4 SmartCheat v$BASE · Test build ${BUILD:-${VERSION_NAME#*-}}"; FLAGS="--prerelease"
           fi
           ../.github/scripts/release-notes.sh "$VERSION_NAME" "$KIND" "$APK_NAME" "$RELEASE_SHA" > "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" dist/*.apk dist/SHA256SUMS.txt \
+          gh release create "$TAG" dist/*.apk \
             --repo "$GITHUB_REPOSITORY" --target "$RELEASE_SHA" \
             --title "$TITLE" --notes-file "$RUNNER_TEMP/notes.md" $FLAGS
 

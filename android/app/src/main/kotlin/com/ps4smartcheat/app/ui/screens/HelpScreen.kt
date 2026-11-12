@@ -30,7 +30,7 @@ private val sections = listOf(
     HelpSection(
         "1. Connect",
         listOf(
-            "On the PS4 (jailbroken, GoldHEN): send ps4debug-NG to the payload loader (port 9020 or 9021, depending on the jailbreak). Download: github.com/Pharaoh2k/ps4debug-NG/releases. ps4debug-NG is required for scanning and editing.",
+            "Any firmware ps4debug-NG supports (5.05–14.02). On the PS4 (jailbroken, GoldHEN): send ps4debug-NG to the payload loader (port 9020 or 9021, depending on the jailbreak). Download: github.com/Pharaoh2k/ps4debug-NG/releases. ps4debug-NG is required for scanning and editing.",
             "Phone and PS4 on the same local network. Enter the PS4's IP, port 744, tap Connect.",
             "ps4debug-NG unlocks Turbo Scan and server-side scans automatically (authentication is handled by the app).",
         ),

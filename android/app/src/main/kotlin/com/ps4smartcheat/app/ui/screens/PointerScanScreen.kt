@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -122,7 +124,7 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
     LazyColumn(Modifier.fillMaxSize().testTag("pointerList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             val sel = selected
-            if (sel == null) WarningBanner("No process selected.")
+            if (sel == null) GameRequiredBanner()
             else Text("${sel.titleId ?: "no title ID"} — ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
             Text(
                 "Finds paths like [[eboot.bin+0x1000]+0x10]+0x48 from the game's static data to a value whose address changes " +

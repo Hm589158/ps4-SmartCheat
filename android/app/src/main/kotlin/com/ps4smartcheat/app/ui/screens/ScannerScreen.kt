@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import android.content.ContentResolver
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -253,14 +255,13 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit, onPatternSearch: () -> Unit
     LazyColumn(Modifier.fillMaxSize().testTag("scannerList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             val sel = selected
-            if (sel == null) {
-                WarningBanner("No process selected. Pick the game on the Processes screen.")
+            if (sel == null || !connected) {
+                GameRequiredBanner()
             } else if (sel.exited) {
                 WarningBanner("${sel.exitedReason}. Scanning is disabled until the game runs again.")
             } else {
                 Text("Process: ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
             }
-            if (!connected) Text("Not connected.", color = MaterialTheme.colorScheme.error)
         }
         resumable?.let { saved ->
             item {

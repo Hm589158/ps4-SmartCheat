@@ -54,7 +54,6 @@ cat <<EOF
 | File | What it is |
 |---|---|
 | [\`${APK}\`](https://github.com/${REPO}/releases/download/v${VERSION_NAME}/${APK}) | Android app (Android 8.0+, phones and tablets) |
-| [\`SHA256SUMS.txt\`](https://github.com/${REPO}/releases/download/v${VERSION_NAME}/SHA256SUMS.txt) | Checksum — verify with \`sha256sum -c SHA256SUMS.txt\` |
 
 ## Install
 
@@ -70,8 +69,9 @@ ${changes}
 
 ## Compatibility
 
-Core flow reported working on a real PS4 by the project owner (FW 11.00, GoldHEN, ps4debug-NG 1.3.3). Features marked
-as new are verified end to end against the mock ps4debug-NG server only — see
+Supports every firmware ps4debug-NG supports (39 versions, 5.05–14.02): the app uses only ps4debug-NG's commands and has
+no firmware-specific code. The core flow is reported working on a real PS4 by the project owner (FW 11.00, GoldHEN,
+ps4debug-NG 1.3.3). Features marked as new are verified end to end against the simulated ps4debug-NG server — see
 [docs/COMPATIBILITY.md](https://github.com/${REPO}/blob/main/docs/COMPATIBILITY.md).
 For offline single-player use on your own console. ps4debug has no authentication: trusted local network only.
 

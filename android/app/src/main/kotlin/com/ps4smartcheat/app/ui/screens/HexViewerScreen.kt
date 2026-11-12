@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
@@ -233,7 +235,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit, onDisas
 
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         item {
-            if (selected == null) WarningBanner("No process selected.")
+            GameRequiredBanner()
             Text("Tap a line to open that address in the editor.", style = MaterialTheme.typography.bodySmall, color = dim)
             OutlinedTextField(
                 value = address, onValueChange = vm::setAddress, label = { Text("Address (hex)") }, singleLine = true,

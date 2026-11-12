@@ -203,9 +203,9 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
             Selector("Theme", ThemeMode.entries, s.theme, { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } }, { t -> vm.update { it.copy(theme = t) } })
             Text("PS4 SmartCheat ${BuildConfig.VERSION_NAME} (${BuildConfig.BUILD_TYPE})", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "Requires ps4debug-NG (port 744; by OSR, github.com/Pharaoh2k/ps4debug-NG, GPL-3.0). Core flow reported working on " +
-                    "FW 11.00 + GoldHEN + ps4debug-NG 1.3.3; newer features are verified against the simulated server. " +
-                    "For offline games and homebrew on your own console.",
+                "Requires ps4debug-NG (port 744; by OSR, github.com/Pharaoh2k/ps4debug-NG, GPL-3.0) and runs on every firmware it " +
+                    "supports (${com.ps4smartcheat.core.protocol.Ps4Firmware.range}). Core flow reported working on a PS4 (FW 11.00); " +
+                    "newer features are verified against the simulated server. For offline games and homebrew on your own console.",
                 style = MaterialTheme.typography.bodySmall, color = dim,
             )
             Text("Report issues: github.com/Hm589158/ps4-SmartCheat/issues", style = MaterialTheme.typography.bodySmall, color = dim)

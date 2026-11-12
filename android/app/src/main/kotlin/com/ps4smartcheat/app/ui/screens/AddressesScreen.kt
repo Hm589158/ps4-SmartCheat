@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -283,11 +285,10 @@ fun AddressesScreen(
     LazyColumn(Modifier.fillMaxSize().testTag("addressList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             when {
-                sel == null -> WarningBanner("No process selected. Pick the game on the Processes screen.")
+                sel == null || !connected -> GameRequiredBanner()
                 sel.exited -> WarningBanner("${sel.exitedReason}. Values are shown again when the game runs.")
                 else -> Text("${sel.titleId ?: "no title ID"} — ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
             }
-            if (!connected) Text("Not connected.", color = MaterialTheme.colorScheme.error)
             Text(
                 "Saved per game. Module-relative entries (e.g. eboot.bin+0x120) and pointer chains follow the game across restarts; " +
                     "absolute heap addresses are only trusted in the session they were added (use \"Find pointers…\" for those). " +

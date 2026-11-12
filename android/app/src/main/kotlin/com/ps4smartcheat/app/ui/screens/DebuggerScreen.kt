@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -329,7 +331,7 @@ fun DebuggerScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
     LazyColumn(Modifier.fillMaxSize().testTag("debugList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (selected == null) WarningBanner("No process selected.")
+                GameRequiredBanner()
                 if (info != null && !ng) WarningBanner("Breakpoints and stepping need ps4debug-NG.")
                 if (ng && !portOk) WarningBanner(
                     "This ps4debug-NG reports capability level ${info?.capabilities?.capabilityLevel ?: "(none)"}. The debugger needs " +

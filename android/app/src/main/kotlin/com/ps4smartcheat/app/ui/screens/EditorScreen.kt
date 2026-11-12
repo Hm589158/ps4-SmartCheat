@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -269,7 +271,7 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
     val isFrozen = frozen.any { it.pid == selected?.pid && it.address == addr }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (selected == null) WarningBanner("No process selected.")
+        GameRequiredBanner()
         if (!settings.editingEnabled) WarningBanner("Read-only mode. Enable memory editing in Settings to write values.")
         SectionCard("Address") {
             Text("Process: ${selected?.name ?: "-"} (pid ${selected?.pid ?: "-"})", style = MaterialTheme.typography.bodySmall)

@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameRequiredBanner
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -380,7 +382,7 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
     LazyColumn(Modifier.fillMaxSize().testTag("codeList"), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         item {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (selected == null) WarningBanner("No process selected.")
+                GameRequiredBanner()
                 OutlinedTextField(
                     value = address, onValueChange = vm::setAddress, label = { Text("Code address (hex)") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("codeAddress"),

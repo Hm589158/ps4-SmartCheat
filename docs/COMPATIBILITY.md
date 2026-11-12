@@ -3,6 +3,30 @@
 **Required debugger: [ps4debug-NG](https://github.com/Pharaoh2k/ps4debug-NG)** (by OSR / Pharaoh2k, GPL-3.0).
 The classic ps4debug payload only works in an untested compatibility mode (Android-side scanning) and is not supported.
 
+## Firmware
+
+**Every firmware ps4debug-NG supports.** The app has no firmware-specific code: it only talks to ps4debug-NG, which
+does all firmware-dependent work on the console. ps4debug-NG lists 39 versions (README "Supported firmwares", commit
+`8be828f`) and refuses to install on others:
+
+| Major | Versions |
+|---|---|
+| 5.xx | 5.05, 5.07 |
+| 6.xx | 6.71, 6.72 |
+| 7.xx | 7.00, 7.02, 7.50, 7.51, 7.55 |
+| 8.xx | 8.00, 8.03, 8.50, 8.52 |
+| 9.xx | 9.00, 9.03, 9.04, 9.50, 9.51, 9.60 |
+| 10.xx | 10.00, 10.01, 10.50, 10.70, 10.71 |
+| 11.xx | 11.00, 11.02, 11.50, 11.52 |
+| 12.xx | 12.00, 12.02, 12.50, 12.52 |
+| 13.xx | 13.00, 13.02, 13.04, 13.50, 13.52 |
+| 14.xx | 14.00, 14.02 |
+
+The Connection screen shows the console's firmware (`CMD_FW_VERSION`) and whether it is in this list
+(`core.protocol.Ps4Firmware`). Hardware reports so far are from FW 11.00 (below); reports from other firmware are welcome.
+
+## Feature status
+
 Legend: **hardware** = reported on a real console by the project owner · **mock** = verified end to end against the
 independent mock ps4debug-NG server in CI only.
 
@@ -24,7 +48,7 @@ independent mock ps4debug-NG server in CI only.
 | Allocated caves (`CMD_PROC_ALLOC_HINTED` / `CMD_PROC_FREE`) | mock; layouts from the ps4debug-NG 1.3.4 source; whether games may execute the new mapping is unknown on hardware |
 | Debugger attach, hardware watchpoints, interrupt channel (What writes / accesses) | mock; needs ps4debug-NG capability level 1.2 (configurable interrupt port, [PR #1](https://github.com/Pharaoh2k/ps4debug-NG/pull/1), not merged upstream yet); level checked before attaching |
 | Session check, pointer candidates, game activity check, SIGCONT resume | mock |
-| ps4debug-NG 1.3.4 (current upstream) and other firmware listed by ps4debug-NG | expected compatible (same protocol); not yet reported |
+| ps4debug-NG 1.3.4 (current upstream) and the other firmware versions above | supported (same protocol, no firmware-specific code in the app); not yet reported on hardware |
 | Classic / GoldHEN ps4debug | not supported (compatibility mode untested; its server scans are never used) |
 | Android | min SDK 26 (Android 8.0), target SDK 36; used on the owner's phone for the hardware report above |
 

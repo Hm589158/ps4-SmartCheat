@@ -66,6 +66,9 @@ Notes (verified in source):
   for unknown commands in the `0xBD` namespace). The client probes with a 1.5 s timeout and, on timeout,
   **reopens the socket** so a late reply can never desynchronise the stream. Firmware is shown as "unknown" then.
   It can be disabled in Settings.
+* The firmware list the Connection screen compares with (39 versions, 5.05–14.02) is ps4debug-NG's README
+  "Supported firmwares" at commit `8be828f` (`core.protocol.Ps4Firmware`); ps4debug-NG rejects other firmware before it
+  installs, so the app itself needs no firmware-specific handling.
 
 ## Server-side scanning (ps4debug-NG) — verified in source
 
