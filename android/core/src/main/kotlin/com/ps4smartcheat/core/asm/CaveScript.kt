@@ -77,7 +77,11 @@ object CaveScript {
         /** Addresses of the hook instructions the Target Code contains (the others no longer run). */
         val keptOriginals: Set<Long>,
         val returns: Int,
-    )
+        /** Fields that address the one-shot flag, relative to the cave start (empty when `[flag]` is not used). */
+        val flagFields: List<FlagField> = emptyList(),
+    ) {
+        val usesFlag: Boolean get() = flagFields.isNotEmpty()
+    }
 
     private val LABEL = Regex("^([A-Za-z_.@$][A-Za-z0-9_.@$]*)\\s*:(?!:)\\s*(.*)$")
     private val REGISTER = Regex(
@@ -117,6 +121,7 @@ object CaveScript {
                 val m = LABEL.find(line) ?: break
                 val name = m.groupValues[1]
                 if (name.equals(RETURN, ignoreCase = true)) throw CodePatchException("\"$RETURN\" is reserved for the jump back; pick another label name.")
+                if (name.equals(OneShotFlag.NAME, ignoreCase = true)) throw CodePatchException("\"${OneShotFlag.NAME}\" is reserved for the one-shot flag; pick another label name.")
                 if (REGISTER.matches(name)) throw CodePatchException("\"$name\" is a register name; pick another label name.")
                 out += Stmt.Label(name, "$name:")
                 line = m.groupValues[2].trim()
@@ -128,7 +133,7 @@ object CaveScript {
                 canon == "jmp$RETURN" -> Stmt.Return(line)
                 canon in originals -> Stmt.Original(original(canon), line)
                 mnemonic == "db" || mnemonic == ".byte" -> Stmt.Bytes(parseBytes(line.substringAfter(' ', "")), line)
-                else -> Stmt.Asm(line)
+                else -> Stmt.Asm(line).also { OneShotFlag.uses(line) } // validates the [flag] form early
             }
         }
         val dup = out.filterIsInstance<Stmt.Label>().groupBy { it.name }.filterValues { it.size > 1 }.keys.firstOrNull()
@@ -154,6 +159,30 @@ object CaveScript {
         val r = BlockEncoder.tryEncode(64, InstructionBlock(CodeWriter { b -> out.write(b.toInt()) }, list, to))
         if (r is String) throw CodePatchException("\"${ins.text}\" cannot be moved to ${Address.format(to)}: $r")
         return out.toByteArray()
+    }
+
+    /**
+     * Assembles one `[flag]` line at [at] RIP-relative to [flag]: first with displacement 0 to learn the length (a
+     * RIP-relative displacement is always 32 bits), then with the real one. Checks with the decoder that the result
+     * addresses the flag. Returns the bytes and the offset of the displacement in them.
+     */
+    private suspend fun assembleFlagLine(
+        line: String, at: Long, flag: Long, cache: HashMap<Pair<String, Long>, ByteArray>,
+        assemble: suspend (text: String, address: Long) -> ByteArray,
+    ): Pair<ByteArray, Int> {
+        val probeText = OneShotFlag.ripForm(line, 0)
+        val probe = cache.getOrPut(probeText to at) { assemble(probeText, at) }
+        if (probe.isEmpty()) throw CodePatchException("The assembler produced no bytes for: $line")
+        val disp = flag - (at + probe.size)
+        if (disp !in Int.MIN_VALUE..Int.MAX_VALUE) throw CodePatchException("\"$line\": the one-shot flag is more than 2 GiB from the cave.")
+        val text = OneShotFlag.ripForm(line, disp)
+        val bytes = cache.getOrPut(text to at) { assemble(text, at) }
+        val decoder = Decoder(64, bytes, at, 0)
+        val ins = decoder.decode()
+        if (bytes.size != probe.size || ins.length != bytes.size || !ins.isIPRelativeMemoryOperand || ins.ipRelativeMemoryAddress() != flag) {
+            throw CodePatchException("\"$line\" could not be encoded to address the one-shot flag (one instruction with one [flag] operand).")
+        }
+        return bytes to decoder.getConstantOffsets(ins).displacementOffset.toInt()
     }
 
     /** Replaces label names used as operands with their address (`jne skip` → `jne 0x40F010`). */
@@ -190,8 +219,18 @@ object CaveScript {
      * what precedes them (the assembler may pick short or near branches), so the layout is repeated until every label
      * stays where it was in the previous pass.
      */
+    /** True when one of [stmts] uses the one-shot flag (`[flag]`). */
+    fun usesFlag(stmts: List<Stmt>): Boolean = stmts.any { it is Stmt.Asm && OneShotFlag.uses(it.text) }
+
+    /**
+     * @param flag address of the one-shot flag that `[flag]` lines address (RIP-relative, so within 2 GiB of the cave);
+     *   required when the Target Code uses `[flag]`. Each such line is assembled on its own, twice: once to learn its
+     *   length, once with the displacement to the flag; the position of the displacement is returned in
+     *   [Linked.flagFields] so it can be bound to another flag later ([OneShotFlag.bind]).
+     */
     suspend fun link(
         stmts: List<Stmt>, cave: Long, returnAddress: Long,
+        flag: Long? = null,
         assemble: suspend (text: String, address: Long) -> ByteArray,
     ): Linked {
         if (stmts.none { it !is Stmt.Label }) throw CodePatchException("The Target Code is empty. Keep the original instructions and \"jmp $RETURN\", or write your own.")
@@ -215,11 +254,13 @@ object CaveScript {
             }
         }
 
-        // Runs of consecutive assembler statements are assembled together.
+        if (usesFlag(stmts) && flag == null) throw CodePatchException("The Target Code uses [flag] but no flag address was given.")
+        // Runs of consecutive assembler statements are assembled together; a [flag] line is assembled on its own.
+        fun flagged(s: Any?) = s is Stmt.Asm && OneShotFlag.uses(s.text)
         val segments = ArrayList<Any>()
         for (s in stmts) {
             val prev = segments.lastOrNull()
-            if (s is Stmt.Asm && prev is MutableList<*>) {
+            if (s is Stmt.Asm && prev is MutableList<*> && !flagged(s) && !flagged(prev.last())) {
                 @Suppress("UNCHECKED_CAST")
                 (prev as MutableList<Stmt.Asm>) += s
             } else {
@@ -231,6 +272,7 @@ object CaveScript {
         var labels: Map<String, Long> = names.associateWith { cave } + (RETURN to returnAddress)
         repeat(MAX_PASSES) {
             val parts = ArrayList<CavePart>()
+            val flagFields = ArrayList<FlagField>()
             val found = LinkedHashMap<String, Long>()
             var at = cave
             for (seg in segments) {
@@ -239,7 +281,12 @@ object CaveScript {
                     is Stmt.Original -> parts += CavePart(CavePartKind.ORIGINAL, at, relocate(seg.ins, at), seg.ins.text)
                     is Stmt.Return -> parts += CavePart(CavePartKind.RETURN, at, InjectionPlanner.jumpBytes(at, returnAddress), "jmp $RETURN")
                     is Stmt.Bytes -> parts += CavePart(CavePartKind.BYTES, at, seg.bytes, seg.text)
-                    is MutableList<*> -> {
+                    is MutableList<*> -> if (seg.size == 1 && flagged(seg.first())) {
+                        val line = (seg.single() as Stmt.Asm).text
+                        val (bytes, field) = assembleFlagLine(substitute(line, labels), at, flag!!, cache, assemble)
+                        flagFields += FlagField((at - cave).toInt() + field, (at - cave).toInt() + bytes.size)
+                        parts += CavePart(CavePartKind.CODE, at, bytes, line)
+                    } else {
                         val text = seg.joinToString("\n") { substitute((it as Stmt.Asm).text, labels) }
                         val bytes = cache.getOrPut(text to at) { assemble(text, at) }
                         if (bytes.isEmpty()) throw CodePatchException("The assembler produced no bytes for: ${seg.joinToString("; ") { (it as Stmt.Asm).text }}")
@@ -254,7 +301,7 @@ object CaveScript {
                 val out = ByteArrayOutputStream()
                 parts.forEach { out.write(it.bytes) }
                 val kept = stmts.filterIsInstance<Stmt.Original>().map { it.ins.address }.toSet()
-                return Linked(out.toByteArray(), parts, found, kept, returnsIn(stmts))
+                return Linked(out.toByteArray(), parts, found, kept, returnsIn(stmts), flagFields)
             }
             labels = found
         }

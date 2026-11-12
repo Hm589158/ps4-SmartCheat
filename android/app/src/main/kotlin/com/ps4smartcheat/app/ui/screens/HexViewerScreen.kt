@@ -1,5 +1,9 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.LeftToRight
+
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.clickable
@@ -238,7 +242,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit, onDisas
             GameRequiredBanner()
             Text("Tap a line to open that address in the editor.", style = MaterialTheme.typography.bodySmall, color = dim)
             OutlinedTextField(
-                value = address, onValueChange = vm::setAddress, label = { Text("Address (hex)") }, singleLine = true,
+                value = address, onValueChange = vm::setAddress, textStyle = ltr(), label = { Text("Address (hex)") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -256,7 +260,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit, onDisas
                     OutlinedTextField(
                         value = patch, onValueChange = vm::setPatch, singleLine = true, enabled = settings.editingEnabled,
                         label = { Text("Bytes at ${Address.format(target!!)}") },
-                        textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                        textStyle = ltr(MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)),
                         modifier = Modifier.weight(1f).testTag("patchBytes"),
                     )
                     Button(onClick = vm::preparePatch, enabled = settings.editingEnabled && connected && selected?.exited == false && patch.isNotBlank(), modifier = Modifier.testTag("patchWrite")) { Text("Write") }
@@ -266,7 +270,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit, onDisas
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
             ErrorText(error)
         }
-        items(rows, key = { it.address }) { row ->
+        items(rows, key = { it.address }) { row -> LeftToRight {
             Text(
                 buildAnnotatedString {
                     withStyle(SpanStyle(color = dim)) { append(Address.format(row.address)) }
@@ -285,7 +289,7 @@ fun HexViewerScreen(initialAddress: Long?, onOpenEditor: (Long) -> Unit, onDisas
                     .then(if (target != null && target!! >= row.address && target!! < row.address + row.bytes.size) Modifier.background(targetRow) else Modifier)
                     .clickable(enabled = row.mapped.any { it }) { onOpenEditor(row.address) }.padding(vertical = 3.dp),
             )
-        }
+        }}
     }
     plan?.let { p ->
         com.ps4smartcheat.app.ui.components.ConfirmDialog(

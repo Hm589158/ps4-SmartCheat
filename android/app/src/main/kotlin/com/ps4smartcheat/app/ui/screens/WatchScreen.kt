@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.clickable
@@ -356,7 +358,7 @@ fun WatchScreen(initialAddress: Long?, initialSize: Int?, writes: Boolean?, onOp
         item {
             SectionCard("Target") {
                 OutlinedTextField(
-                    value = address, onValueChange = vm::setAddress, label = { Text("Address (hex)") }, singleLine = true, enabled = !running,
+                    value = address, onValueChange = vm::setAddress, textStyle = ltr(), label = { Text("Address (hex)") }, singleLine = true, enabled = !running,
                     modifier = Modifier.fillMaxWidth().testTag("wpAddress"),
                 )
                 ChoiceRow("Writes", "Instructions that change the value", type == WatchType.WRITES, { vm.setType(WatchType.WRITES) }, enabled = !running)

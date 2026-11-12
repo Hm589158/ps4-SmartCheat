@@ -265,6 +265,9 @@ object GoldHenExporter {
     }
 
     private fun memoryFor(c: CheatEntry, processName: String): kotlin.Result<GhMemory> = runCatching {
+        if (c.usesFlag) {
+            error("uses a one-shot flag — the app allocates it in every game session, which GoldHEN cannot do; switch it from Cheats instead.")
+        }
         val module = c.module ?: error("absolute address (not inside the game executable) — GoldHEN needs an executable offset.")
         if (!ModuleResolver.sameModule(module.name, processName)) error("address is in module ${module.name}, not $processName.")
         if (module.offset < 0) error("negative executable offset.")

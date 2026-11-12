@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.clickable
@@ -408,7 +410,7 @@ private fun AddAddressForm(onAdd: (String, ValueType, String) -> Unit) {
     var type by rememberSaveable { mutableStateOf(ValueType.INT32) }
     var label by rememberSaveable { mutableStateOf("") }
     SectionCard("Add address") {
-        OutlinedTextField(address, { address = it.trim() }, label = { Text("Address (hex)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("watchAddress"))
+        OutlinedTextField(address, { address = it.trim() }, textStyle = ltr(), label = { Text("Address (hex)") }, singleLine = true, modifier = Modifier.fillMaxWidth().testTag("watchAddress"))
         Selector("Value type", ValueType.entries, type, { it.label }, { type = it })
         OutlinedTextField(label, { label = it }, label = { Text("Name (optional)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
         Button(onClick = { onAdd(address, type, label) }, enabled = address.isNotBlank(), modifier = Modifier.testTag("watchAdd")) { Text("Add") }

@@ -2,6 +2,23 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.9
+
+### One-shot injections (new — verified against the simulated server only)
+- Target Code can use `[flag]`: a byte that starts at 0 in every game session, e.g. to run a change only the first
+  time a condition holds. **+ once (flag)** inserts the guard (`cmp byte ptr [flag], 0` / `jne` / `mov byte ptr
+  [flag], 1`).
+- Each injection gets its own 8-byte flag, allocated next to the cave when it is switched ON (verified in the memory
+  map, reads 0) and freed after a verified OFF; never inside the cave, so code bytes never change while the game runs.
+- Saved injections hold no session address: the RIP-relative displacements to the flag are saved as 0 with their
+  positions and bound to a new flag on every ON — also from the Cheats screen and after a game restart. The ON/OFF
+  check and the session check compare everything but those displacements. Not exportable to GoldHEN (it cannot
+  allocate the flag); the export says so. Details in docs/CODE_CAVES.md.
+
+### Interface
+- Code, addresses and hex are written left to right in every input field and listing (Target Code, disassembler, hex
+  viewer, debugger, address fields), whatever the phone's language.
+
 ## 1.0.8
 
 ### Firmware support

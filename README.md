@@ -151,6 +151,8 @@ You can also build it from source with the project's `build.sh`, which produces 
 - **Code caves**: the replaced instructions appear as read-only **Source Code** and are copied into an editable
   **Target Code**. Write before, after or instead of them, with `jmp return` wherever you need it
   ([details](docs/CODE_CAVES.md))
+- **One-shot**: `[flag]` is a byte that starts at 0 in every game session — run a change only the first time a
+  condition holds. The flag is allocated per injection and session; saved cheats hold no session address
 - Building over a patch that is already ON is refused, so "off" is always the game's original code
 
 </td><td valign="top">

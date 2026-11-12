@@ -101,6 +101,19 @@ class MiniCpu(private val server: MockPs4DebugServer, private val pid: Int, stac
                     if (ins.getOpKind(0) != OpKind.MEMORY || !ins.isIPRelativeMemoryOperand) throw Unsupported("indirect jmp at 0x%X".format(rip))
                     rip = read(ins.ipRelativeMemoryAddress(), 8, rip, ins.length)
                 }
+                Code.CMP_RM8_IMM8 -> {
+                    if (ins.getOpKind(0) == OpKind.REGISTER) throw Unsupported("8-bit register compare at 0x%X".format(rip))
+                    cmpA = read(address(ins), 1, rip, ins.length)
+                    cmpB = ins.immediate8.toLong() and 0xFF
+                    rip = next
+                }
+                Code.MOV_RM8_IMM8 -> {
+                    if (ins.getOpKind(0) == OpKind.REGISTER) throw Unsupported("8-bit register move at 0x%X".format(rip))
+                    val a = address(ins)
+                    server.poke(pid, a, byteArrayOf(ins.immediate8.toByte()))
+                    server.gameAccess(pid, rip, ins.length, a, 1, write = true, registers = named())
+                    rip = next
+                }
                 Code.MOV_R32_IMM32 -> { set32(ins.op0Register, ins.immediate32.toLong()); rip = next }
                 Code.MOV_R32_RM32 -> { set32(ins.op0Register, src32(ins, 1, rip)); rip = next }
                 Code.MOV_RM32_R32 -> { store32(ins, get32(ins.op1Register), rip); rip = next }

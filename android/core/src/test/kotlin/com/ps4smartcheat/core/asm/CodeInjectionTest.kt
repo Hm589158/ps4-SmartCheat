@@ -536,4 +536,131 @@ class CodeInjectionTest {
         assertTrue(countingWriter.execute(pid, inj, steps, true).ok)
         assertEquals(1, counting.maps)
     }
+
+    // ------------------------------------------------------------------ one-shot flag
+
+    /** "mov eax, 1000" only the first time the routine runs, then the original instructions every time. */
+    private suspend fun oneShot(): CodeInjection = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE)) { src ->
+        OneShotFlag.guard("once_done").replace("\n\nonce_done:", "\nmov eax, 1000\nonce_done:") + "\n$src\njmp return"
+    }
+
+    @Test fun oneShotFlagRunsTheCodeOnceWithoutChangingCodeBytes() = runBlocking {
+        connect()
+        val inj = oneShot()
+        assertTrue(inj.usesFlag)
+        assertNull(inj.flagAddress) // planned against a stand-in: must be bound first
+        assertEquals(2, inj.flagFields.size) // cmp and mov address the flag
+        try { writer.prepare(pid, "eboot.bin", inj, true); fail() } catch (e: EditDeniedException) {
+            assertTrue(e.message!!, e.message!!.contains("not allocated"))
+        }
+
+        val flag = alloc.allocateNear(pid, inj.caveAddress, OneShotFlag.SIZE)
+        assertArrayEquals(ByteArray(OneShotFlag.SIZE), server.peek(pid, flag.address, OneShotFlag.SIZE)) // starts at 0
+        val bound = inj.withFlag(flag.address)
+        assertEquals(flag.address, bound.flagAddress)
+        assertEquals(listOf(flag.address, flag.address), bound.caveListing.mapNotNull { it.ripTarget }.filter { it == flag.address })
+        assertTrue(switch(bound, true).ok)
+        val cave = server.peek(pid, bound.caveAddress, bound.caveOn.size)
+
+        DemoGame.spendCoin(server)
+        assertEquals(999, coins) // first run: mov eax, 1000, then the original sub 1 and store
+        assertEquals(1.toByte(), server.peek(pid, flag.address, 1)[0])
+        DemoGame.spendCoin(server)
+        DemoGame.spendCoin(server)
+        assertEquals(997, coins) // later runs skip the one-shot code
+        assertArrayEquals(cave, server.peek(pid, bound.caveAddress, bound.caveOn.size)) // code bytes never change
+        assertEquals(InjectionState.ON, writer.state(pid, bound))
+
+        // OFF, then the flag memory is freed (only after the jump is gone).
+        assertTrue(switch(bound, false).ok)
+        alloc.free(flag)
+        assertTrue(client.getMemoryRegions(pid).none { it.contains(flag.address) })
+        DemoGame.spendCoin(server)
+        assertEquals(996, coins)
+    }
+
+    @Test fun oneShotInjectionIsSavedWithoutSessionAddressesAndRebindsInANewSession() = runBlocking {
+        connect()
+        val inj = oneShot()
+        val first = alloc.allocateNear(pid, inj.caveAddress, OneShotFlag.SIZE)
+        val bound = inj.withFlag(first.address)
+        val regions = client.getMemoryRegions(pid)
+        var n = 0
+        val entries = InjectionEntries.build(bound, "Once", null, regions) { "e${++n}" }
+        // Saved: the flag displacements are 0, never this session's flag; their positions are kept.
+        val caves = entries.filter { it.usesFlag }
+        assertTrue(caves.isNotEmpty())
+        val saved = Hex.decode(entries.filter { it.name.contains("cave") }.joinToString("") { it.patchBytes!! })
+        assertArrayEquals(bound.caveTemplate, saved)
+        assertTrue(caves.all { e -> e.flagFields!!.all { f -> (0 until 4).all { Hex.decode(e.patchBytes!!)[f.at + it] == 0.toByte() } } })
+        // Survives the JSON store.
+        val repo = CheatRepository(tmp.root.resolve("cheats.json")).also { it.load() }
+        val p = repo.createProfileWithCheats("MOCK00001", "MOCK00001", "01.00", "eboot.bin", entries)
+        val stored = CheatRepository(tmp.root.resolve("cheats.json")).also { it.load() }.profile(p.id)!!
+        assertEquals(entries.map { it.flagFields }, stored.cheats.map { it.flagFields })
+        // GoldHEN cannot allocate the flag: the export leaves it out and says why.
+        val export = GoldHenExporter.export(stored.copy(titleId = "CUSA12345"), "Demo", emptyList())
+        assertNull(export.json)
+        assertTrue(export.skipped.toString(), export.skipped.single().contains("one-shot flag"))
+
+        // Switched ON from the library in this session: allocate, bind, write in order.
+        val file = CodeCheats.asGoldHenFile(stored)!!
+        val mod = file.mods.single()
+        assertTrue(mod.applicable && mod.usesFlag)
+        var check = GoldHenImport.check(client, pid, file, mod, regions)
+        assertTrue(check.canEnable)
+        assertNull(check.boundFlag())
+        fun enable(flag: Long) {
+            for (i in check.writeOrder(true)) {
+                val out = runBlocking { editor.execute(editor.planBytes(pid, "eboot.bin", check.addresses[i], mod.patches[i].onFor(check.addresses[i], flag))) }
+                assertTrue(out is WriteOutcome.Verified)
+            }
+        }
+        enable(first.address)
+        check = GoldHenImport.check(client, pid, file, mod, regions)
+        assertEquals(PatchState.ON, check.state) // bound fields count as ON
+        assertEquals(first.address, check.boundFlag())
+        DemoGame.spendCoin(server)
+        assertEquals(999, coins)
+        // Session check agrees.
+        assertTrue(com.ps4smartcheat.core.validate.SessionValidator.validate(client, pid, regions, profile = stored, processName = "eboot.bin").items
+            .all { it.validity == com.ps4smartcheat.core.validate.Validity.ACTIVE })
+
+        // OFF and free; then a "new session": a new flag at 0, bound to the same saved bytes, runs the code once again.
+        for (i in check.writeOrder(false)) {
+            assertTrue(editor.execute(editor.planBytes(pid, "eboot.bin", check.addresses[i], mod.patches[i].off)) is WriteOutcome.Verified)
+        }
+        alloc.free(first)
+        check = GoldHenImport.check(client, pid, file, mod, regions)
+        assertEquals(PatchState.OFF, check.state)
+        val second = alloc.allocateNear(pid, check.flagHint()!!, OneShotFlag.SIZE)
+        assertArrayEquals(ByteArray(OneShotFlag.SIZE), server.peek(pid, second.address, OneShotFlag.SIZE))
+        enable(second.address)
+        assertEquals(second.address, GoldHenImport.check(client, pid, file, mod, regions).boundFlag())
+        server.pokeInt32(pid, DemoGame.COINS_ADDRESS, 5000)
+        DemoGame.spendCoin(server)
+        assertEquals(999, coins) // once more in the new session
+        DemoGame.spendCoin(server)
+        assertEquals(998, coins)
+    }
+
+    @Test fun flagSyntaxAndSavedPartsAreChecked() {
+        val known = emptyList<AsmInstruction>()
+        try { CaveScript.parse("mov byte ptr [flag+1], 1\njmp return", known); fail() } catch (e: CodePatchException) { assertTrue(e.message!!.contains("[flag]")) }
+        try { CaveScript.parse("flag:\njmp return", known); fail() } catch (e: CodePatchException) { assertTrue(e.message!!.contains("reserved")) }
+        try { CaveScript.parse("jmp flag", known); fail() } catch (_: CodePatchException) {}
+        assertTrue(CaveScript.usesFlag(CaveScript.parse("CMP BYTE PTR [ Flag ], 0\njmp return", known)))
+        // Saved parts never split a displacement.
+        val fields = listOf(FlagField(62, 67), FlagField(130, 135))
+        val starts = OneShotFlag.chunkStarts(200, 64, fields)
+        assertEquals(listOf(0, 62, 126, 190), starts)
+        assertTrue(fields.all { f -> starts.none { it > f.at && it < f.at + 4 } })
+        assertEquals(listOf(FlagField(0, 5)), OneShotFlag.fieldsIn(fields, 62, 126))
+        // ON = equal outside the fields and every field bound.
+        val template = byteArrayOf(0x80.toByte(), 0x3D, 0, 0, 0, 0, 0)
+        val f = listOf(FlagField(2, 7))
+        assertTrue(OneShotFlag.matchesOn(OneShotFlag.bind(template, 0x1000, f, 0x5000), template, f))
+        assertFalse(OneShotFlag.matchesOn(template, template, f)) // unbound
+        assertEquals(0x5000L, OneShotFlag.boundTo(OneShotFlag.bind(template, 0x1000, f, 0x5000), 0x1000, f))
+    }
 }

@@ -97,6 +97,39 @@ lines and `jmp return` still works.
   it (for example the zero bytes of `mov eax, 0x100`). Caves used by saved or active injections are skipped.
   Immediately before writing, the planner re-checks that the cave still holds only padding.
 
+## One-shot flag (`[flag]`)
+
+Target Code can use `[flag]`, a byte that starts at 0 in every game session, to run a change only once — e.g. the
+first time a condition holds. **+ once (flag)** in the editor inserts the guard:
+
+```
+cmp byte ptr [flag], 0
+jne once_done
+mov byte ptr [flag], 1
+mov eax, 1000          ; runs the first time only
+once_done:
+sub eax, 1             ; the original instructions, every time
+mov [0x500120], eax
+jmp return
+```
+
+* **Where the flag lives.** Not in the cave: code memory is not writable, and saved code bytes must never change while
+  the game runs. Not in the game's data either (its padding cannot be proven unused). Each injection gets its own
+  allocation of 8 bytes next to the cave (ps4debug-NG `CMD_PROC_ALLOC_HINTED`, validated against the memory map like an
+  allocated cave). New memory reads 0; the app still checks it and resets it (confirmed) if it does not.
+* **Lifetime.** Allocated when the injection is switched ON (and freed again if that switch is cancelled), freed after
+  a verified OFF. A game exit takes it with the process; switching ON again — also after a game restart — allocates a
+  new one at 0, so the one-shot code runs once again.
+* **No session address is saved.** The cave reaches the flag RIP-relative (`[rip ± disp]`, within 2 GiB). Each `[flag]`
+  line is assembled on its own, twice (to learn its length, then with the real displacement), and the decoder checks
+  that it addresses the flag. The library stores the cave with these 4-byte displacements set to 0, plus their
+  positions (`flagFields`); saved parts are cut so that no displacement is split. Every ON binds them to the new flag.
+* **Checks.** ON = every byte equal except the displacements, which must be bound (not 0); OFF and mismatch are exact.
+  The library switches, the session check and the Inject screen use the same comparison. Building over an injection
+  that is ON is refused as before.
+* **GoldHEN.** GoldHEN cannot allocate memory, so one-shot injections are left out of GoldHEN exports with that reason;
+  they are switched from the app's Cheats screen.
+
 ## Write order and failures
 
 | Action | Order | If a write fails |

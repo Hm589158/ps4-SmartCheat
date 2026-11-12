@@ -1,5 +1,9 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.LeftToRight
+
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.clickable
@@ -406,7 +410,7 @@ fun DebuggerScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
                     OutlinedButton(onClick = { vm.traceText()?.let { copyText(context, "Register trace", it) } }, modifier = Modifier.testTag("dbgCopy")) { Text("Copy") }
                 }
             }
-            items(steps, key = { it.index }) { s ->
+            items(steps, key = { it.index }) { s -> LeftToRight {
                 SectionCard(null) {
                     Column(
                         Modifier.fillMaxWidth().clickable { expanded = if (expanded == s.index) null else s.index }.testTag("dbgStepRow-${s.index}"),
@@ -429,12 +433,12 @@ fun DebuggerScreen(initialAddress: Long?, onOpenCode: (Long) -> Unit) {
                         }
                     }
                 }
-            }
+            }}
         }
         item {
             SectionCard("Breakpoint address", step = 1) {
                 OutlinedTextField(
-                    value = address, onValueChange = vm::setAddress, label = { Text("Instruction address (hex)") }, singleLine = true, enabled = !running,
+                    value = address, onValueChange = vm::setAddress, textStyle = ltr(), label = { Text("Instruction address (hex)") }, singleLine = true, enabled = !running,
                     modifier = Modifier.fillMaxWidth().testTag("dbgAddress"),
                 )
                 Text(

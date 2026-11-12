@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.layout.Arrangement
@@ -276,7 +278,7 @@ fun EditorScreen(initialAddress: Long?, initialType: ValueType?, onViewMemory: (
         SectionCard("Address") {
             Text("Process: ${selected?.name ?: "-"} (pid ${selected?.pid ?: "-"})", style = MaterialTheme.typography.bodySmall)
             OutlinedTextField(
-                value = address, onValueChange = vm::setAddress, label = { Text("Address (hex)") }, singleLine = true,
+                value = address, onValueChange = vm::setAddress, textStyle = ltr(), label = { Text("Address (hex)") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
             Selector("Value type", ValueType.entries, type, { it.label }, vm::setType)

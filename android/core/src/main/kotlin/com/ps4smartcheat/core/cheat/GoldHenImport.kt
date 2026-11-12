@@ -19,11 +19,24 @@ import kotlinx.serialization.json.jsonPrimitive
  * it was saved, e.g. `executable`) and are resolved through it — exactly like the session check — instead of through
  * the process name. [label] names the part in the UI ("… · cave 1/1", "… · jump").
  */
-data class GhPatch(val offset: Long, val on: ByteArray, val off: ByteArray, val module: ModuleRef? = null, val label: String? = null)
+data class GhPatch(
+    val offset: Long, val on: ByteArray, val off: ByteArray, val module: ModuleRef? = null, val label: String? = null,
+    /** One-shot flag displacements in [on] (saved as 0), bound per session; library entries only. */
+    val flagFields: List<com.ps4smartcheat.core.asm.FlagField> = emptyList(),
+) {
+    /** The bytes to write for ON at [address]: [on], with the flag displacements bound to [flag] when there are any. */
+    fun onFor(address: Long, flag: Long?): ByteArray = when {
+        flagFields.isEmpty() -> on
+        flag == null -> throw IllegalStateException("$label needs its one-shot flag")
+        else -> com.ps4smartcheat.core.asm.OneShotFlag.bind(on, address, flagFields, flag)
+    }
+}
 
 /** One `mods` entry. [problems] non-empty → the mod cannot be applied (it is still listed). */
 data class GhImportMod(val name: String, val type: String, val patches: List<GhPatch>, val problems: List<String>) {
     val applicable: Boolean get() = problems.isEmpty() && patches.isNotEmpty()
+    /** A one-shot injection: switching it ON needs a flag allocated in this session. */
+    val usesFlag: Boolean get() = patches.any { it.flagFields.isNotEmpty() }
 }
 
 data class GhImportFile(
@@ -99,6 +112,20 @@ data class ModCheck(val mod: GhImportMod, val addresses: List<Long>, val states:
      * target state are skipped. The reverse order matters for code-cave injections (cave chunks first, jump last):
      * switching OFF removes the jump before the cave code.
      */
+    /**
+     * One-shot injections: the flag the parts that are ON already address (an interrupted enable keeps using it), or
+     * null when none is ON.
+     */
+    fun boundFlag(): Long? = mod.patches.indices.firstNotNullOfOrNull { i ->
+        val fields = mod.patches[i].flagFields
+        val part = parts.getOrNull(i)
+        if (fields.isEmpty() || states.getOrNull(i) != PatchState.ON || part?.actual == null) null
+        else com.ps4smartcheat.core.asm.OneShotFlag.boundTo(part.actual, part.address, fields)
+    }
+
+    /** Where to allocate a new one-shot flag: next to the first part that addresses it (within 2 GiB). */
+    fun flagHint(): Long? = mod.patches.indices.firstOrNull { mod.patches[it].flagFields.isNotEmpty() }?.let { addresses.getOrNull(it) }?.takeIf { it >= 0 }
+
     fun writeOrder(enable: Boolean): List<Int> {
         val want = if (enable) PatchState.OFF else PatchState.ON
         val idx = states.indices.filter { states[it] == want }
@@ -189,7 +216,7 @@ object GoldHenImport {
         }
         val current = readContiguous(backend, pid, mod.patches.map { it.on.size }, located.map { it.second }, regions)
         val parts = mod.patches.mapIndexed { i, p ->
-            inspect(backend, pid, i, p.label ?: "patch ${i + 1}", located[i].first, located[i].second, p.on, p.off, regions, current[i])
+            inspect(backend, pid, i, p.label ?: "patch ${i + 1}", located[i].first, located[i].second, p.on, p.off, regions, current[i], p.flagFields)
         }
         return ModCheck(mod, parts.map { it.address }, parts.map { it.state }, parts)
     }
@@ -239,13 +266,16 @@ object GoldHenImport {
         on: ByteArray, off: ByteArray, regions: List<MemoryRegion>,
         /** Bytes already read at [address] (a joined read), or null to read them now. */
         current: ByteArray? = null,
+        /** One-shot flag displacements in [on]: compared as "bound", not byte for byte ([OneShotFlag.matchesOn]). */
+        flagFields: List<com.ps4smartcheat.core.asm.FlagField> = emptyList(),
     ): PartCheck {
         if (address == null) return PartCheck(index, label, location, -1L, PatchState.UNMAPPED, on, off, null)
         if (regions.regionFor(address, on.size)?.isReadable != true) return PartCheck(index, label, location, address, PatchState.UNMAPPED, on, off, null)
         val now = current ?: backend.readMemory(pid, address, on.size)
         val state = when {
             now.contentEquals(off) -> PatchState.OFF
-            now.contentEquals(on) -> PatchState.ON
+            flagFields.isEmpty() && now.contentEquals(on) -> PatchState.ON
+            flagFields.isNotEmpty() && com.ps4smartcheat.core.asm.OneShotFlag.matchesOn(now, on, flagFields) -> PatchState.ON
             else -> PatchState.MISMATCH
         }
         return PartCheck(index, label, location, address, state, on, off, now)

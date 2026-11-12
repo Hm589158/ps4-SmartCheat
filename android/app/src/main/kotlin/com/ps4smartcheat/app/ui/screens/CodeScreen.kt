@@ -1,5 +1,9 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.LeftToRight
+
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.background
@@ -384,7 +388,7 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 GameRequiredBanner()
                 OutlinedTextField(
-                    value = address, onValueChange = vm::setAddress, label = { Text("Code address (hex)") }, singleLine = true,
+                    value = address, onValueChange = vm::setAddress, textStyle = ltr(), label = { Text("Code address (hex)") }, singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("codeAddress"),
                 )
                 Button(onClick = vm::go, enabled = selected != null && connected, modifier = Modifier.testTag("codeGo")) { Text("Disassemble") }
@@ -464,7 +468,7 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                             OutlinedTextField(
                                 value = source, onValueChange = vm::setSource, minLines = 2,
                                 label = { Text(if (assembly) "New instructions (Intel syntax, one per line)" else "New bytes (hex)") },
-                                textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                                textStyle = ltr(MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)),
                                 modifier = Modifier.fillMaxWidth().testTag("codeSource"),
                             )
                             if (assembly && !ng && connected) Text("Assembling runs on the PS4 and needs ps4debug-NG; use Hex instead.", style = MaterialTheme.typography.bodySmall, color = dim)
@@ -522,7 +526,7 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                 }
             }
         }
-        items(rows, key = { it.address }) { ins ->
+        items(rows, key = { it.address }) { ins -> LeftToRight {
             val flag = when {
                 ins.writesMemory -> "W"
                 ins.readsMemory -> "R"
@@ -553,7 +557,7 @@ fun CodeScreen(initialAddress: Long?, onViewMemory: (Long) -> Unit, onWatch: (Lo
                     }
                 }
             }
-        }
+        }}
     }
 
     plan?.let { (on, p) ->

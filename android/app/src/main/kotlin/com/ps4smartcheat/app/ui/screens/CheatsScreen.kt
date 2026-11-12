@@ -142,7 +142,11 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     val ghMismatch = _ghMismatch.asStateFlow()
 
     /** Toggle waiting for confirmation: mod index, enable?, one verified-write plan per patch. */
-    data class GhToggle(val index: Int, val enable: Boolean, val plans: List<WritePlan>)
+    /** [newFlag]: a one-shot flag allocated for this switch (freed again when cancelled); [flagKey] its library key. */
+    data class GhToggle(
+        val index: Int, val enable: Boolean, val plans: List<WritePlan>,
+        val newFlag: com.ps4smartcheat.core.asm.CaveAllocation? = null, val flagKey: String? = null,
+    )
     private val _ghToggle = MutableStateFlow<GhToggle?>(null)
     val ghToggle = _ghToggle.asStateFlow()
 
@@ -276,13 +280,30 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
                         check.parts.joinToString("; ") { "${it.label} is ${it.state.label}" } + " — nothing written."
                     return@launch
                 }
+                // One-shot injections: ON binds the cave to this session's flag — the one the parts already ON use, the one
+                // allocated earlier in this session, or a new one (reads 0) next to the cave.
+                val mod = check.mod
+                val key = c.libraryFlagKey(sel.pid, f.name, mod.name)
+                var newFlag: com.ps4smartcheat.core.asm.CaveAllocation? = null
+                val flag: Long? = if (enable && mod.usesFlag) {
+                    check.boundFlag() ?: c.libraryFlags[key]?.address ?: run {
+                        if (!c.caveAllocator.available) throw EditDeniedException("\"${mod.name}\" uses a one-shot flag, which needs ps4debug-NG (memory allocation).")
+                        val hint = check.flagHint() ?: throw EditDeniedException("\"${mod.name}\": the code cave is not mapped.")
+                        c.caveAllocator.allocateNear(sel.pid, hint, com.ps4smartcheat.core.asm.OneShotFlag.SIZE).also { newFlag = it }.address
+                    }
+                } else null
                 // ON in file order, OFF in reverse (an injection's jump goes last ON and first OFF); patches already in
                 // the target state (an interrupted toggle) are skipped.
-                val plans = check.writeOrder(enable).map { i ->
-                    val p = check.mod.patches[i]
-                    c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.on else p.off, regions)
+                val plans = try {
+                    check.writeOrder(enable).map { i ->
+                        val p = mod.patches[i]
+                        c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.onFor(check.addresses[i], flag) else p.off, regions)
+                    }
+                } catch (e: Exception) {
+                    newFlag?.let { runCatching { c.caveAllocator.free(it) } }
+                    throw e
                 }
-                _ghToggle.value = GhToggle(index, enable, plans)
+                _ghToggle.value = GhToggle(index, enable, plans, newFlag, key.takeIf { mod.usesFlag })
             } catch (e: EditDeniedException) {
                 _error.value = e.message
             } catch (e: BackendException) {
@@ -291,7 +312,12 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    fun dismissGoldHenToggle() { _ghToggle.value = null }
+    fun dismissGoldHenToggle() {
+        val t = _ghToggle.value
+        _ghToggle.value = null
+        // Nothing was written: a flag allocated for this switch is freed again.
+        t?.newFlag?.let { f -> viewModelScope.launch { runCatching { c.caveAllocator.free(f) } } }
+    }
 
     fun confirmGoldHenToggle() {
         val t = _ghToggle.value ?: return
@@ -301,9 +327,21 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
             for (p in t.plans) {
                 val out = c.editor.execute(p)
                 if (out !is WriteOutcome.Verified) {
+                    // Parts may already address the new flag: keep it (switching OFF frees it).
+                    if (t.enable && t.flagKey != null) t.newFlag?.let { c.libraryFlags[t.flagKey] = it }
                     _error.value = "\"$name\": ${out.message} (stopped; earlier patches of this mod were written — use Undo in the editor)"
                     checkGoldHen()
                     return@launch
+                }
+            }
+            if (t.flagKey != null) {
+                if (t.enable) {
+                    t.newFlag?.let { c.libraryFlags[t.flagKey] = it }
+                } else {
+                    // OFF verified: the cave cannot reach the flag any more; free it if this app allocated it.
+                    c.libraryFlags.remove(t.flagKey)?.let { f ->
+                        runCatching { c.caveAllocator.free(f) }.onFailure { c.log.warn("One-shot flag at ${Address.format(f.address)} could not be freed: ${it.message}") }
+                    }
                 }
             }
             _message.value = "\"$name\" ${if (t.enable) "enabled" else "disabled"}: ${t.plans.size} patch(es) verified"

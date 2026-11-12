@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.layout.Arrangement
@@ -135,7 +137,7 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
         }
         item {
             SectionCard("1. Scan") {
-                OutlinedTextField(target, { target = it.trim() }, label = { Text("Target address (hex)") }, singleLine = true, enabled = !st.running, modifier = Modifier.fillMaxWidth().testTag("pointerTarget"))
+                OutlinedTextField(target, { target = it.trim() }, textStyle = ltr(), label = { Text("Target address (hex)") }, singleLine = true, enabled = !st.running, modifier = Modifier.fillMaxWidth().testTag("pointerTarget"))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Selector("Value type", ValueType.entries, type, { it.label }, { type = it }, Modifier.weight(1f), enabled = !st.running)
                     Selector("Depth", depthOptions, depth, { "$it" }, { depth = it }, Modifier.weight(0.7f), enabled = !st.running)
@@ -167,7 +169,7 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
             item {
                 SectionCard("2. After restarting the game") {
                     Text("Find the value again with a normal scan, then enter its new address.", style = MaterialTheme.typography.bodySmall)
-                    OutlinedTextField(newTarget, { newTarget = it.trim() }, label = { Text("New address (hex)") }, singleLine = true, enabled = !st.running, modifier = Modifier.fillMaxWidth().testTag("pointerNewTarget"))
+                    OutlinedTextField(newTarget, { newTarget = it.trim() }, textStyle = ltr(), label = { Text("New address (hex)") }, singleLine = true, enabled = !st.running, modifier = Modifier.fillMaxWidth().testTag("pointerNewTarget"))
                     Button(onClick = { vm.filter(newTarget) }, enabled = connected && alive && !st.running && st.chains.isNotEmpty(), modifier = Modifier.testTag("pointerFilter")) { Text("Keep chains that lead there") }
                 }
             }
@@ -205,7 +207,7 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
                     OutlinedButton(onClick = vm::saveCandidates, enabled = st.chains.isNotEmpty() && !st.running, modifier = Modifier.testTag("saveCandidates")) { Text("Save ${st.chains.size} as candidates") }
                     if (st.candidates.isNotEmpty()) TextButton(onClick = vm::clearCandidates) { Text("Clear") }
                 }
-                OutlinedTextField(confirmedAddress, { confirmedAddress = it.trim() }, label = { Text("Value's address now (optional, hex)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(confirmedAddress, { confirmedAddress = it.trim() }, textStyle = ltr(), label = { Text("Value's address now (optional, hex)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
                 Button(onClick = { vm.validateCandidates(confirmedAddress) }, enabled = connected && alive && !st.running && st.candidates.isNotEmpty(), modifier = Modifier.testTag("validateCandidates")) {
                     Text("Validate ${st.candidates.size} saved candidate(s)")
                 }

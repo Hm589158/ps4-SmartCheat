@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.ltr
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -89,7 +91,7 @@ fun ConnectionScreen(onConnected: () -> Unit) {
     ) {
         SectionCard("PS4 address") {
             OutlinedTextField(
-                value = host, onValueChange = vm::setHost, label = { Text("IP address (e.g. 192.168.1.50)") },
+                value = host, onValueChange = vm::setHost, textStyle = ltr(), label = { Text("IP address (e.g. 192.168.1.50)") },
                 singleLine = true, enabled = !connected && !connecting, modifier = Modifier.fillMaxWidth().testTag("host"),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             )

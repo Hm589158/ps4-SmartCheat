@@ -57,7 +57,15 @@ data class CheatEntry(
     val group: String? = null,
     /** AOB signature of the original code (`??` = wildcard), used to find the patch again after a game update. */
     val signature: String? = null,
+    /**
+     * Part of a one-shot injection's cave: displacements in [patchBytes] (saved as 0) that address the injection's flag,
+     * bound to a new flag every time the injection is switched ON (see [com.ps4smartcheat.core.asm.OneShotFlag]).
+     */
+    val flagFields: List<com.ps4smartcheat.core.asm.FlagField>? = null,
 ) {
+    /** Uses a one-shot flag that the app allocates per game session. */
+    val usesFlag: Boolean get() = !flagFields.isNullOrEmpty()
+
     val isPatch: Boolean get() = !patchBytes.isNullOrBlank()
 }
 

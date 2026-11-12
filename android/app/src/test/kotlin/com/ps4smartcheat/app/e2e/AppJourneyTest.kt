@@ -639,6 +639,57 @@ class AppJourneyTest {
         press(t)
     }
 
+    @Test fun oneShotInjectionRunsOnceAndFreesItsFlag() {
+        connect()
+        waitText("eboot.bin (77)", timeoutMs = 20_000)
+        tab("Code")
+        waitTag("codeAddress")
+        tag("codeAddress").performTextInput(Address.format(DemoGame.SUB_ONE))
+        press("codeGo")
+        waitText("sub eax, 1")
+        press("codeInject")
+        waitTag("injectList")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injBuild"))
+        waitText("end of code (page padding)")
+
+        step("one-shot guard")
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injTarget"))
+        tag("injTarget").performTextClearance()
+        injPress("injInsertOnce")
+        waitText("one-shot flag") // the summary recognises [flag]
+        compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injTarget"))
+        tag("injTarget").performTextClearance()
+        tag("injTarget").performTextInput(
+            "cmp byte ptr [flag], 0\njne once_done\nmov byte ptr [flag], 1\nmov eax, 1000\nonce_done:\nsub eax, 1\nmov [0x500120], eax\njmp return",
+        )
+        shot("62_one_shot_target_code")
+
+        step("build and switch ON")
+        injPress("injBuild")
+        compose.waitUntil(20_000) { runCatching { compose.onNodeWithTag("injectList").performScrollToNode(hasTestTag("injPreview")) }.isSuccess }
+        waitText("One-shot flag")
+        injPress("injOn")
+        confirmDialog()
+        compose.waitUntil(20_000) { c().injections.value.any { it.state == com.ps4smartcheat.core.asm.InjectionState.ON } }
+        val active = c().injections.value.single()
+        val flag = active.flag!!
+        assertEquals(flag.address, active.injection.flagAddress)
+        DemoGame.spendCoin(server)
+        assertEquals(999, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS)) // the one-shot code ran
+        assertEquals(1, server.peek(DemoGame.PID, flag.address, 1)[0].toInt())
+        DemoGame.spendCoin(server)
+        assertEquals(998, server.peekInt32(DemoGame.PID, DemoGame.COINS_ADDRESS)) // and only once
+        shot("63_one_shot_on")
+
+        step("switch OFF frees the flag")
+        injPress("injOff")
+        confirmDialog()
+        waitMock { hexBytes(DemoGame.SUB_ONE, 3) == "83 E8 01" }
+        compose.waitUntil(20_000) { c().injections.value.single().flag == null }
+        val regions = kotlinx.coroutines.runBlocking { c().backend.getMemoryRegions(DemoGame.PID) }
+        assertEquals(true, regions.none { it.contains(flag.address) })
+    }
+
     @Test fun codeCaveInjectionRunsInTheGameIsSavedAndSwitchedFromCheats() {
         connect()
         waitText("eboot.bin (77)", timeoutMs = 20_000)

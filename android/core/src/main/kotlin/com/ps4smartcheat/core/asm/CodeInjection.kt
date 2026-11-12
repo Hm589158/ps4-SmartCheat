@@ -63,8 +63,38 @@ class CodeInjection(
     val warnings: List<String>,
     /** AOB signature of the original code at the hook (constants wildcarded). */
     val signature: String,
+    /** Fields of [caveOn] that address the one-shot flag, relative to [caveAddress] (see [OneShotFlag]). */
+    val flagFields: List<FlagField> = emptyList(),
+    /** The flag [caveOn] is bound to in this session; null = not yet allocated (then [caveOn] must not be written). */
+    val flagAddress: Long? = null,
 ) {
     val caveRange: LongRange get() = caveAddress until caveAddress + caveOn.size
+
+    /** The Target Code uses the one-shot flag `[flag]`. */
+    val usesFlag: Boolean get() = flagFields.isNotEmpty()
+
+    /** [caveOn] in the session-independent form that is saved (flag fields 0). */
+    val caveTemplate: ByteArray get() = OneShotFlag.template(caveOn, flagFields)
+
+    /**
+     * This injection with the cave bound to the flag at [flag] (this session's allocation): [caveOn], the parts and the
+     * listing then address it. Nothing else changes.
+     */
+    fun withFlag(flag: Long): CodeInjection {
+        if (!usesFlag) return this
+        val bound = OneShotFlag.bind(caveOn, caveAddress, flagFields, flag)
+        val newParts = parts.map { p ->
+            val from = (p.address - caveAddress).toInt()
+            CavePart(p.kind, p.address, bound.copyOfRange(from, from + p.bytes.size), p.text)
+        }
+        val listing = newParts.flatMap { p ->
+            if (p.kind == CavePartKind.RETURN) listOf(InjectionPlanner.jumpRow(p.address, p.bytes, returnAddress)) else X86.decode(p.bytes, p.address)
+        }
+        return CodeInjection(
+            hookAddress, hookOff, hookOn, stolen, returnAddress, jump, caveKind, caveAddress, caveOff, bound, listing,
+            hookListing, newParts, labels, replaced, source, warnings, signature, flagFields, flag,
+        )
+    }
 
     /** The part of the cave code that holds [address]. */
     fun partAt(address: Long): CavePart? = parts.firstOrNull { address in it.range }
@@ -72,7 +102,8 @@ class CodeInjection(
     fun state(hookNow: ByteArray, caveNow: ByteArray): InjectionState {
         val hookOn = hookNow.contentEquals(this.hookOn)
         val hookOff = hookNow.contentEquals(this.hookOff)
-        val caveOn = caveNow.contentEquals(this.caveOn)
+        // With a one-shot flag the cave is bound to this session's flag: compare everything but the flag fields.
+        val caveOn = if (usesFlag) OneShotFlag.matchesOn(caveNow, caveTemplate, flagFields) else caveNow.contentEquals(this.caveOn)
         val caveOff = caveNow.contentEquals(this.caveOff)
         return when {
             hookOn && caveOn -> InjectionState.ON
@@ -178,10 +209,12 @@ object InjectionPlanner {
      * @param assemble assembles typed instructions for the address they will run at (Keystone on the PS4)
      * @param known patches the app knows (library, this session): planning over one that is ON is refused, because its
      *   bytes would become the injection's "original" code ([AppliedPatches])
+     * @param flag the one-shot flag already allocated for this injection in this session, if any ([OneShotFlag])
      */
     suspend fun plan(
         hook: Long, window: ByteArray, hookRegion: MemoryRegion?, cave: CaveSpace, target: String,
-        replaceBytes: Int = 0, known: List<AppliedPatch> = emptyList(), assemble: suspend (text: String, address: Long) -> ByteArray,
+        replaceBytes: Int = 0, known: List<AppliedPatch> = emptyList(), flag: Long? = null,
+        assemble: suspend (text: String, address: Long) -> ByteArray,
     ): CodeInjection {
         if (hookRegion != null && !hookRegion.isExecutable) {
             throw CodePatchException("${Address.format(hook)} is not in executable memory (${hookRegion.name.ifBlank { "anon" }} ${hookRegion.protString()}).")
@@ -207,7 +240,10 @@ object InjectionPlanner {
         }
 
         val stmts = CaveScript.parse(target, stolen + following.drop(stolen.size))
-        val linked = CaveScript.link(stmts, cave.address, returnAddress, assemble)
+        // [flag] needs an address to assemble against: this session's flag, else a stand-in (the cave itself) that only
+        // fixes the layout; such a plan is bound with withFlag() before anything is written.
+        val usesFlag = CaveScript.usesFlag(stmts)
+        val linked = CaveScript.link(stmts, cave.address, returnAddress, if (usesFlag) flag ?: cave.address else null, assemble)
         val caveOn = linked.bytes
         if (caveOn.size > MAX_CAVE_CODE) throw CodePatchException("The cave code is ${caveOn.size} bytes (max $MAX_CAVE_CODE).")
         if (caveOn.size > cave.capacity) throw CodePatchException("The cave code needs ${caveOn.size} bytes but the cave has ${cave.capacity}. Pick a larger cave.")
@@ -237,6 +273,10 @@ object InjectionPlanner {
         }
         if (linked.returns == 0) warnings += "The Target Code never jumps back with \"jmp return\"; make sure its own jmp/ret leads somewhere valid."
         if (jump == HookJump.ABS64) warnings += "The cave is more than 2 GiB away: a 14-byte jump is used."
+        if (usesFlag) {
+            warnings += "One-shot flag: ${OneShotFlag.SIZE} bytes are allocated near the cave when the injection is switched ON " +
+                "(they read 0) and freed after it is switched OFF. A game restart starts with a new flag at 0. Not exportable to GoldHEN."
+        }
         if (cave.kind == CaveKind.ALLOCATED) warnings += "Allocated memory: this injection lasts only while the game runs and cannot be saved or exported."
         if (cave.kind == CaveKind.MODULE_PADDING && caveOff[0] == 0.toByte() && !cave.atSegmentEnd) {
             warnings += "The cave is zero bytes inside the code mapping; it is very likely padding, but make sure nothing uses it."
@@ -247,6 +287,7 @@ object InjectionPlanner {
         return CodeInjection(
             hook, hookOff, hookOn, stolen, returnAddress, jump, cave.kind, cave.address, caveOff, caveOn, listing,
             hookListing, linked.parts, labels, replaced, target.trim(), warnings, signature,
+            linked.flagFields, if (usesFlag) flag else null,
         )
     }
 }

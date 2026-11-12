@@ -257,6 +257,7 @@ class AppContainer(context: Context) {
         freezer.frozen.value.filter { it.pid == pid }.forEach { freezer.unfreeze(it.id) }
         editor.forgetProcess(pid)
         _injections.value = _injections.value.filterNot { it.pid == pid } // its memory and code are gone
+        libraryFlags.keys.removeAll { it.startsWith("$pid\u0000") }
         _selected.value = _selected.value?.takeIf { it.pid == pid }?.copy(exitedReason = "$name (pid $pid) exited") ?: _selected.value
         log.notify("$name (pid $pid) exited — its scan session was closed", EventCategory.PROCESS)
     }
@@ -426,7 +427,17 @@ class AppContainer(context: Context) {
         /** Memory allocated for its cave (null for a cave in the executable's padding); freed only on request. */
         val allocation: com.ps4smartcheat.core.asm.CaveAllocation?,
         val state: com.ps4smartcheat.core.asm.InjectionState?,
+        /** This session's one-shot flag ([com.ps4smartcheat.core.asm.OneShotFlag]); freed after a verified OFF. */
+        val flag: com.ps4smartcheat.core.asm.CaveAllocation? = null,
     )
+
+    /**
+     * One-shot flags of injections switched ON from the library in this game session, by [libraryFlagKey]. Freed after a
+     * verified OFF; dropped (not freed: the memory went with the process) when the game exits.
+     */
+    val libraryFlags: MutableMap<String, com.ps4smartcheat.core.asm.CaveAllocation> = java.util.concurrent.ConcurrentHashMap()
+
+    fun libraryFlagKey(pid: Int, file: String, mod: String) = "$pid\u0000$file\u0000$mod"
 
     private val _injections = MutableStateFlow<List<ActiveInjection>>(emptyList())
     /** Injections of this session (newest last) so they can be checked, switched off and freed later. */

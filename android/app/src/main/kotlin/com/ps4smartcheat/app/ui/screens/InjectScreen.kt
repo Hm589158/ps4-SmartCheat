@@ -1,5 +1,9 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.LeftToRight
+
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.background
@@ -60,6 +64,7 @@ import com.ps4smartcheat.app.ui.components.Tone
 import com.ps4smartcheat.app.ui.components.WarningBanner
 import com.ps4smartcheat.core.asm.AsmInstruction
 import com.ps4smartcheat.core.asm.CaveAllocation
+import com.ps4smartcheat.core.asm.OneShotFlag
 import com.ps4smartcheat.core.asm.CaveAllocationException
 import com.ps4smartcheat.core.asm.CaveAllocator
 import com.ps4smartcheat.core.asm.CaveCandidate
@@ -89,7 +94,8 @@ import kotlinx.coroutines.launch
 
 /** A write waiting for confirmation on the Inject screen. */
 sealed interface InjectConfirm {
-    data class Switch(val id: String, val enable: Boolean, val steps: List<InjectionStep>) : InjectConfirm
+    /** [newFlag]: a one-shot flag allocated for this switch, freed again if it is cancelled. */
+    data class Switch(val id: String, val enable: Boolean, val steps: List<InjectionStep>, val newFlag: CaveAllocation? = null) : InjectConfirm
     data class Allocate(val hint: Long, val length: Int) : InjectConfirm
     data class Free(val allocation: CaveAllocation) : InjectConfirm
 }
@@ -268,7 +274,33 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
 
     fun requestFree(a: CaveAllocation) { _confirm.value = InjectConfirm.Free(a) }
 
-    fun dismiss() { _confirm.value = null }
+    fun dismiss() {
+        val pending = _confirm.value
+        _confirm.value = null
+        // A flag allocated for a switch that was cancelled is freed again (nothing was written).
+        if (pending is InjectConfirm.Switch && pending.newFlag != null) {
+            val a = c.injections.value.firstOrNull { it.id == pending.id } ?: _current.value?.takeIf { it.id == pending.id } ?: return
+            launchBusy { releaseFlag(a, pending.newFlag) }
+        }
+    }
+
+    private fun store(a: AppContainer.ActiveInjection) {
+        if (c.injections.value.any { it.id == a.id } || _current.value?.id == a.id) c.putInjection(a)
+        if (_current.value?.id == a.id) _current.value = a
+    }
+
+    /** Frees a one-shot flag after its injection is OFF (checked in memory) and forgets it. */
+    private suspend fun releaseFlag(a: AppContainer.ActiveInjection, flag: CaveAllocation) {
+        val st = runCatching { c.injectionWriter.state(a.pid, a.injection) }.getOrNull()
+        if (st == InjectionState.ON || st == InjectionState.MISMATCH) {
+            c.log.warn("One-shot flag at ${Address.format(flag.address)} kept: \"${a.name}\" is ${st.label}")
+            return
+        }
+        runCatching { c.caveAllocator.free(flag) }
+            .onSuccess { c.log.info("One-shot flag at ${Address.format(flag.address)} freed") }
+            .onFailure { c.log.warn("One-shot flag at ${Address.format(flag.address)} could not be freed: ${it.message}") }
+        store(a.copy(flag = null))
+    }
 
     /** Assembles the code for the cave, plans the injection and reads its current state. Nothing is written. */
     fun build() {
@@ -289,14 +321,18 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                     CaveSpace(a.address, a.length, CaveKind.ALLOCATED, c.backend.readMemory(sel.pid, a.address, a.length))
                 }
             }
-            val inj = InjectionPlanner.plan(hook, hookBytes, region, space, src, _replaceBytes.value, known = c.knownPatches(sel, regions)) { text, at ->
+            val id0 = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(space.address)}"
+            val flag = c.injections.value.firstOrNull { it.id == id0 }?.flag
+            val inj = InjectionPlanner.plan(
+                hook, hookBytes, region, space, src, _replaceBytes.value, known = c.knownPatches(sel, regions), flag = flag?.address,
+            ) { text, at ->
                 c.codeTools.assemble(text, at).bytes
             }
             val id = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(inj.caveAddress)}"
             val state = c.injectionWriter.state(sel.pid, inj)
             val name = c.injections.value.firstOrNull { it.id == id }?.name ?: defaultName(inj)
             val alloc = if (space.kind == CaveKind.ALLOCATED) _allocation.value else null
-            _current.value = AppContainer.ActiveInjection(id, sel.pid, sel.name, name, inj, alloc, state)
+            _current.value = AppContainer.ActiveInjection(id, sel.pid, sel.name, name, inj, alloc, state, flag?.takeIf { inj.usesFlag })
             _saveState.value = SaveState.Idle
         }
     }
@@ -308,10 +344,22 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
         val sel = c.selectedProcess.value ?: return
         if (sel.pid != a.pid) { _error.value = "This injection belongs to pid ${a.pid}; the selected process is ${sel.pid}."; return }
         launchBusy {
+            var target = a
+            var newFlag: CaveAllocation? = null
             try {
-                val steps = c.injectionWriter.prepare(a.pid, a.processName, a.injection, enable)
-                _confirm.value = InjectConfirm.Switch(a.id, enable, steps)
-            } catch (e: EditDeniedException) {
+                // A one-shot injection gets a new flag (reads 0) before it is switched ON; the cave is bound to it.
+                if (enable && a.injection.usesFlag && a.flag == null) {
+                    if (!c.caveAllocator.available) throw CodePatchException("The one-shot flag needs ps4debug-NG (memory allocation).")
+                    newFlag = c.caveAllocator.allocateNear(a.pid, a.injection.caveAddress, OneShotFlag.SIZE)
+                    target = a.copy(injection = a.injection.withFlag(newFlag.address), flag = newFlag)
+                    store(target)
+                    c.log.info("One-shot flag for \"${a.name}\" at ${Address.format(newFlag.address)} (allocated, reads 0)")
+                }
+                val steps = c.injectionWriter.prepare(target.pid, target.processName, target.injection, enable)
+                _confirm.value = InjectConfirm.Switch(target.id, enable, steps, newFlag)
+            } catch (e: Exception) {
+                newFlag?.let { f -> releaseFlag(target, f) }
+                if (e !is EditDeniedException) throw e
                 refresh(a)
                 throw CodePatchException(e.message + if (e.message?.contains("not writable") == true) " (Settings → Allow writes to non-writable regions)" else "")
             }
@@ -328,6 +376,8 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                 val updated = a.copy(state = r.stateAfter)
                 c.putInjection(updated)
                 if (_current.value?.id == a.id) _current.value = updated
+                // OFF verified: the cave can no longer reach the flag, so its memory is freed (a new one at 0 next ON).
+                if (!pending.enable && r.ok && updated.flag != null) releaseFlag(updated, updated.flag)
                 c.log.info("Code injection ${if (pending.enable) "on" else "off"} at ${Address.format(a.injection.hookAddress)}: ${r.message}")
                 if (r.ok) _message.value = r.message else _error.value = r.message
             }
@@ -375,6 +425,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
 
     fun forget(a: AppContainer.ActiveInjection) {
         if (a.allocation != null && a.state != InjectionState.OFF) { _error.value = "Free its memory instead (after switching it OFF)."; return }
+        if (a.flag != null && a.state != InjectionState.OFF) { _error.value = "Switch it OFF first (its one-shot flag is freed then)."; return }
         c.removeInjection(a.id)
     }
 
@@ -669,16 +720,28 @@ private fun TargetCodeCard(
     }
     val accent = MaterialTheme.colorScheme.primary
     SectionCard("Target Code", step = 3, subtitle = "Runs in the cave instead of the Source Code") {
-        OutlinedTextField(
-            value = field,
-            onValueChange = { field = it; vm.setSource(it.text) },
-            minLines = 6,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
-            placeholder = { Text("mov eax, 1000\njmp return", fontFamily = FontFamily.Monospace) },
-            modifier = Modifier.fillMaxWidth().testTag("injTarget"),
-        )
+        // Assembly is written left to right whatever the phone's language.
+        LeftToRight {
+            OutlinedTextField(
+                value = field,
+                onValueChange = { field = it; vm.setSource(it.text) },
+                minLines = 6,
+                textStyle = ltr(MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace)),
+                placeholder = { Text("mov eax, 1000\njmp return", fontFamily = FontFamily.Monospace) },
+                modifier = Modifier.fillMaxWidth().testTag("injTarget"),
+            )
+        }
         Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistChip(onClick = { insertLine("jmp ${CaveScript.RETURN}") }, label = { Text("+ jmp return") }, modifier = Modifier.testTag("injInsertReturn"))
+            AssistChip(
+                onClick = {
+                    // A label that is not used yet, so the guard can be inserted more than once.
+                    val label = generateSequence(1) { it + 1 }.map { if (it == 1) "once_done" else "once_done$it" }
+                        .first { l -> !Regex("(?m)^\\s*${Regex.escape(l)}\\s*:").containsMatchIn(field.text) }
+                    insertLine(OneShotFlag.guard(label))
+                },
+                label = { Text("+ once (flag)") }, modifier = Modifier.testTag("injInsertOnce"),
+            )
             AssistChip(onClick = vm::resetTarget, label = { Text("Reset to Source Code") }, modifier = Modifier.testTag("injResetTarget"))
         }
         val parsed = remember(source, sourceCode) { runCatching { CaveScript.parse(source, sourceCode) } }
@@ -691,6 +754,7 @@ private fun TargetCodeCard(
                 StatusPill("original $keptCount/${sourceCode.size}", if (keptCount == sourceCode.size) Tone.GOOD else Tone.WARN)
                 StatusPill("return ×$returns", if (returns == 0) Tone.WARN else Tone.GOOD)
                 StatusPill("$added new line${if (added == 1) "" else "s"}")
+                if (runCatching { CaveScript.usesFlag(stmts) }.getOrDefault(false)) StatusPill("one-shot flag", Tone.GOOD)
             }
             if (sourceCode.isNotEmpty() && keptCount < sourceCode.size) {
                 Text(
@@ -710,7 +774,10 @@ private fun TargetCodeCard(
                 withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append("skip:") }
                 append(") and raw bytes (")
                 withStyle(SpanStyle(fontFamily = FontFamily.Monospace)) { append("db 90 90") }
-                append(") work too. Keep registers and flags the game needs.")
+                append(") work too. ")
+                withStyle(SpanStyle(fontFamily = FontFamily.Monospace, color = accent)) { append("[flag]") }
+                append(" is a byte that starts at 0 in every game session (+ once inserts a guard that runs your code the first time only). ")
+                append("Keep registers and CPU flags the game needs.")
             },
             style = MaterialTheme.typography.bodySmall, color = dim,
         )
@@ -731,8 +798,10 @@ private fun CodePanel(modifier: Modifier = Modifier, content: @Composable () -> 
         shape = RoundedCornerShape(10.dp),
         modifier = modifier.fillMaxWidth(),
     ) {
-        Column(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            content()
+        LeftToRight {
+            Column(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                content()
+            }
         }
     }
 }

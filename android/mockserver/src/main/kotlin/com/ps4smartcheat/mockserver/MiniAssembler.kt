@@ -8,7 +8,8 @@ import java.io.ByteArrayOutputStream
 /**
  * Tiny stand-in for the Keystone assembler embedded in ps4debug-NG, enough for tests. Supports:
  * `nop`, `ret`, `int3`, `mov r32, imm`, `xor r32, r32`, `add`/`sub`/`cmp r32, imm`, `jmp <address>` (always
- * rel32) and `jcc <address>` (rel8 when the target is within reach, else rel32 — so label layouts must settle), `mov dword ptr [r64+disp], imm`.
+ * rel32) and `jcc <address>` (rel8 when the target is within reach, else rel32 — so label layouts must settle), `mov dword ptr [r64+disp], imm`,
+ * and `mov`/`cmp byte|dword ptr [rip ± disp], imm` (RIP-relative: the displacement counts from the next instruction).
  * Anything else fails like Keystone does (CMD_ERROR + errno + message).
  */
 object MiniAssembler {
@@ -22,6 +23,8 @@ object MiniAssembler {
         "jb" to 2, "jae" to 3, "je" to 4, "jz" to 4, "jne" to 5, "jnz" to 5, "jbe" to 6, "ja" to 7,
         "jl" to 0xC, "jge" to 0xD, "jle" to 0xE, "jg" to 0xF,
     )
+
+    private val RIP_OPERAND = Regex("(byte|dword) ptr \\[\\s*rip\\s*(?:([+-])\\s*(0x[0-9a-f]+|\\d+))?\\s*]")
 
     fun assemble(text: String, base: Long): Pair<ByteArray, Int> {
         val out = ByteArrayOutputStream()
@@ -65,6 +68,19 @@ object MiniAssembler {
                     val d = num(ops[0]) - (at + 2)
                     return if (d in -128..127) byteArrayOf((0x70 + cc).toByte(), d.toByte())
                     else byteArrayOf(0x0F, (0x80 + cc).toByte()) + le32(num(ops[0]) - (at + 6))
+                }
+                (m[0] == "mov" || m[0] == "cmp") && ops.size == 2 && RIP_OPERAND.matches(ops[0]) -> {
+                    val g = RIP_OPERAND.matchEntire(ops[0])!!.groupValues
+                    val disp = if (g[3].isEmpty()) 0L else num(g[3]) * (if (g[2] == "-") -1 else 1)
+                    if (disp !in Int.MIN_VALUE..Int.MAX_VALUE) throw AsmError(2, "Invalid operand (KS_ERR_ASM_INVALIDOPERAND)")
+                    val imm = num(ops[1])
+                    return when {
+                        g[1] == "byte" && m[0] == "mov" -> byteArrayOf(0xC6.toByte(), 0x05) + le32(disp) + byteArrayOf(imm.toByte())
+                        g[1] == "byte" -> byteArrayOf(0x80.toByte(), 0x3D) + le32(disp) + byteArrayOf(imm.toByte())
+                        m[0] == "mov" -> byteArrayOf(0xC7.toByte(), 0x05) + le32(disp) + le32(imm)
+                        imm in -128..127 -> byteArrayOf(0x83.toByte(), 0x3D) + le32(disp) + byteArrayOf(imm.toByte())
+                        else -> byteArrayOf(0x81.toByte(), 0x3D) + le32(disp) + le32(imm)
+                    }
                 }
                 m[0] == "mov" && ops.size == 2 && ops[0].startsWith("dword ptr [") -> {
                     val inner = ops[0].removePrefix("dword ptr [").removeSuffix("]")

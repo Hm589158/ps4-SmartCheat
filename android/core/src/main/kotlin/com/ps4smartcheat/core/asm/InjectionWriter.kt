@@ -39,6 +39,9 @@ class InjectionWriter(private val backend: DebugBackend, private val editor: Mem
      * OFF only restores the hook (the memory is freed separately). Throws [EditDeniedException] when not allowed now.
      */
     suspend fun prepare(pid: Int, processName: String, inj: CodeInjection, enable: Boolean): List<InjectionStep> {
+        if (enable && inj.usesFlag && inj.flagAddress == null) {
+            throw EditDeniedException("The one-shot flag is not allocated yet: allocate it before switching ON. Nothing written.")
+        }
         val now = state(pid, inj)
         // One map for every part (a 1 KiB cave is 16 writes): the map is the slowest request on a PS4.
         val regions = backend.getMemoryRegions(pid)
@@ -49,6 +52,12 @@ class InjectionWriter(private val backend: DebugBackend, private val editor: Mem
         }
         val total = (inj.caveOn.size + MAX_PATCH_BYTES - 1) / MAX_PATCH_BYTES
         if (enable) {
+            // The flag must read 0 before the code that tests it can run (new memory does; anything else is reset, confirmed).
+            inj.flagAddress?.let { flag ->
+                if (backend.readMemory(pid, flag, OneShotFlag.SIZE).any { it != 0.toByte() }) {
+                    steps += InjectionStep("flag reset", editor.planBytes(pid, processName, flag, ByteArray(OneShotFlag.SIZE), regions))
+                }
+            }
             when (now) {
                 InjectionState.OFF -> cave(true).forEach { (a, b, l) -> steps += InjectionStep("$l/$total", editor.planBytes(pid, processName, a, b, regions)) }
                 InjectionState.CAVE_ONLY -> Unit // cave already verified in place: only the jump is missing

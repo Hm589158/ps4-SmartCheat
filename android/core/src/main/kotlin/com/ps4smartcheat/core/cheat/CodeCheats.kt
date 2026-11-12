@@ -22,7 +22,7 @@ object CodeCheats {
                     module == null -> { problems += "${c.name}: absolute address — save patches from the game executable"; null }
                     !ModuleResolver.sameModule(module.name, profile.processName) -> { problems += "${c.name}: in ${module.name}, not ${profile.processName}"; null }
                     c.originalBytes.isNullOrBlank() -> { problems += "${c.name}: original bytes unknown"; null }
-                    else -> GhPatch(module.offset, Hex.decode(c.patchBytes!!), Hex.decode(c.originalBytes), module, c.name)
+                    else -> GhPatch(module.offset, Hex.decode(c.patchBytes!!), Hex.decode(c.originalBytes), module, c.name, c.flagFields.orEmpty())
                 }
             }
             // Two parts of one mod at the same bytes cannot both match: the usual cause is a cheat saved twice under
@@ -66,15 +66,20 @@ object InjectionEntries {
         require(ModuleResolver.sameModule(hookRef.name, caveRef.name)) { "The hook and the cave must be in the same module." }
         val g = group?.trim()?.ifEmpty { null } ?: name.trim()
         val size = com.ps4smartcheat.core.edit.MAX_PATCH_BYTES
-        val chunks = (inj.caveOn.indices step size).toList()
+        // A one-shot cave is saved with its flag displacements at 0 (never this session's address) and their positions;
+        // parts are cut so that no displacement is split.
+        val on = inj.caveTemplate
+        val chunks = com.ps4smartcheat.core.asm.OneShotFlag.chunkStarts(on.size, size, inj.flagFields)
         val out = ArrayList<CheatEntry>()
         chunks.forEachIndexed { i, off ->
-            val end = minOf(off + size, inj.caveOn.size)
+            val end = chunks.getOrNull(i + 1) ?: on.size
+            val fields = com.ps4smartcheat.core.asm.OneShotFlag.fieldsIn(inj.flagFields, off, end)
             out += CheatEntry(
                 newId(), "${name.trim()} · cave ${i + 1}/${chunks.size}", com.ps4smartcheat.core.scan.ValueType.INT8,
                 inj.caveAddress + off, ModuleRef(caveRef.name, caveRef.offset + off),
-                originalBytes = Hex.encode(inj.caveOff.copyOfRange(off, end)), patchBytes = Hex.encode(inj.caveOn.copyOfRange(off, end)),
-                notes = "Code cave of \"${name.trim()}\"", group = g,
+                originalBytes = Hex.encode(inj.caveOff.copyOfRange(off, end)), patchBytes = Hex.encode(on.copyOfRange(off, end)),
+                notes = "Code cave of \"${name.trim()}\"" + if (inj.usesFlag) " (one-shot flag)" else "", group = g,
+                flagFields = fields.ifEmpty { null },
             )
         }
         out += CheatEntry(

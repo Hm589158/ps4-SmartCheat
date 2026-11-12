@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.ltr
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import androidx.compose.foundation.clickable
@@ -150,7 +152,8 @@ fun PatternSearchScreen(onOpen: (Long) -> Unit) {
                     input, { vm.input.value = it }, singleLine = true, enabled = !running,
                     label = { Text(if (kind == PatternKind.BYTES) "Bytes, e.g. 48 8B ?? ?? 89 05" else "Text") },
                     modifier = Modifier.fillMaxWidth().testTag("patternInput"),
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = if (kind == PatternKind.BYTES) FontFamily.Monospace else FontFamily.Default),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(fontFamily = if (kind == PatternKind.BYTES) FontFamily.Monospace else FontFamily.Default)
+                        .let { if (kind == PatternKind.BYTES) ltr(it) else it },
                 )
                 if (kind == PatternKind.TEXT) {
                     Selector("Encoding", BytePattern.Companion.TextEncoding.entries, encoding, { it.label }, { vm.encoding.value = it }, enabled = !running)
