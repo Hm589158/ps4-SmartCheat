@@ -876,7 +876,11 @@ private fun InjectionCard(
                             append(ins.text)
                             // Name branch targets the way the Target Code wrote them.
                             val target = ins.branchTarget
+                            val caveOffset = (ins.address - inj.caveAddress).toInt()
                             val name = when {
+                                // [flag] lines: the flag of this session, or "not allocated yet" before the first ON.
+                                inj.flagFields.any { it.at in caveOffset until caveOffset + ins.length } ->
+                                    if (inj.flagAddress != null) "flag" else "flag (allocated when switched ON)"
                                 target == null -> null
                                 target == inj.returnAddress -> CaveScript.RETURN
                                 else -> inj.labels[target]?.firstOrNull()
