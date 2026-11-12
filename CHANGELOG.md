@@ -2,6 +2,22 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.8
+
+### Firmware support
+- PS4 SmartCheat supports every firmware ps4debug-NG supports: 39 versions from 5.05 to 14.02 (ps4debug-NG README,
+  "Supported firmwares"). The app has no firmware-specific code; the Connection screen now shows whether the console's
+  firmware is on ps4debug-NG's list. Docs, release notes and in-app texts no longer read as FW 11.00 only (11.00 is
+  still the only firmware with a hardware report).
+
+### Interface
+- Coloured connection dot in the header: green connected, amber connecting or game exited, red lost.
+- Tools that need the game say what is missing and offer a button to the Connect or Processes tab.
+- New README with the current screens (tabs, disassembler, code caves, debugger) and features.
+
+### Releases
+- A release now carries only the APK (no `SHA256SUMS.txt`).
+
 ## 1.0.7
 
 ### Processes screen no longer keeps loading

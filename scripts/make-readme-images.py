@@ -12,7 +12,10 @@ OUT.mkdir(parents=True, exist_ok=True)
 PHONE = {
     "scanner": "06_refined", "address-list": "37_pointer_entry_follows", "pointer-scan": "36_pointer_scan",
     "write-confirmation": "09_write_confirmation", "memory-viewer": "12_memory_viewer",
-    "cheat-library": "13_cheat_library", "diagnostics": "38_diagnostics", "guide": "39_guide",
+    "cheat-library": "57_injection_library", "diagnostics": "38_diagnostics", "guide": "39_guide",
+    "tabs": "52_tab_overview", "new-tab": "50_new_tab_page", "disassembler": "42_patch_preview",
+    "code-cave": "54_injection_target_code", "what-writes": "46_what_writes", "debugger": "60_register_trace",
+    "goldhen-export": "58_goldhen_export", "connection": "02_connected_ng",
 }
 FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
 BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
@@ -63,11 +66,11 @@ def poster(w: int, h: int, path: Path, title_size: int, phones: list[str], phone
     tx, ty = int(w * 0.05), int(h * 0.26)
     d.text((tx, ty), "PS4 SmartCheat", font=ImageFont.truetype(BOLD, title_size), fill="white")
     sub = ImageFont.truetype(FONT, int(title_size * 0.36))
-    lines = ["Memory scanner & cheat workbench", "for your own PS4 — on Android"]
+    lines = ["Memory scanner & cheat workbench", "for your own PS4 (FW 5.05–14.02) — on Android"]
     for k, line in enumerate(lines):
         d.text((tx, ty + int(title_size * 1.35) + k * int(title_size * 0.5)), line, font=sub, fill=(200, 215, 240))
     tag = ImageFont.truetype(BOLD, int(title_size * 0.27))
-    chips = ["Turbo Scan", "Pointer scan", "Safe edits", "GoldHEN"]
+    chips = ["Turbo Scan", "Code caves", "Debugger", "GoldHEN"]
     cx, cy = tx, ty + int(title_size * 2.75)
     for c in chips:
         tw = d.textlength(c, font=tag)
@@ -77,6 +80,6 @@ def poster(w: int, h: int, path: Path, title_size: int, phones: list[str], phone
     save(canvas.convert("RGB"), path)
 
 
-poster(1600, 560, OUT / "banner.png", 84, ["13_cheat_library", "06_refined", "37_pointer_entry_follows"], 230)
-poster(1280, 640, OUT / "social-preview.png", 64, ["13_cheat_library", "06_refined", "37_pointer_entry_follows"], 210)
+poster(1600, 560, OUT / "banner.png", 84, ["54_injection_target_code", "06_refined", "60_register_trace"], 230)
+poster(1280, 640, OUT / "social-preview.png", 64, ["54_injection_target_code", "06_refined", "60_register_trace"], 210)
 print("written:", sorted(p.name for p in OUT.iterdir()))
