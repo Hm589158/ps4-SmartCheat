@@ -140,8 +140,12 @@ object GoldHenSafety {
                 "was ON there. Writing it would send the game into the cave's padding. Restart the game, then build and save the injection again."
         }
         val first = ins.firstOrNull()
+        // A jmp rel32 at a hook cannot be told apart from another injection's jump (a 5-byte one has no nops after it),
+        // and saving that as "off" crashes the game when it is written. The planner refuses such hooks (InjectionPlanner),
+        // so a saved one is always unsafe. Elsewhere only the injection form (jmp + nops) is refused: a plain jmp in a
+        // code patch can be the game's own.
         if (first != null && p.off[0] == 0xE9.toByte() && first.flow == Flow.JUMP) {
-            val nopsAfter = ins.drop(1).all { it.mnemonic.startsWith("nop") }
+            val nopsAfter = ins.size > 1 && ins.drop(1).all { it.mnemonic.startsWith("nop") }
             if (p.kind == Kind.HOOK || nopsAfter) {
                 return "${p.label}: OFF (the original code) starts with \"${first.text}\" — the hook was built while another injection's jump " +
                     "was written there, so its jump was saved as the original. Restart the game (or switch the other injection OFF), then build and save again."

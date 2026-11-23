@@ -114,10 +114,6 @@ class CheatRepository(
     }
 
     /**
-     * Reads the library file back from storage and checks that [cheatId] is in profile [profileId] and that the whole
-     * file still passes validation (a file that fails it would be set aside at the next start). Does not change state.
-     */
-    /**
      * Removes the entries [removeIds] and adds [entries] to profile [profileId] in one atomic write — used when a
      * cheat made of several parts (a code-cave injection) is saved again under the same name, so that the old parts
      * never stay next to the new ones.
@@ -130,6 +126,10 @@ class CheatRepository(
         }
     }
 
+    /**
+     * Reads the library file back from storage and checks that [cheatId] is in profile [profileId] and that the whole
+     * file still passes validation (a file that fails it would be set aside at the next start). Does not change state.
+     */
     suspend fun verifyStored(profileId: String, cheatId: String): Boolean = verifyStored(profileId, listOf(cheatId))
 
     /** [verifyStored] for several entries: true only when all of them are in the stored file. */

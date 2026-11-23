@@ -34,7 +34,7 @@ object ProcessSafety {
     fun isSystemProcess(name: String): Boolean = name in knownSystem || name.startsWith("Sce")
 }
 
-class EditDeniedException(message: String) : Exception(message)
+open class EditDeniedException(message: String) : Exception(message)
 
 /** [length] is the number of bytes written: the value type's size, or the byte count of a raw patch. */
 data class EditTarget(val pid: Int, val processName: String, val address: Long, val type: ValueType, val length: Int = type.size)

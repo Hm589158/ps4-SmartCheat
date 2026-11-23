@@ -141,4 +141,36 @@ class GoldHenSafetyTest {
         val file = Json.decodeFromString(GoldHenExporter.GhFile.serializer(), r.json!!)
         assertTrue(GoldHenExporter.formatProblems(r.json!!, file.copy(credits = emptyList())).any { it.contains("credits") })
     }
+
+    @Test fun aHookOnAJumpIsRefusedConsistently() {
+        // The planner refuses hooks on a jmp rel32 (they cannot be told apart from another injection's jump), and a
+        // saved one is refused by the library and the export — the same answer everywhere.
+        val gameJump = Hex.decode("E9F50F0000")
+        val cave = Hex.decode("B8E8030000" + "E9E63FFFFF") // mov eax, 1000 ; jmp 0x3000
+        val reason = skippedReason(injection(caveBytes = cave, on = Hex.decode("E905D00000"), off = gameJump))
+        assertTrue(reason, reason.contains("OFF (the original code) starts with \"jmp"))
+        val hookOnJump = Hex.decode("E9F50F0000") + ByteArray(100)
+        try {
+            kotlinx.coroutines.runBlocking {
+                com.ps4smartcheat.core.asm.InjectionPlanner.plan(
+                    0x2006, hookOnJump, null, com.ps4smartcheat.core.asm.CaveSpace(0xF010, 64, com.ps4smartcheat.core.asm.CaveKind.MODULE_PADDING, ByteArray(64)),
+                    "jmp return", assemble = { _, _ -> ByteArray(0) },
+                )
+            }
+            org.junit.Assert.fail()
+        } catch (e: com.ps4smartcheat.core.asm.CodePatchException) {
+            assertTrue(e.message!!, e.message!!.contains("is a jmp"))
+        }
+    }
+
+    @Test fun aLiveOneShotCaveIsRecognisedAsApplied() {
+        // A one-shot cave in int3 padding (OFF = CC) saved with its flag displacement 0; in memory it is bound.
+        val template = Hex.decode("803D0000000000" + "C3") // cmp byte ptr [rip+0], 0 ; ret
+        val off = ByteArray(template.size) { 0xCC.toByte() }
+        val fields = listOf(com.ps4smartcheat.core.asm.FlagField(2, 7))
+        val patch = com.ps4smartcheat.core.asm.AppliedPatch("Once (cave)", 0x1000, template, off, fields)
+        val live = com.ps4smartcheat.core.asm.OneShotFlag.bind(template, 0x1000, fields, 0x9000)
+        assertEquals(patch, com.ps4smartcheat.core.asm.AppliedPatches.covering(0x1000, live, live.size, listOf(patch)))
+        assertNull(com.ps4smartcheat.core.asm.AppliedPatches.covering(0x1000, off, off.size, listOf(patch))) // OFF: not applied
+    }
 }

@@ -141,12 +141,11 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     private val _ghMismatch = MutableStateFlow<String?>(null)
     val ghMismatch = _ghMismatch.asStateFlow()
 
-    /** Toggle waiting for confirmation: mod index, enable?, one verified-write plan per patch. */
-    /** [newFlag]: a one-shot flag allocated for this switch (freed again when cancelled); [flagKey] its library key. */
-    data class GhToggle(
-        val index: Int, val enable: Boolean, val plans: List<WritePlan>,
-        val newFlag: com.ps4smartcheat.core.asm.CaveAllocation? = null, val flagKey: String? = null,
-    )
+    /** Switch waiting for confirmation: mod index and the prepared writes ([LibrarySwitch.Prepared]); [flagKey] for one-shot mods. */
+    data class GhToggle(val index: Int, val prepared: com.ps4smartcheat.core.cheat.LibrarySwitch.Prepared, val flagKey: String?) {
+        val enable: Boolean get() = prepared.enable
+        val plans: List<WritePlan> get() = prepared.plans
+    }
     private val _ghToggle = MutableStateFlow<GhToggle?>(null)
     val ghToggle = _ghToggle.asStateFlow()
 
@@ -270,53 +269,30 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
         val f = _gh.value ?: return
         val sel = c.selectedProcess.value ?: return
+        val mod = f.mods.getOrNull(index) ?: return
         viewModelScope.launch {
+            // All errors end up as a message (an allocation the PS4 did not really make used to close the app).
             try {
-                val regions = c.backend.getMemoryRegions(sel.pid)
-                val check = com.ps4smartcheat.core.cheat.GoldHenImport.check(c.backend, sel.pid, f, f.mods[index], regions)
-                _ghChecks.value = _ghChecks.value + (index to check)
-                if (if (enable) !check.canEnable else !check.canDisable) {
-                    _error.value = "\"${f.mods[index].name}\" cannot be switched ${if (enable) "on" else "off"}: " +
-                        check.parts.joinToString("; ") { "${it.label} is ${it.state.label}" } + " — nothing written."
-                    return@launch
-                }
-                // One-shot injections: ON binds the cave to this session's flag — the one the parts already ON use, the one
-                // allocated earlier in this session, or a new one (reads 0) next to the cave.
-                val mod = check.mod
                 val key = c.libraryFlagKey(sel.pid, f.name, mod.name)
-                var newFlag: com.ps4smartcheat.core.asm.CaveAllocation? = null
-                val flag: Long? = if (enable && mod.usesFlag) {
-                    check.boundFlag() ?: c.libraryFlags[key]?.address ?: run {
-                        if (!c.caveAllocator.available) throw EditDeniedException("\"${mod.name}\" uses a one-shot flag, which needs ps4debug-NG (memory allocation).")
-                        val hint = check.flagHint() ?: throw EditDeniedException("\"${mod.name}\": the code cave is not mapped.")
-                        c.caveAllocator.allocateNear(sel.pid, hint, com.ps4smartcheat.core.asm.OneShotFlag.SIZE).also { newFlag = it }.address
-                    }
-                } else null
-                // ON in file order, OFF in reverse (an injection's jump goes last ON and first OFF); patches already in
-                // the target state (an interrupted toggle) are skipped.
-                val plans = try {
-                    check.writeOrder(enable).map { i ->
-                        val p = mod.patches[i]
-                        c.editor.planBytes(sel.pid, sel.name, check.addresses[i], if (enable) p.onFor(check.addresses[i], flag) else p.off, regions)
-                    }
-                } catch (e: Exception) {
-                    newFlag?.let { runCatching { c.caveAllocator.free(it) } }
-                    throw e
-                }
-                _ghToggle.value = GhToggle(index, enable, plans, newFlag, key.takeIf { mod.usesFlag })
-            } catch (e: EditDeniedException) {
+                val prepared = c.librarySwitch.prepare(sel.pid, sel.name, f, mod, enable, c.libraryFlags[key]?.address)
+                _ghChecks.value = _ghChecks.value + (index to prepared.check)
+                _ghToggle.value = GhToggle(index, prepared, key.takeIf { mod.usesFlag })
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: com.ps4smartcheat.core.cheat.SwitchRefusedException) {
+                _ghChecks.value = _ghChecks.value + (index to e.check)
                 _error.value = e.message
-            } catch (e: BackendException) {
-                _error.value = e.message
+            } catch (e: Exception) {
+                _error.value = (e as? BackendException)?.let { com.ps4smartcheat.core.diag.ErrorAdvisor.diagnose(it).format() } ?: e.message
             }
         }
     }
 
     fun dismissGoldHenToggle() {
-        val t = _ghToggle.value
+        val t = _ghToggle.value ?: return
         _ghToggle.value = null
         // Nothing was written: a flag allocated for this switch is freed again.
-        t?.newFlag?.let { f -> viewModelScope.launch { runCatching { c.caveAllocator.free(f) } } }
+        viewModelScope.launch { c.librarySwitch.cancel(t.prepared) }
     }
 
     fun confirmGoldHenToggle() {
@@ -324,28 +300,30 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         _ghToggle.value = null
         val name = _gh.value?.mods?.getOrNull(t.index)?.name ?: "mod"
         viewModelScope.launch {
-            for (p in t.plans) {
-                val out = c.editor.execute(p)
-                if (out !is WriteOutcome.Verified) {
-                    // Parts may already address the new flag: keep it (switching OFF frees it).
-                    if (t.enable && t.flagKey != null) t.newFlag?.let { c.libraryFlags[t.flagKey] = it }
-                    _error.value = "\"$name\": ${out.message} (stopped; earlier patches of this mod were written — use Undo in the editor)"
-                    checkGoldHen()
-                    return@launch
-                }
-            }
-            if (t.flagKey != null) {
-                if (t.enable) {
-                    t.newFlag?.let { c.libraryFlags[t.flagKey] = it }
-                } else {
-                    // OFF verified: the cave cannot reach the flag any more; free it if this app allocated it.
-                    c.libraryFlags.remove(t.flagKey)?.let { f ->
-                        runCatching { c.caveAllocator.free(f) }.onFailure { c.log.warn("One-shot flag at ${Address.format(f.address)} could not be freed: ${it.message}") }
+            try {
+                val r = c.librarySwitch.execute(t.prepared)
+                if (t.flagKey != null) {
+                    if (t.enable || !r.ok) {
+                        // ON (or a switch that stopped part-way): parts may address the new flag — keep it for this session.
+                        t.prepared.newFlag?.let { c.libraryFlags[t.flagKey] = it }
+                    } else {
+                        // OFF verified: the cave cannot reach the flag any more; free it if this app allocated it.
+                        c.libraryFlags.remove(t.flagKey)?.let { fl ->
+                            runCatching { c.caveAllocator.free(fl) }.onFailure { c.log.warn("One-shot flag at ${Address.format(fl.address)} could not be freed: ${it.message}") }
+                        }
                     }
                 }
+                if (r.ok) {
+                    _message.value = "\"$name\" ${if (t.enable) "enabled" else "disabled"}: ${r.message}"
+                    c.log.info("GoldHEN mod $name ${if (t.enable) "on" else "off"}")
+                } else {
+                    _error.value = "\"$name\": ${r.message} — use Undo in the editor or switch it again"
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _error.value = "\"$name\": ${e.message}"
             }
-            _message.value = "\"$name\" ${if (t.enable) "enabled" else "disabled"}: ${t.plans.size} patch(es) verified"
-            c.log.info("GoldHEN mod $name ${if (t.enable) "on" else "off"}")
             checkGoldHen()
         }
     }

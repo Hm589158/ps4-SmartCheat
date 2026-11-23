@@ -223,9 +223,18 @@ object InjectionPlanner {
         val jump = jumpFor(hook, cave.address, cave.capacity)
         val stolen = steal(hook, window, maxOf(jump.size, replaceBytes))
         val stolenLen = stolen.sumOf { it.length }
+        AppliedPatches.covering(hook, window, stolenLen, known)?.let { throw CodePatchException(AppliedPatches.refusal(it, "The code at the hook")) }
+        // A hook that starts with jmp rel32 cannot be told apart from another injection's jump once saved, so the library
+        // and the GoldHEN export would refuse it (GoldHenSafety); refused here already, with what to do instead.
+        if (stolen.first().bytes[0] == 0xE9.toByte() && stolen.first().flow == Flow.JUMP) {
+            throw CodePatchException(
+                "${Address.format(hook)} is a jmp (${stolen.first().text}). A hook on a jump cannot be told apart from another " +
+                    "injection's jump once saved, so it could not be switched from Cheats or exported. Hook an instruction before " +
+                    "the jump instead, or switch OFF the injection that wrote it.",
+            )
+        }
         if (hookRegion != null && !hookRegion.contains(hook, stolenLen)) throw CodePatchException("The jump would cross the end of the code region.")
         val returnAddress = hook + stolenLen
-        AppliedPatches.covering(hook, window, stolenLen, known)?.let { throw CodePatchException(AppliedPatches.refusal(it, "The code at the hook")) }
         AppliedPatches.covering(cave.address, cave.current, cave.capacity, known)?.let { throw CodePatchException(AppliedPatches.refusal(it, "The cave")) }
         val caveRange = cave.address until cave.address + cave.capacity
         if (hook < caveRange.last + 1 && caveRange.first < returnAddress) throw CodePatchException("The cave overlaps the hooked instructions.")

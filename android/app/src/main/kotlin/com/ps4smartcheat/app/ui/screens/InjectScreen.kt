@@ -174,9 +174,24 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
     fun relative(a: Long): String = c.selectedProcess.value?.regions?.let { ModuleResolver.refFor(a, it) }
         ?.let { "${it.name}+0x${java.lang.Long.toHexString(it.offset).uppercase()}" } ?: ""
 
+    /** The game the hook address belongs to (an address means nothing in another game or game session). */
+    private var hookPid: Int? = null
+
+    /** Refuses to go on with a hook opened in another game (or before a restart): its address is not this game's. */
+    private fun checkHookGame(sel: com.ps4smartcheat.app.data.SelectedProcess) {
+        val pid = hookPid ?: return
+        if (pid != sel.pid) {
+            throw CodePatchException(
+                "The hook ${_hook.value?.let { Address.format(it) } ?: ""} was opened in pid $pid; the selected game is pid ${sel.pid}. " +
+                    "Open the instruction again from the disassembler of this game.",
+            )
+        }
+    }
+
     private fun load(address: Long) {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         _hook.value = address
+        hookPid = sel.pid
         launchBusy {
             val region = sel.regions.regionFor(address) ?: throw CodePatchException("${Address.format(address)} is not mapped")
             if (!region.isExecutable) throw CodePatchException("${Address.format(address)} is not executable code (${region.name.ifBlank { "anon" }} ${region.protString()}).")
@@ -251,6 +266,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
     private suspend fun findCavesNow() {
         val sel = c.selectedProcess.value ?: return
         val hook = _hook.value ?: return
+        checkHookGame(sel)
         run {
             val regions = c.backend.getMemoryRegions(sel.pid).also { c.updateRegions(it) }
             val profile = c.cheats.profiles.value.firstOrNull { it.processName == sel.name && (it.titleId == null || it.titleId == sel.titleId) }
@@ -289,81 +305,18 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
         if (_current.value?.id == a.id) _current.value = a
     }
 
-    /** Frees a one-shot flag after its injection is OFF (checked in memory) and forgets it. */
+    /** Frees a one-shot flag once its injection is OFF (checked in memory) and forgets it; kept while it could be reached. */
     private suspend fun releaseFlag(a: AppContainer.ActiveInjection, flag: CaveAllocation) {
-        val st = runCatching { c.injectionWriter.state(a.pid, a.injection) }.getOrNull()
-        if (st == InjectionState.ON || st == InjectionState.MISMATCH) {
-            c.log.warn("One-shot flag at ${Address.format(flag.address)} kept: \"${a.name}\" is ${st.label}")
-            return
-        }
-        runCatching { c.caveAllocator.free(flag) }
-            .onSuccess { c.log.info("One-shot flag at ${Address.format(flag.address)} freed") }
+        runCatching { c.injectionWriter.releaseFlag(a.pid, a.injection, flag, c.caveAllocator) }
+            .onSuccess { freed ->
+                if (freed) {
+                    c.log.info("One-shot flag at ${Address.format(flag.address)} freed")
+                    store(a.copy(flag = null))
+                } else {
+                    c.log.warn("One-shot flag at ${Address.format(flag.address)} kept: \"${a.name}\" is still switched on")
+                }
+            }
             .onFailure { c.log.warn("One-shot flag at ${Address.format(flag.address)} could not be freed: ${it.message}") }
-        store(a.copy(flag = null))
-    }
-
-    /** Assembles the code for the cave, plans the injection and reads its current state. Nothing is written. */
-    fun build() {
-        val sel = c.selectedProcess.value ?: return
-        val hook = _hook.value ?: run { _error.value = "Open an instruction to hook first"; return }
-        val src = _source.value
-        launchBusy {
-            val regions = c.backend.getMemoryRegions(sel.pid).also { c.updateRegions(it) }
-            val region = regions.regionFor(hook)
-            val hookBytes = c.backend.readMemory(sel.pid, hook, minOf(InjectionPlanner.HOOK_WINDOW.toLong(), (region?.end ?: (hook + InjectionPlanner.HOOK_WINDOW)) - hook).toInt())
-            val space = when (_caveKind.value) {
-                CaveKind.MODULE_PADDING -> {
-                    val cand = _cave.value ?: throw CodePatchException("Find caves and pick one first.")
-                    CaveSpace(cand.address, cand.size, CaveKind.MODULE_PADDING, c.backend.readMemory(sel.pid, cand.address, cand.size), cand.atSegmentEnd)
-                }
-                CaveKind.ALLOCATED -> {
-                    val a = _allocation.value ?: throw CodePatchException("Allocate memory first.")
-                    CaveSpace(a.address, a.length, CaveKind.ALLOCATED, c.backend.readMemory(sel.pid, a.address, a.length))
-                }
-            }
-            val id0 = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(space.address)}"
-            val flag = c.injections.value.firstOrNull { it.id == id0 }?.flag
-            val inj = InjectionPlanner.plan(
-                hook, hookBytes, region, space, src, _replaceBytes.value, known = c.knownPatches(sel, regions), flag = flag?.address,
-            ) { text, at ->
-                c.codeTools.assemble(text, at).bytes
-            }
-            val id = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(inj.caveAddress)}"
-            val state = c.injectionWriter.state(sel.pid, inj)
-            val name = c.injections.value.firstOrNull { it.id == id }?.name ?: defaultName(inj)
-            val alloc = if (space.kind == CaveKind.ALLOCATED) _allocation.value else null
-            _current.value = AppContainer.ActiveInjection(id, sel.pid, sel.name, name, inj, alloc, state, flag?.takeIf { inj.usesFlag })
-            _saveState.value = SaveState.Idle
-        }
-    }
-
-    private fun defaultName(inj: CodeInjection) = "Injection at ${relative(inj.hookAddress).ifBlank { Address.format(inj.hookAddress) }}"
-
-    /** Prepares switching an injection ON/OFF (checks state and policy); written only after confirmation. */
-    fun prepare(a: AppContainer.ActiveInjection, enable: Boolean) {
-        val sel = c.selectedProcess.value ?: return
-        if (sel.pid != a.pid) { _error.value = "This injection belongs to pid ${a.pid}; the selected process is ${sel.pid}."; return }
-        launchBusy {
-            var target = a
-            var newFlag: CaveAllocation? = null
-            try {
-                // A one-shot injection gets a new flag (reads 0) before it is switched ON; the cave is bound to it.
-                if (enable && a.injection.usesFlag && a.flag == null) {
-                    if (!c.caveAllocator.available) throw CodePatchException("The one-shot flag needs ps4debug-NG (memory allocation).")
-                    newFlag = c.caveAllocator.allocateNear(a.pid, a.injection.caveAddress, OneShotFlag.SIZE)
-                    target = a.copy(injection = a.injection.withFlag(newFlag.address), flag = newFlag)
-                    store(target)
-                    c.log.info("One-shot flag for \"${a.name}\" at ${Address.format(newFlag.address)} (allocated, reads 0)")
-                }
-                val steps = c.injectionWriter.prepare(target.pid, target.processName, target.injection, enable)
-                _confirm.value = InjectConfirm.Switch(target.id, enable, steps, newFlag)
-            } catch (e: Exception) {
-                newFlag?.let { f -> releaseFlag(target, f) }
-                if (e !is EditDeniedException) throw e
-                refresh(a)
-                throw CodePatchException(e.message + if (e.message?.contains("not writable") == true) " (Settings → Allow writes to non-writable regions)" else "")
-            }
-        }
     }
 
     fun confirm() {

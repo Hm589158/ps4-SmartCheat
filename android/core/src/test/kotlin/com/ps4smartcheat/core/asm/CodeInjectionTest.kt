@@ -23,6 +23,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -506,13 +507,8 @@ class CodeInjectionTest {
             CodePatchPlanner.plan(DemoGame.SUB_ONE, window, Hex.decode("90"), "nop", regions.regionFor(DemoGame.SUB_ONE), AppliedPatches.of("Coins", inj)); fail()
         } catch (e: CodePatchException) { assertTrue(e.message!!.contains("currently changed")) }
 
-        // Unknown to the app (e.g. enabled by GoldHEN): the plan takes the jump as "original" — and the export refuses it.
-        val bad = replan(emptyList())
-        assertEquals(0xE9.toByte(), bad.hookOff[0])
-        val entries = InjectionEntries.build(bad, "Coins again", null, regions) { "f${++n}" }
-        val export = GoldHenExporter.export(CheatProfile("q", "Demo", "CUSA12345", "01.00", "eboot.bin", cheats = entries), "Demo", emptyList())
-        assertNull(export.json)
-        assertTrue(export.skipped.toString(), export.skipped.single().contains("OFF (the original code)"))
+        // Unknown to the app (e.g. enabled by GoldHEN): the hook now starts with a jmp, which is refused as well.
+        try { replan(emptyList()); fail() } catch (e: CodePatchException) { assertTrue(e.message!!, e.message!!.contains("is a jmp")) }
 
         // Switched OFF, the original code is back and the hook can be planned again.
         assertTrue(switch(inj, false).ok)
@@ -540,7 +536,7 @@ class CodeInjectionTest {
     // ------------------------------------------------------------------ one-shot flag
 
     /** "mov eax, 1000" only the first time the routine runs, then the original instructions every time. */
-    private suspend fun oneShot(): CodeInjection = plan(DemoGame.SUB_ONE, moduleCave(DemoGame.SUB_ONE)) { src ->
+    private suspend fun oneShot(cave: CaveSpace? = null): CodeInjection = plan(DemoGame.SUB_ONE, cave ?: moduleCave(DemoGame.SUB_ONE)) { src ->
         OneShotFlag.guard("once_done").replace("\n\nonce_done:", "\nmov eax, 1000\nonce_done:") + "\n$src\njmp return"
     }
 
@@ -662,5 +658,92 @@ class CodeInjectionTest {
         assertTrue(OneShotFlag.matchesOn(OneShotFlag.bind(template, 0x1000, f, 0x5000), template, f))
         assertFalse(OneShotFlag.matchesOn(template, template, f)) // unbound
         assertEquals(0x5000L, OneShotFlag.boundTo(OneShotFlag.bind(template, 0x1000, f, 0x5000), 0x1000, f))
+    }
+
+    @Test fun reEnablingAnAllocatedOneShotCaveRebindsItToTheNewFlag() = runBlocking {
+        connect()
+        // An allocated cave keeps its code after OFF (only the jump is removed), still addressing the old flag.
+        val caveMem = alloc.allocateNear(pid, DemoGame.SUB_ONE, 256)
+        val inj = oneShot(CaveSpace(caveMem.address, caveMem.length, CaveKind.ALLOCATED, client.readMemory(pid, caveMem.address, caveMem.length)))
+        val first = alloc.allocateNear(pid, inj.caveAddress, OneShotFlag.SIZE)
+        val on1 = inj.withFlag(first.address)
+        assertTrue(switch(on1, true).ok)
+        DemoGame.spendCoin(server)
+        assertEquals(999, coins)
+        assertTrue(switch(on1, false).ok)
+        assertEquals(InjectionState.CAVE_ONLY, writer.state(pid, on1))
+        // The app frees the old flag after OFF; the next ON gets another one.
+        val second = alloc.allocateNear(pid, inj.caveAddress, OneShotFlag.SIZE)
+        alloc.free(first)
+        assertNotEquals(first.address, second.address)
+        val on2 = inj.withFlag(second.address)
+        val steps = writer.prepare(pid, "eboot.bin", on2, true)
+        assertTrue(steps.map { it.label }.toString(), steps.first().label.startsWith("cave")) // the cave is rewritten first…
+        assertEquals("jump", steps.last().label) // …then the jump
+        assertTrue(writer.execute(pid, on2, steps, true).ok)
+        assertEquals(second.address, OneShotFlag.boundTo(server.peek(pid, inj.caveAddress, inj.caveOn.size), inj.caveAddress, inj.flagFields))
+        server.pokeInt32(pid, DemoGame.COINS_ADDRESS, 5000)
+        DemoGame.spendCoin(server) // runs against the new flag (the old one is unmapped: a read there would fail)
+        assertEquals(999, coins)
+        assertEquals(1, server.peek(pid, second.address, 1)[0].toInt())
+        // A cave already bound to this flag is not rewritten.
+        assertTrue(switch(on2, false).ok)
+        // (the flag read 1, so resetting it to 0 is proposed — confirmed like any write)
+        assertEquals(listOf("flag reset", "jump"), writer.prepare(pid, "eboot.bin", on2, true).map { it.label })
+    }
+
+    @Test fun theFlagIsFreedOnlyWhenNothingCanReachIt() = runBlocking {
+        connect()
+        val (bound, flag) = writer.allocateFlag(pid, oneShot(), alloc)
+        assertEquals(flag.address, bound.flagAddress)
+        assertTrue(switch(bound, true).ok)
+        assertFalse(writer.releaseFlag(pid, bound, flag, alloc)) // ON: kept
+        assertTrue(client.getMemoryRegions(pid).any { it.contains(flag.address) })
+        assertTrue(switch(bound, false).ok)
+        assertTrue(writer.releaseFlag(pid, bound, flag, alloc)) // OFF: freed
+        assertTrue(client.getMemoryRegions(pid).none { it.contains(flag.address) })
+    }
+
+    @Test fun libraryOneShotSwitchAllocatesCancelsAndReportsFailures() = runBlocking {
+        connect()
+        val (bound, first) = writer.allocateFlag(pid, oneShot(), alloc)
+        val regions = client.getMemoryRegions(pid)
+        var n = 0
+        val profile = CheatProfile("p", "Demo", "MOCK00001", "01.00", "eboot.bin", cheats = InjectionEntries.build(bound, "Once", null, regions) { "e${++n}" })
+        alloc.free(first) // saved earlier; this is a new session
+        val file = CodeCheats.asGoldHenFile(profile)!!
+        val mod = file.mods.single()
+        val switch = com.ps4smartcheat.core.cheat.LibrarySwitch(client, editor, alloc)
+
+        // Not confirmed: the flag allocated for the switch is freed again, nothing was written.
+        val cancelled = switch.prepare(pid, "eboot.bin", file, mod, enable = true)
+        val tmp = cancelled.newFlag!!
+        switch.cancel(cancelled)
+        assertTrue(client.getMemoryRegions(pid).none { it.contains(tmp.address) })
+        assertEquals(PatchState.OFF, GoldHenImport.check(client, pid, file, mod, client.getMemoryRegions(pid)).state)
+
+        // The PS4 does not really allocate: a clear error (the app shows it), nothing written.
+        server.faults.allocFails = true
+        try { switch.prepare(pid, "eboot.bin", file, mod, enable = true); fail() } catch (e: CaveAllocationException) {
+            assertTrue(e.message!!, e.message!!.contains("did not allocate"))
+        }
+        server.faults.allocFails = false
+
+        // Confirmed: written in order and bound to the new flag; the one-shot code runs once.
+        val on = switch.prepare(pid, "eboot.bin", file, mod, enable = true)
+        val r = switch.execute(on)
+        assertTrue(r.message, r.ok)
+        assertEquals(on.newFlag!!.address, GoldHenImport.check(client, pid, file, mod, client.getMemoryRegions(pid)).boundFlag())
+        DemoGame.spendCoin(server)
+        DemoGame.spendCoin(server)
+        assertEquals(998, coins)
+        // Already ON: refused with the check, nothing allocated.
+        try { switch.prepare(pid, "eboot.bin", file, mod, enable = true); fail() } catch (e: com.ps4smartcheat.core.cheat.SwitchRefusedException) {
+            assertEquals(PatchState.ON, e.check.state)
+        }
+        // OFF, then the caller frees the flag.
+        assertTrue(switch.execute(switch.prepare(pid, "eboot.bin", file, mod, enable = false)).ok)
+        alloc.free(on.newFlag!!)
+        assertEquals(PatchState.OFF, GoldHenImport.check(client, pid, file, mod, client.getMemoryRegions(pid)).state)
     }
 }

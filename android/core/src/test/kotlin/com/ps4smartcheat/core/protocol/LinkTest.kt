@@ -91,4 +91,13 @@ class LinkTest {
         assertTrue(System.currentTimeMillis() - t0 < BackgroundRequest.MAX_YIELD_MS + 1500)
         busy.await()
     }
+
+    @Test fun longExclusiveExchangesDoNotCountAsRoundTrips() = runBlocking {
+        connect()
+        repeat(3) { client.readMemory(DemoGame.PID, DemoGame.COINS_ADDRESS, 4) }
+        val before = client.linkMillis.value!!
+        // A long exchange that moves few bytes (like a server scan or a debugger attach waiting for the PS4).
+        client.exclusive("long exchange", null) { _ -> Thread.sleep(600) }
+        assertEquals(before, client.linkMillis.value)
+    }
 }

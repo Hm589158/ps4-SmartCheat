@@ -7,7 +7,11 @@ import com.ps4smartcheat.core.util.Address
 import com.ps4smartcheat.core.util.Hex
 
 /** A patch the app knows about: a library entry resolved in the running game, or an injection of this session. */
-class AppliedPatch(val name: String, val address: Long, val on: ByteArray, val off: ByteArray) {
+class AppliedPatch(
+    val name: String, val address: Long, val on: ByteArray, val off: ByteArray,
+    /** One-shot flag displacements in [on] (saved as 0, bound to a session's flag in memory): not compared. */
+    val flagFields: List<FlagField> = emptyList(),
+) {
     val end: Long get() = address + on.size
 }
 
@@ -30,7 +34,11 @@ object AppliedPatches {
             val from = maxOf(address, p.address)
             val to = minOf(end, p.end)
             if (from >= to) return@firstOrNull false
-            val changed = (from until to).filter { a -> p.on[(a - p.address).toInt()] != p.off.getOrNull((a - p.address).toInt()) }
+            val bound = HashSet<Int>().apply { p.flagFields.forEach { f -> for (i in 0 until 4) add(f.at + i) } }
+            val changed = (from until to).filter { a ->
+                val i = (a - p.address).toInt()
+                i !in bound && p.on[i] != p.off.getOrNull(i)
+            }
             changed.isNotEmpty() && changed.all { a -> current[(a - address).toInt()] == p.on[(a - p.address).toInt()] }
         }
     }
@@ -46,12 +54,12 @@ object AppliedPatches {
             val at = c.module?.let { ModuleResolver.resolve(it, regions) } ?: return@mapNotNull null
             val on = runCatching { Hex.decode(c.patchBytes!!) }.getOrNull() ?: return@mapNotNull null
             val off = runCatching { Hex.decode(c.originalBytes!!) }.getOrNull() ?: return@mapNotNull null
-            AppliedPatch(c.name, at, on, off)
+            AppliedPatch(c.name, at, on, off, c.flagFields.orEmpty())
         }
 
     /** The jump and cave of an injection. */
     fun of(name: String, inj: CodeInjection): List<AppliedPatch> = listOf(
         AppliedPatch("$name (jump)", inj.hookAddress, inj.hookOn, inj.hookOff),
-        AppliedPatch("$name (cave)", inj.caveAddress, inj.caveOn, inj.caveOff),
+        AppliedPatch("$name (cave)", inj.caveAddress, inj.caveOn, inj.caveOff, inj.flagFields),
     )
 }

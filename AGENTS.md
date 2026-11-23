@@ -7,8 +7,10 @@
 * Never add protocol commands or packet layouts that are not verified in upstream source; document them in
   `docs/PROTOCOL.md` with the source file.
 * Never report hardware results that were not observed. Mock results are labelled as such.
-* Safety invariants: read-only by default; every write confirmed + verified by fresh read; no automatic
-  re-application of cheats; local-network-only hosts by default; no kernel memory editing; no telemetry.
+* Safety invariants: every write confirmed + verified by fresh read; no automatic re-application of cheats;
+  local-network-only hosts by default; no kernel memory editing; no telemetry. Memory editing (and writes to code /
+  system processes) is enabled by default by the project owner's decision; it can be switched off for a read-only
+  session, and each write still needs confirmation.
 * `google()` repositories are content-filtered in `settings.gradle.kts` so JVM modules resolve without Google Maven.
 * README images in `docs/images/` are generated from the CI UI-test screenshots (`ci-screenshots` branch) with
   `scripts/make-readme-images.py`; release notes come from `CHANGELOG.md` via `.github/scripts/release-notes.sh`.

@@ -32,6 +32,8 @@ enum class CandidateVerdict(val label: String) {
     PASS("leads to the value"),
     /** Resolved, but somewhere else than the agreed address. */
     DISAGREES("resolves elsewhere"),
+    /** Resolved, but there is nothing to compare with (no confirmed address, fewer than two candidates agree). */
+    UNVERIFIED("resolves — not confirmed"),
     BROKEN("broken in this session"),
 }
 
@@ -76,7 +78,8 @@ object PointerStability {
         val checks = resolved.map { (c, a) ->
             val verdict = when {
                 a == null -> CandidateVerdict.BROKEN
-                reference == null || a == reference -> CandidateVerdict.PASS
+                reference == null -> CandidateVerdict.UNVERIFIED // never "leads to the value" without a reference
+                a == reference -> CandidateVerdict.PASS
                 else -> CandidateVerdict.DISAGREES
             }
             CandidateCheck(c, verdict, a)

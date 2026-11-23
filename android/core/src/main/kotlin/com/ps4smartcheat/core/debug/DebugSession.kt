@@ -65,17 +65,28 @@ class InterruptListener private constructor(private val sockets: List<ServerSock
     /** The legacy port (755) when it could be opened as well; null otherwise (normal on Android). */
     val legacyPort: Int? get() = sockets.getOrNull(1)?.localPort
 
+    /** Connections closed by [accept] because they did not come from the PS4. */
+    @Volatile var rejected: Int = 0
+        private set
+
     /**
      * Waits for the PS4's connection on any of the ports (normally already queued once the attach request
-     * succeeded).
+     * succeeded). With [peer] (the PS4's address on the command connection), a connection from any other host — another
+     * device on the network, a port scanner — is closed and waiting goes on: it is never read as debugger events.
      */
-    fun accept(timeoutMs: Int): InterruptChannel {
+    fun accept(timeoutMs: Int, peer: java.net.InetAddress? = null): InterruptChannel {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
             for (server in sockets) {
-                server.soTimeout = if (sockets.size == 1) timeoutMs.coerceAtLeast(1) else 50
+                val left = (deadline - System.currentTimeMillis()).coerceAtLeast(1)
+                server.soTimeout = if (sockets.size == 1) left.toInt() else 50
                 try {
                     val s = server.accept()
+                    if (peer != null && s.inetAddress != peer) {
+                        rejected++
+                        runCatching { s.close() }
+                        continue
+                    }
                     s.tcpNoDelay = true
                     return InterruptChannel(s)
                 } catch (e: SocketTimeoutException) {
@@ -444,7 +455,7 @@ class DebugSession private constructor(
                 throw e
             }
             val channel = try {
-                withContext(Dispatchers.IO) { listener.accept(acceptTimeoutMs) }
+                withContext(Dispatchers.IO) { listener.accept(acceptTimeoutMs, peer = t.remoteAddress) }
             } catch (e: Throwable) {
                 // Attached on the PS4 but no event channel here (or the caller was cancelled): end the session right
                 // away, even when cancelled, so it does not stay on the PS4.

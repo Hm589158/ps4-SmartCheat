@@ -148,6 +148,9 @@ that address — typically an earlier injection that was edited and built again,
 bytes are that patch's jump, not the game's code. Saved as OFF, the jump would be written back later with nothing
 behind it (the old cave is empty in a fresh game), and the new cave would copy the jump as an "original" instruction.
 
+* **A hook on a `jmp rel32` is refused.** Saved, its OFF bytes would be a jump that cannot be told apart from another
+  injection's (the one that caused a crash: a 5-byte jump has no nops after it), so it could not be switched from
+  Cheats or exported. Hook an instruction before the jump instead.
 * **Building is refused** while a known patch is ON at the hook or the cave: library entries of the game's profiles
   and this session's injections (`AppliedPatches`). The same applies to code patches in the disassembler. Switch the
   other patch OFF (or restart the game) first.

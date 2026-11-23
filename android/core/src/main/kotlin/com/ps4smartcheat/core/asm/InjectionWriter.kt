@@ -60,7 +60,17 @@ class InjectionWriter(private val backend: DebugBackend, private val editor: Mem
             }
             when (now) {
                 InjectionState.OFF -> cave(true).forEach { (a, b, l) -> steps += InjectionStep("$l/$total", editor.planBytes(pid, processName, a, b, regions)) }
-                InjectionState.CAVE_ONLY -> Unit // cave already verified in place: only the jump is missing
+                InjectionState.CAVE_ONLY -> {
+                    // The cave is in place and only the jump is missing — unless it is a one-shot cave still bound to an
+                    // earlier flag (an allocated cave keeps its code after OFF, and that flag was freed): then the cave
+                    // is written again for this flag first.
+                    if (inj.usesFlag) {
+                        val caveNow = backend.readMemory(pid, inj.caveAddress, inj.caveOn.size)
+                        if (OneShotFlag.boundTo(caveNow, inj.caveAddress, inj.flagFields) != inj.flagAddress) {
+                            cave(true).forEach { (a, b, l) -> steps += InjectionStep("$l/$total", editor.planBytes(pid, processName, a, b, regions)) }
+                        }
+                    }
+                }
                 else -> throw EditDeniedException("The injection is ${now.label} — it can only be switched ON from \"off\". Nothing written.")
             }
             steps += InjectionStep("jump", editor.planBytes(pid, processName, inj.hookAddress, inj.hookOn, regions))
@@ -75,6 +85,29 @@ class InjectionWriter(private val backend: DebugBackend, private val editor: Mem
             }
         }
         return steps
+    }
+
+    /**
+     * One-shot injections ([OneShotFlag]): allocates a new flag next to the cave (validated in the memory map, reads 0)
+     * and returns the injection bound to it. Nothing is written to the game.
+     */
+    suspend fun allocateFlag(pid: Int, inj: CodeInjection, allocator: CaveAllocator): Pair<CodeInjection, CaveAllocation> {
+        require(inj.usesFlag) { "The injection does not use [flag]." }
+        if (!allocator.available) throw CodeToolUnavailableException("The one-shot flag needs ps4debug-NG (memory allocation).")
+        val flag = allocator.allocateNear(pid, inj.caveAddress, OneShotFlag.SIZE)
+        return inj.withFlag(flag.address) to flag
+    }
+
+    /**
+     * Frees [flag] when nothing can run the injection's `[flag]` lines any more: its jump is not in place (OFF, or only
+     * the cave left). Returns false and keeps the memory when the injection is ON or does not match (a thread could still
+     * reach the flag). A later ON binds a new flag (and rewrites a cave left bound to this one, see [prepare]).
+     */
+    suspend fun releaseFlag(pid: Int, inj: CodeInjection, flag: CaveAllocation, allocator: CaveAllocator): Boolean {
+        val st = runCatching { state(pid, inj) }.getOrNull()
+        if (st != InjectionState.OFF && st != InjectionState.CAVE_ONLY) return false
+        allocator.free(flag)
+        return true
     }
 
     /** Executes confirmed [steps] in order (see the class comment for failure handling). */

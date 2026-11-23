@@ -2,6 +2,28 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.11
+
+### Fixes from a full review of the app
+- **Crash:** switching a one-shot injection ON from Cheats closed the app when ps4debug-NG's allocation reply failed
+  the memory-map check. All errors of a library switch are now shown as a message; the switch logic moved to
+  `core.cheat.LibrarySwitch` (tested against the simulated server).
+- **Freed flag still used:** an injection in allocated memory keeps its cave code after OFF; switching it ON again with a
+  new one-shot flag only wrote the jump, so the cave still used the old, freed flag. The cave is now rewritten for the
+  new flag first.
+- **Old addresses in restored tabs:** tabs restored after an app restart came back with addresses from an earlier game
+  session. They now reopen empty, and the Code cave screen refuses to build at a hook opened in another game.
+- **Hooks on a jmp:** were accepted while building but refused later by the library and the export (they cannot be told
+  apart from another injection's jump). Building refuses them now, with what to do instead.
+- A live one-shot cave in int3 padding was not recognised as applied (its flag bytes differ from the saved ones), so a
+  new patch could be planned over it.
+- The link time on the Connection screen counted long exchanges (scans, debugger attach) as round trips and showed a
+  false "slow link" warning.
+- Pointer candidates were reported as "leads to the value" with nothing to compare with; they now show "resolves — not
+  confirmed".
+- The debugger's interrupt port accepts only the PS4: connections from other devices on the network are closed.
+- Flag allocation and release for the Code cave screen moved to `InjectionWriter` (tested); misplaced doc comments.
+
 ## 1.0.10
 
 ### GoldHEN export: credits are never empty

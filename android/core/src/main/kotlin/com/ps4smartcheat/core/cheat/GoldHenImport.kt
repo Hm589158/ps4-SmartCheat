@@ -108,11 +108,6 @@ data class ModCheck(val mod: GhImportMod, val addresses: List<Long>, val states:
     val partial: Boolean get() = known && states.distinct().size == 2
 
     /**
-     * Indices of the patches to write, in write order: ON in file order, OFF in reverse. Patches already in the
-     * target state are skipped. The reverse order matters for code-cave injections (cave chunks first, jump last):
-     * switching OFF removes the jump before the cave code.
-     */
-    /**
      * One-shot injections: the flag the parts that are ON already address (an interrupted enable keeps using it), or
      * null when none is ON.
      */
@@ -126,6 +121,11 @@ data class ModCheck(val mod: GhImportMod, val addresses: List<Long>, val states:
     /** Where to allocate a new one-shot flag: next to the first part that addresses it (within 2 GiB). */
     fun flagHint(): Long? = mod.patches.indices.firstOrNull { mod.patches[it].flagFields.isNotEmpty() }?.let { addresses.getOrNull(it) }?.takeIf { it >= 0 }
 
+    /**
+     * Indices of the patches to write, in write order: ON in file order, OFF in reverse. Patches already in the
+     * target state are skipped. The reverse order matters for code-cave injections (cave chunks first, jump last):
+     * switching OFF removes the jump before the cave code.
+     */
     fun writeOrder(enable: Boolean): List<Int> {
         val want = if (enable) PatchState.OFF else PatchState.ON
         val idx = states.indices.filter { states[it] == want }

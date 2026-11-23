@@ -414,6 +414,8 @@ class AppContainer(context: Context) {
 
     /** ps4debug-NG memory allocation for caves (validated against the map; never automatic). */
     val caveAllocator = com.ps4smartcheat.core.asm.CaveAllocator(client, backend)
+    /** Library / GoldHEN mod switches (checked, ordered, verified; one-shot flags per session). */
+    val librarySwitch = com.ps4smartcheat.core.cheat.LibrarySwitch(backend, editor, caveAllocator)
     /** Ordered, verified writes of injections (cave first, jump last; reverse to remove). */
     val injectionWriter = com.ps4smartcheat.core.asm.InjectionWriter(backend, editor)
 

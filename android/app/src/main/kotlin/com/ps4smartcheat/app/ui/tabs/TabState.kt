@@ -3,7 +3,6 @@ package com.ps4smartcheat.app.ui.tabs
 import android.content.Context
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.ViewModelStoreOwner
-import com.ps4smartcheat.core.scan.ValueType
 import com.ps4smartcheat.core.tabs.TabSpec
 import com.ps4smartcheat.core.tabs.Tool
 import com.ps4smartcheat.core.tabs.ToolArgs
@@ -11,8 +10,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Remembers the open tabs (tool + arguments, order, active tab) across app restarts. Only what is needed to reopen
- * them is stored; a tool's work (scan results, a running watch…) lives in its view model and app-wide state.
+ * Remembers the open tabs (tool, order, active tab) across app restarts. Their arguments (addresses) are saved but not
+ * restored: they belong to the game session the tab was opened in. A tool's work (scan results, a running watch…)
+ * lives in its view model and app-wide state.
  */
 class TabStore(context: Context) {
     private val prefs = context.getSharedPreferences("tabs", Context.MODE_PRIVATE)
@@ -23,15 +23,10 @@ class TabStore(context: Context) {
         val list = (0 until arr.length()).mapNotNull { i ->
             val o = arr.getJSONObject(i)
             val tool = runCatching { Tool.valueOf(o.getString("tool")) }.getOrNull() ?: return@mapNotNull null
-            TabSpec(
-                o.getString("id"), tool,
-                ToolArgs(
-                    address = if (o.has("address")) o.getLong("address") else null,
-                    type = if (o.has("type")) runCatching { ValueType.valueOf(o.getString("type")) }.getOrNull() else null,
-                    size = if (o.has("size")) o.getInt("size") else null,
-                    writes = if (o.has("writes")) o.getBoolean("writes") else null,
-                ),
-            )
+            // Restored without their arguments: addresses belong to the game session they were opened in, and after an
+            // app restart the game may be another one or have restarted (a restored Code cave tab at an old address
+            // would read — and offer to build at — whatever is there now). The tool comes back empty.
+            TabSpec(o.getString("id"), tool, ToolArgs())
         }.distinctBy { it.id }
         list to root.optString("active").ifBlank { null }
     } catch (e: Exception) {

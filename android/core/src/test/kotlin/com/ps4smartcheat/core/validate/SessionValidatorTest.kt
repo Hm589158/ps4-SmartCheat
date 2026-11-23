@@ -25,6 +25,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -163,5 +164,20 @@ class SessionValidatorTest {
     @Test fun errorAdvisorGivesActionableHints() {
         assertEquals("Connection refused", ErrorAdvisor.diagnose(RuntimeException("x", ConnectException("refused"))).title)
         assertTrue(ErrorAdvisor.diagnose(SocketTimeoutException()).actions.any { it.contains("same network") })
+    }
+
+    @Test fun aCandidateWithoutReferenceIsNotReportedAsPassing() = runBlocking {
+        pokeLong(DemoGame.PID, staticSlot, heapObject)
+        client.connect(ConnectOptions("127.0.0.1", server.port, readTimeoutMs = 3000))
+        val regions = client.getMemoryRegions(DemoGame.PID)
+        val one = PointerStability.merge(emptyList(), listOf(PointerChain(ModuleRef("eboot.bin", 0x100400), listOf(0x10))))
+        // One candidate, no confirmed address: it resolves, but nothing says it leads to the value.
+        val r = PointerStability.validate(client, DemoGame.PID, one, regions, 4)
+        assertNull(r.reference)
+        assertEquals(CandidateVerdict.UNVERIFIED, r.checks.single().verdict)
+        assertEquals(0, r.passed)
+        // With the confirmed address it passes.
+        val ok = PointerStability.validate(client, DemoGame.PID, one, regions, 4, confirmed = heapObject + 0x10)
+        assertEquals(CandidateVerdict.PASS, ok.checks.single().verdict)
     }
 }

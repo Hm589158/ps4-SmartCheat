@@ -242,7 +242,7 @@ class Ps4DebugClient(
      * Runs a multi-step exchange (server-side scans) with exclusive access to the connection.
      * Same error handling as normal requests; [readTimeoutMs] temporarily replaces the socket timeout.
      */
-    override suspend fun <T> exclusive(what: String, readTimeoutMs: Int?, block: (Wire) -> T): T = request(what, idempotent = false) {
+    override suspend fun <T> exclusive(what: String, readTimeoutMs: Int?, block: (Wire) -> T): T = request(what, idempotent = false, measure = false) {
         val s = socket ?: throw NotConnectedException()
         val saved = s.soTimeout
         if (readTimeoutMs != null) s.soTimeout = readTimeoutMs
@@ -256,6 +256,7 @@ class Ps4DebugClient(
     override val serverScanTimeoutMs: Int get() = options?.serverScanTimeoutMs ?: 600_000
 
     override val localAddress: InetAddress? get() = socket?.takeIf { it.isConnected && !it.isClosed }?.localAddress
+    override val remoteAddress: InetAddress? get() = socket?.takeIf { it.isConnected && !it.isClosed }?.inetAddress
 
     /**
      * Sends one command on a separate, short-lived connection (e.g. Turbo CANCEL while the main
@@ -311,7 +312,8 @@ class Ps4DebugClient(
      * released only after resuming there: a request started from the UI thread kept every other request waiting
      * until the UI thread got to run that resumption.)
      */
-    private suspend fun <T> request(what: String, idempotent: Boolean = true, block: () -> T): T {
+    /** [measure]: a plain request/reply that counts for [linkMillis] (not scans or other long exclusive exchanges). */
+    private suspend fun <T> request(what: String, idempotent: Boolean = true, measure: Boolean = true, block: () -> T): T {
         // User actions first: a background request (BackgroundRequest) steps aside while one is waiting — also when it
         // already queued for the lock before the user action arrived — for at most BackgroundRequest.MAX_YIELD_MS.
         val background = currentCoroutineContext()[com.ps4smartcheat.core.backend.BackgroundRequestKey] != null
@@ -322,7 +324,7 @@ class Ps4DebugClient(
         try {
             while (true) {
                 while (yieldNow()) delay(5)
-                val r = requestLocked(what, idempotent, { if (waiting.compareAndSet(true, false)) foregroundWaiting.decrementAndGet() }, ::yieldNow, block)
+                val r = requestLocked(what, idempotent, measure, { if (waiting.compareAndSet(true, false)) foregroundWaiting.decrementAndGet() }, ::yieldNow, block)
                 @Suppress("UNCHECKED_CAST")
                 if (r !== YIELDED) return r as T
             }
@@ -334,7 +336,7 @@ class Ps4DebugClient(
     private object YIELDED
 
     private suspend fun <T> requestLocked(
-        what: String, idempotent: Boolean, onLocked: () -> Unit, yieldNow: () -> Boolean, block: () -> T,
+        what: String, idempotent: Boolean, measure: Boolean, onLocked: () -> Unit, yieldNow: () -> Boolean, block: () -> T,
     ): Any? = withContext(ioDispatcher) {
         mutex.withLock {
             if (yieldNow()) return@withLock YIELDED // a user action is waiting: let it go first
@@ -352,7 +354,7 @@ class Ps4DebugClient(
                 }
             }
             try {
-                timed(block).also { lastActivity = System.currentTimeMillis() }
+                (if (measure) timed(block) else block()).also { lastActivity = System.currentTimeMillis() }
             } catch (e: InSyncAbort) {
                 throw e
             } catch (e: CommandFailedException) {
