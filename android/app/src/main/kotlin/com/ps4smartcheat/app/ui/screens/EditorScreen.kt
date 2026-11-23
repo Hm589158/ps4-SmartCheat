@@ -75,7 +75,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     val step = _step.asStateFlow()
 
     fun prepareStep(undo: Boolean) {
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val peek = if (undo) c.editor.peekUndo() else c.editor.peekRedo()
                 _step.value = peek?.let { (item, now) -> StepPlan(undo, item, now) }
@@ -90,7 +90,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     fun confirmStep() {
         val st = _step.value ?: return
         _step.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             val out = if (st.undo) c.editor.undo() else c.editor.redo()
             report(out, (if (st.undo) "Undo " else "Redo ") + Address.format(st.item.target.address))
             if (Address.parse(_address.value) == st.item.target.address) read()
@@ -134,7 +134,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     fun read() {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         val addr = parsedAddress() ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val snap = c.editor.read(sel.pid, addr, _type.value)
                 _current.value = snap.bytes
@@ -151,7 +151,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     fun prepareWrite() {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         val addr = parsedAddress() ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 _plan.value = c.editor.plan(EditTarget(sel.pid, sel.name, addr, _type.value), _replacement.value)
                 _error.value = null
@@ -168,7 +168,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     fun confirmWrite() {
         val p = _plan.value ?: return
         _plan.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             val out = c.editor.execute(p)
             report(out, "Write ${Address.format(p.target.address)} = ${p.replacementText}")
             read()
@@ -180,7 +180,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
         val addr = parsedAddress() ?: return
         c.log.event(com.ps4smartcheat.core.logging.EventLevel.DEBUG, com.ps4smartcheat.core.logging.EventCategory.EDIT, "restore requested", "address" to Address.format(addr))
         c.freezer.unfreeze(sel.pid, addr)
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             report(c.editor.restore(sel.pid, addr), "Restore ${Address.format(addr)}")
             read()
         }
@@ -194,7 +194,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
             _message.value = "Unfrozen"
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val p = c.editor.plan(EditTarget(sel.pid, sel.name, addr, _type.value), _replacement.value)
                 if (p.dangerous) { _error.value = "Freeze is not allowed for writes with warnings: ${p.warnings.joinToString()}"; return@launch }
@@ -220,7 +220,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
 
     fun addToList() {
         val addr = parsedAddress() ?: return
-        viewModelScope.launch { _message.value = c.addToAddressList(addr, _type.value) }
+        viewModelScope.launch(c.guard) { _message.value = c.addToAddressList(addr, _type.value) }
     }
 
     fun profilesForSelected(): List<CheatProfile> {
@@ -232,7 +232,7 @@ class EditorViewModel(private val c: AppContainer) : ViewModel() {
     fun saveCheat(name: String, profileId: String?, newProfileName: String, gameVersion: String) {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         val addr = parsedAddress() ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val original = c.editor.originalFor(sel.pid, addr)?.original ?: _current.value
                 _message.value = c.saveCheat(addr, _type.value, name, _replacement.value, original, profileId, newProfileName, gameVersion)

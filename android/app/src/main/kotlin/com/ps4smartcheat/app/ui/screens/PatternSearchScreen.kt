@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameHeader
+
 import com.ps4smartcheat.app.ui.components.ltr
 
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
@@ -94,7 +96,7 @@ class PatternSearchViewModel(private val c: AppContainer) : ViewModel() {
         _error.value = null
         _result.value = null
         _running.value = true
-        job = viewModelScope.launch {
+        job = viewModelScope.launch(c.guard) {
             try {
                 val s = c.settings.value
                 val filter = RegionFilter(includeReadOnly.value, includeExecutable.value, s.maxRegionMiB.coerceAtLeast(0).toLong() * 1024 * 1024)
@@ -145,7 +147,7 @@ fun PatternSearchScreen(onOpen: (Long) -> Unit) {
         item {
             val sel = selected
             if (sel == null) GameRequiredBanner()
-            else Text("Process: ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
+            else GameHeader(sel)
             SectionCard(null) {
                 Selector("Search for", PatternKind.entries, kind, { it.label }, { vm.kind.value = it }, enabled = !running)
                 OutlinedTextField(

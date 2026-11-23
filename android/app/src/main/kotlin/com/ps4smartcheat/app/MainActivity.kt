@@ -123,6 +123,16 @@ private fun AppRoot() {
     LaunchedEffect(Unit) {
         container.log.messages.collect { snackbar.showSnackbar(it) }
     }
+    // After an unexpected close: say so once, with the way to the report (it stays on the phone).
+    LaunchedEffect(Unit) {
+        if (container.crashes.last() != null) {
+            val r = snackbar.showSnackbar(
+                "The app closed unexpectedly last time. The report is in Diagnostics.",
+                actionLabel = "Open", duration = androidx.compose.material3.SnackbarDuration.Long,
+            )
+            if (r == androidx.compose.material3.SnackbarResult.ActionPerformed) open(Tool.DIAGNOSTICS, ToolArgs())
+        }
+    }
     // Forget the saved UI state of closed tabs (their view models are cleared by the tab manager).
     val known = remember { mutableSetOf<String>() }
     LaunchedEffect(list) {

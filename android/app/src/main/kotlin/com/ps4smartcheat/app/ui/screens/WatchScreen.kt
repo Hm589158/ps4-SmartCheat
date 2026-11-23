@@ -153,7 +153,7 @@ class WatchViewModel(private val c: AppContainer) : ViewModel() {
         _phase.value = WatchPhase.ATTACHING
         _status.value = "Attaching the debugger to ${sel.name}…"
         val startedAt = System.currentTimeMillis()
-        job = viewModelScope.launch {
+        job = viewModelScope.launch(c.guard) {
             try {
                 // A high port needs no root; the extended attach request tells ps4debug-NG where to connect.
                 val listener = withContext(Dispatchers.IO) { InterruptListener.open() }
@@ -210,13 +210,13 @@ class WatchViewModel(private val c: AppContainer) : ViewModel() {
 
     fun loadSaved() {
         val key = c.selectedProcess.value?.let { c.gameKey(it) }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             val all = withContext(Dispatchers.IO) { c.watchResults.load() }
             _saved.value = if (key == null) all else all.filter { it.gameKey == key }
         }
     }
 
-    fun deleteSaved(id: String) = viewModelScope.launch {
+    fun deleteSaved(id: String) = viewModelScope.launch(c.guard) {
         val key = c.selectedProcess.value?.let { c.gameKey(it) }
         val all = withContext(Dispatchers.IO) { c.watchResults.delete(id) }
         _saved.value = if (key == null) all else all.filter { it.gameKey == key }

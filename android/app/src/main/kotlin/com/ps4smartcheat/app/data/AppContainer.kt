@@ -62,7 +62,16 @@ data class SelectedProcess(
 /** Manual dependency container, created once per process by [com.ps4smartcheat.app.SmartCheatApp]. */
 class AppContainer(context: Context) {
     private val appContext: Context = context.applicationContext
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    /**
+     * Safety net for every coroutine of the app (view models and background work): an error nobody expected is logged
+     * and shown as a message instead of closing the app. Errors a screen expects are still handled there first.
+     */
+    val guard = kotlinx.coroutines.CoroutineExceptionHandler { _, e ->
+        log.error("Unexpected error: ${e.message ?: e.javaClass.simpleName}" + if (e.message != null) " (${e.javaClass.simpleName})" else "")
+    }
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + guard)
+    /** Local crash reports (see [CrashReports]); installed by the application before this container exists. */
+    val crashes: CrashReports get() = (appContext as com.ps4smartcheat.app.SmartCheatApp).crashes
     /** Options of the last successful connection, for reconnecting when the app returns to the foreground. */
     @Volatile private var lastOptions: com.ps4smartcheat.core.backend.ConnectOptions? = null
     @Volatile private var userDisconnected = false

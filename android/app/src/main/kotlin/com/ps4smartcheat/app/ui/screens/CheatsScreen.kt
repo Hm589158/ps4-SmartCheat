@@ -1,5 +1,8 @@
 package com.ps4smartcheat.app.ui.screens
 
+import androidx.compose.material.icons.filled.Star
+import com.ps4smartcheat.app.ui.components.EmptyState
+
 import android.content.ContentResolver
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -85,7 +88,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
 
     fun validate(profile: CheatProfile) {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select the game process first"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val regions = c.backend.getMemoryRegions(sel.pid)
                 c.updateRegions(regions)
@@ -106,7 +109,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
             _error.value = "Cheat cannot be applied: ${check.status.label}"
             return
         }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 _plan.value = c.editor.plan(EditTarget(sel.pid, sel.name, addr, check.entry.type), check.entry.replacementValue!!)
             } catch (e: EditDeniedException) {
@@ -124,7 +127,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     fun confirmApply() {
         val p = _plan.value ?: return
         _plan.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             val out = c.editor.execute(p)
             if (out is WriteOutcome.Verified) _message.value = "Applied: ${p.replacementText} at ${Address.format(p.target.address)}"
             else _error.value = out.message
@@ -149,7 +152,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     private val _ghToggle = MutableStateFlow<GhToggle?>(null)
     val ghToggle = _ghToggle.asStateFlow()
 
-    fun openGoldHen(resolver: ContentResolver, uri: Uri) = viewModelScope.launch {
+    fun openGoldHen(resolver: ContentResolver, uri: Uri) = viewModelScope.launch(c.guard) {
         try {
             val text = withContext(Dispatchers.IO) {
                 resolver.openInputStream(uri)!!.use { input ->
@@ -202,7 +205,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     init {
         // The card must never show a profile as it was when it was opened: a cheat saved, edited or deleted meanwhile
         // changes the bytes that are compared with memory.
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             c.cheats.profiles.collect { if (_ghLibrary.value && ghProfileId != null) checkGoldHen() }
         }
     }
@@ -226,7 +229,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
     /** Read-only check of what still holds in this game session (after a restart or update). */
     fun checkSession(p: CheatProfile) {
         val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: run { _error.value = "Select the running game first"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val regions = c.backend.getMemoryRegions(sel.pid)
                 c.updateRegions(regions)
@@ -248,7 +251,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: run { _ghMismatch.value = "Select the running game to check this file."; return }
         _ghMismatch.value = com.ps4smartcheat.core.cheat.GoldHenImport.mismatch(f, sel.titleId, sel.name)
         if (_ghMismatch.value != null) { _ghChecks.value = emptyMap(); return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val regions = c.backend.getMemoryRegions(sel.pid)
                 _ghChecks.value = f.mods.withIndex().filter { it.value.applicable }.associate { (i, m) ->
@@ -270,7 +273,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         val f = _gh.value ?: return
         val sel = c.selectedProcess.value ?: return
         val mod = f.mods.getOrNull(index) ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             // All errors end up as a message (an allocation the PS4 did not really make used to close the app).
             try {
                 val key = c.libraryFlagKey(sel.pid, f.name, mod.name)
@@ -292,14 +295,14 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         val t = _ghToggle.value ?: return
         _ghToggle.value = null
         // Nothing was written: a flag allocated for this switch is freed again.
-        viewModelScope.launch { c.librarySwitch.cancel(t.prepared) }
+        viewModelScope.launch(c.guard) { c.librarySwitch.cancel(t.prepared) }
     }
 
     fun confirmGoldHenToggle() {
         val t = _ghToggle.value ?: return
         _ghToggle.value = null
         val name = _gh.value?.mods?.getOrNull(t.index)?.name ?: "mod"
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val r = c.librarySwitch.execute(t.prepared)
                 if (t.flagKey != null) {
@@ -328,10 +331,10 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    fun deleteProfile(p: CheatProfile) = viewModelScope.launch { c.cheats.deleteProfile(p.id); _checks.value = _checks.value - p.id }
-    fun deleteCheat(p: CheatProfile, e: CheatEntry) = viewModelScope.launch { c.cheats.deleteCheat(p.id, e.id) }
+    fun deleteProfile(p: CheatProfile) = viewModelScope.launch(c.guard) { c.cheats.deleteProfile(p.id); _checks.value = _checks.value - p.id }
+    fun deleteCheat(p: CheatProfile, e: CheatEntry) = viewModelScope.launch(c.guard) { c.cheats.deleteCheat(p.id, e.id) }
 
-    fun updateProfile(p: CheatProfile, name: String, titleId: String, version: String) = viewModelScope.launch {
+    fun updateProfile(p: CheatProfile, name: String, titleId: String, version: String) = viewModelScope.launch(c.guard) {
         if (name.isBlank()) { _error.value = "Profile name is required"; return@launch }
         c.cheats.updateProfile(
             p.copy(
@@ -342,7 +345,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         )
     }
 
-    fun updateCheat(p: CheatProfile, e: CheatEntry, name: String, value: String) = viewModelScope.launch {
+    fun updateCheat(p: CheatProfile, e: CheatEntry, name: String, value: String) = viewModelScope.launch(c.guard) {
         val v = value.trim().ifBlank { null }
         if (v != null) {
             try { ValueCodec.parse(e.type, v) } catch (ex: ValueParseException) { _error.value = ex.message; return@launch }
@@ -351,7 +354,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         c.cheats.upsertCheat(p.id, e.copy(name = name.trim(), replacementValue = v))
     }
 
-    fun exportTo(resolver: ContentResolver, uri: Uri) = viewModelScope.launch {
+    fun exportTo(resolver: ContentResolver, uri: Uri) = viewModelScope.launch(c.guard) {
         try {
             val text = c.cheats.exportJson()
             withContext(Dispatchers.IO) { resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) } }
@@ -361,7 +364,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    fun importFrom(resolver: ContentResolver, uri: Uri) = viewModelScope.launch {
+    fun importFrom(resolver: ContentResolver, uri: Uri) = viewModelScope.launch(c.guard) {
         try {
             val text = withContext(Dispatchers.IO) {
                 resolver.openInputStream(uri)!!.use { s ->
@@ -397,7 +400,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         val r = GoldHenExporter.export(fixed, gameName, credits.split(',').map { it.trim() }, runningTitleId = runningTitle(p))
         val json = r.json ?: run { _error.value = r.errors.joinToString("\n"); return null }
         if (fixed.titleId != p.titleId || fixed.gameVersion != p.gameVersion) {
-            viewModelScope.launch {
+            viewModelScope.launch(c.guard) {
                 try { c.cheats.updateProfile(fixed) } catch (e: Exception) { c.log.warn("Could not store the corrected title ID/version: ${e.message}") }
             }
         }
@@ -411,7 +414,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
 
     private var pendingGoldHenName: String? = null
 
-    fun writeGoldHen(resolver: ContentResolver, uri: Uri) = viewModelScope.launch {
+    fun writeGoldHen(resolver: ContentResolver, uri: Uri) = viewModelScope.launch(c.guard) {
         val text = pendingGoldHen ?: return@launch
         try {
             withContext(Dispatchers.IO) { resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) } }
@@ -472,7 +475,16 @@ fun CheatsScreen() {
             message?.let { Text(it, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall) }
             ErrorText(error)
             WarningBanner("Saved absolute addresses are only valid for the game session they were found in. Validate a profile before re-applying; nothing is applied automatically.")
-            if (profiles.isEmpty()) Text("No cheats saved yet. Save one from the Memory Editor.", modifier = Modifier.padding(top = 8.dp))
+            if (profiles.isEmpty()) {
+                val openTool = com.ps4smartcheat.app.ui.components.LocalOpenTool.current
+                EmptyState(
+                    "No cheats saved yet",
+                    "Save a value from the memory editor, an Assembly patch from the disassembler or an injection from Code cave — or import a file above.",
+                    modifier = Modifier.padding(top = 8.dp),
+                    icon = androidx.compose.material.icons.Icons.Filled.Star,
+                    action = "Open disassembler" to { openTool(com.ps4smartcheat.core.tabs.Tool.CODE) },
+                )
+            }
         }
         gh?.let { f ->
             item { GoldHenCard(f, ghChecks, ghMismatch, canWrite = selected?.exited == false, onCheck = vm::checkGoldHen, onClose = vm::closeGoldHen, onToggle = vm::prepareGoldHenToggle, library = ghLibrary) }

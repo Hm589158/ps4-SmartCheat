@@ -80,7 +80,7 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
         val at = _target.value ?: run { _error.value = "Go to an address first"; return }
         val bytes = try { com.ps4smartcheat.core.util.Hex.decode(_patch.value) } catch (e: IllegalArgumentException) { _error.value = e.message; return }
         if (bytes.isEmpty()) { _error.value = "Enter bytes, e.g. 90 90"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 _plan.value = c.editor.planBytes(sel.pid, sel.name, at, bytes)
             } catch (e: com.ps4smartcheat.core.edit.EditDeniedException) {
@@ -94,7 +94,7 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
     fun confirmPatch() {
         val p = _plan.value ?: return
         _plan.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             val out = c.editor.execute(p)
             if (out is com.ps4smartcheat.core.edit.WriteOutcome.Verified) {
                 _message.value = "${p.target.length} byte(s) written and verified at ${Address.format(p.target.address)}"
@@ -167,7 +167,7 @@ class HexViewerViewModel(private val c: AppContainer) : ViewModel() {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
         val s = start ?: return
         if (_loading.value) return
-        viewModelScope.launch(if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
+        viewModelScope.launch(c.guard + if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
             _loading.value = true
             try {
                 val w = viewer.read(sel.pid, s, WINDOW, sel.regions)

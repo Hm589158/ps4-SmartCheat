@@ -2,6 +2,20 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.12
+
+### Stability
+- One safety net for every task the app runs (all screens and background work): an error nobody expected is logged
+  and shown as a message instead of closing the app.
+- Local crash reports: if the app does close unexpectedly, the report (time, version, stack trace) is saved on the
+  phone. The next start says so, and Diagnostics shows it with **Copy report** and **Dismiss**. Nothing is sent
+  anywhere.
+
+### Interface
+- The game a tool works on is shown the same way on every screen (scanner, address list, pattern search, pointer
+  scan): name, pid and title ID on one strip.
+- Empty address list and cheat library explain what to do next, with a button to the scanner or disassembler.
+
 ## 1.0.11
 
 ### Fixes from a full review of the app

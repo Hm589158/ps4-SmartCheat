@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameHeader
+
 import com.ps4smartcheat.app.ui.components.ltr
 
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
@@ -90,7 +92,7 @@ class PointerScanViewModel(private val c: AppContainer) : ViewModel() {
     fun add(chain: PointerChain) {
         val sel = c.selectedProcess.value ?: return
         val type = state.value.type
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _message.value = try {
                 when (val r = PointerResolver.resolve(c.backend, sel.pid, chain, sel.regions, type.size)) {
                     is PointerResolution.Resolved -> c.addPointerToAddressList(chain, type, r.address)
@@ -127,7 +129,7 @@ fun PointerScanScreen(initialAddress: Long?, initialType: ValueType?) {
         item {
             val sel = selected
             if (sel == null) GameRequiredBanner()
-            else Text("${sel.titleId ?: "no title ID"} — ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
+            else GameHeader(sel)
             Text(
                 "Finds paths like [[eboot.bin+0x1000]+0x10]+0x48 from the game's static data to a value whose address changes " +
                     "every run. The phone reads all readable data regions once to build a pointer map (read-only, can take a while " +

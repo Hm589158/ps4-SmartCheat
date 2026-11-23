@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -39,6 +41,10 @@ import kotlinx.coroutines.launch
 
 class DiagnosticsViewModel(private val c: AppContainer) : ViewModel() {
     val connection = c.backend.state
+    private val _lastCrash = MutableStateFlow(c.crashes.last())
+    /** Report of the last time the app closed unexpectedly (kept on the phone only), or null. */
+    val lastCrash = _lastCrash.asStateFlow()
+    fun dismissCrash() { c.crashes.dismiss(); _lastCrash.value = null }
     val lines = c.log.lines
     private val _ping = MutableStateFlow<PingStats?>(null)
     val ping = _ping.asStateFlow()
@@ -61,7 +67,7 @@ class DiagnosticsViewModel(private val c: AppContainer) : ViewModel() {
     fun checkActivity() {
         val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: run { _activity.value = "Select the game process first."; return }
         _activity.value = "Checking…"
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val regions = c.backend.getMemoryRegions(sel.pid)
                 val a = com.ps4smartcheat.core.diag.ProcessActivity.probe(c.backend, sel.pid, regions)
@@ -79,7 +85,7 @@ class DiagnosticsViewModel(private val c: AppContainer) : ViewModel() {
     /** Sends SIGCONT to the selected process (CMD_DEBUG_PROCESS_STOP state 0; no debugger session). */
     fun resumeProcess() {
         val sel = c.selectedProcess.value?.takeIf { !it.exited } ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 com.ps4smartcheat.core.debug.DebugSession.continueProcess(c.transport, sel.pid)
                 _activity.value = "Sent SIGCONT to ${sel.name}. Check again in a moment."
@@ -114,7 +120,7 @@ class DiagnosticsViewModel(private val c: AppContainer) : ViewModel() {
         c.log.lines.value.filter { it.event.level >= EventLevel.WARN }.takeLast(50).forEach { append(it.format()).append('\n') }
     }
 
-    fun exportReport(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch {
+    fun exportReport(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch(c.guard) {
         val text = report()
         try {
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) } }
@@ -128,7 +134,7 @@ class DiagnosticsViewModel(private val c: AppContainer) : ViewModel() {
     fun runPing() {
         if (_pinging.value || c.backend.state.value !is ConnectionState.Connected) return
         _pinging.value = true
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try { _ping.value = LinkDiagnostics.ping(c.backend, count = 5) } finally { _pinging.value = false }
         }
     }
@@ -159,7 +165,23 @@ fun DiagnosticsScreen() {
     var tick by remember { mutableLongStateOf(0L) }
     LaunchedEffect(Unit) { while (true) { delay(1000); tick++ } }
 
+    val lastCrash by vm.lastCrash.collectAsStateWithLifecycle()
+    val context = androidx.compose.ui.platform.LocalContext.current
+
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        lastCrash?.let { report ->
+            SectionCard("The app closed unexpectedly last time", modifier = Modifier.testTag("crashCard")) {
+                Text(
+                    "The report below stays on this phone (nothing is sent). Copy it into a GitHub issue to help fix the problem.",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                Text(report.lines().take(8).joinToString("\n"), fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall)
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { com.ps4smartcheat.app.ui.components.copyText(context, "Crash report", report) }) { Text("Copy report") }
+                    OutlinedButton(onClick = vm::dismissCrash, modifier = Modifier.testTag("crashDismiss")) { Text("Dismiss") }
+                }
+            }
+        }
         SectionCard("Connection") {
             when (val st = connection) {
                 is ConnectionState.Connected -> {

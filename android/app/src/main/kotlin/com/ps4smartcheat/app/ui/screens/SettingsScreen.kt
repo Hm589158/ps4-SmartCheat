@@ -45,7 +45,7 @@ class SettingsViewModel(private val c: AppContainer) : ViewModel() {
 
     fun exportLog(resolver: android.content.ContentResolver, uri: android.net.Uri) {
         val text = c.log.exportJsonLines()
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                     resolver.openOutputStream(uri, "wt")!!.use { it.write(text.toByteArray()) }

@@ -134,7 +134,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
 
     private fun load(a: Long, select: Boolean) {
         val sel = c.selectedProcess.value ?: run { _error.value = "Select a process first"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _loading.value = true
             try {
                 val region = sel.regions.regionFor(a)?.takeIf { it.isReadable } ?: run { _error.value = "${Address.format(a)} is not mapped"; return@launch }
@@ -180,7 +180,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
         val ea = snap.effectiveAddress(ins) ?: return
         val size = ins.memory?.size?.takeIf { it in setOf(1, 2, 4, 8) } ?: return
         if (sel.regions.regionFor(ea, size)?.isReadable != true) { _operand.value = "not mapped now"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _operand.value = try {
                 val b = c.backend.readMemory(sel.pid, ea, size)
                 var v = 0L
@@ -221,7 +221,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
     fun buildPreview() {
         val sel = c.selectedProcess.value ?: return
         val ins = _row.value ?: run { _error.value = "Tap an instruction first"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _loading.value = true
             try {
                 val bytes = if (_assembly.value) c.codeTools.assemble(_source.value, ins.address).bytes else CodePatchPlanner.parseHex(_source.value)
@@ -253,7 +253,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
     fun prepare(on: Boolean) {
         val sel = c.selectedProcess.value ?: return
         val p = _preview.value ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val now = p.stateOf(c.backend.readMemory(sel.pid, p.address, p.length))
                 _state.value = now
@@ -276,7 +276,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
     fun confirm() {
         val (on, plan) = _plan.value ?: return
         _plan.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             val out = c.editor.execute(plan)
             if (out is WriteOutcome.Verified) {
                 _message.value = "Patch ${if (on) "ON" else "OFF"}: ${plan.target.length} byte(s) verified at ${Address.format(plan.target.address)}"
@@ -304,7 +304,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
         if (_saveState.value is SaveState.Saving) return
         val p = _preview.value ?: run { _saveState.value = SaveState.Failed("Build a preview first (Preview button)."); return }
         _saveState.value = SaveState.Saving
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _saveState.value = try {
                 SaveState.Saved(c.saveCodePatch(p, name, group, profileId, newProfileName, version))
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -322,7 +322,7 @@ class CodeViewModel(private val c: AppContainer) : ViewModel() {
     /** Server-side search for instructions referencing [target] (RIP-relative) in the executable regions. */
     fun findReferences(target: Long) {
         val sel = c.selectedProcess.value ?: return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _loading.value = true
             try {
                 val code = sel.regions.filter { it.isExecutable && it.isReadable && it.size in 1..0xFFFFFFFFL }

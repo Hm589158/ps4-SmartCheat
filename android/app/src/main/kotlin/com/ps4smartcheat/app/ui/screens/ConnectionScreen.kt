@@ -62,7 +62,7 @@ class ConnectionViewModel(private val c: AppContainer) : ViewModel() {
         if (problem != null) { _error.value = problem; return }
         c.settings.update { it.copy(host = host, port = port) }
         _error.value = null
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 c.backend.connect(c.settings.value.connectOptions())
             } catch (e: BackendException) {
@@ -73,7 +73,7 @@ class ConnectionViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun disconnect() {
-        viewModelScope.launch { c.userDisconnect() }
+        viewModelScope.launch(c.guard) { c.userDisconnect() }
     }
 }
 

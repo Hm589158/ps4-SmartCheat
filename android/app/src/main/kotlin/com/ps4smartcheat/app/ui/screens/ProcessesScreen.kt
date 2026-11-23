@@ -75,7 +75,7 @@ class ProcessesViewModel(private val c: AppContainer) : ViewModel() {
     fun refresh() {
         if (c.backend.state.value !is ConnectionState.Connected) { _error.value = "Connect to the PS4 first"; return }
         if (_loading.value) return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _loading.value = true
             _error.value = null
             try {
@@ -109,7 +109,7 @@ class ProcessesViewModel(private val c: AppContainer) : ViewModel() {
 
     fun select(details: ProcessDetails) {
         if (_selecting.value) return
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _selecting.value = true
             _error.value = null
             try {

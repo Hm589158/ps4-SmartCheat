@@ -429,7 +429,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
 
     /** Re-reads the bytes of an injection (read-only). */
     fun refresh(a: AppContainer.ActiveInjection) {
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val st = c.injectionWriter.state(a.pid, a.injection)
                 val u = a.copy(state = st)
@@ -453,7 +453,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
         if (_saveState.value is SaveState.Saving) return
         val a = _current.value ?: run { _saveState.value = SaveState.Failed("Build a preview first."); return }
         _saveState.value = SaveState.Saving
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _saveState.value = try {
                 SaveState.Saved(c.saveInjection(a.injection, name, group, profileId, newProfileName, version))
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -469,7 +469,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     private fun launchBusy(block: suspend () -> Unit) {
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _busy.value = true
             _error.value = null
             _message.value = null

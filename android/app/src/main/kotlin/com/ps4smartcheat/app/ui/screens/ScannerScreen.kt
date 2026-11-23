@@ -1,5 +1,7 @@
 package com.ps4smartcheat.app.ui.screens
 
+import com.ps4smartcheat.app.ui.components.GameHeader
+
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
 
 import android.content.ContentResolver
@@ -114,7 +116,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     fun exportCsv(resolver: ContentResolver, uri: Uri) {
         val res = c.scanner.results() ?: run { _error.value = "Nothing to export"; return }
         val sel = c.selectedProcess.value
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val n = withContext(Dispatchers.IO) {
                     resolver.openOutputStream(uri, "wt")!!.bufferedWriter().use { w ->
@@ -129,7 +131,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     init {
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             c.scanner.status.collect { st ->
                 when (st) {
                     is ScanStatus.Completed -> { _page.value = 0; loadPage() }
@@ -138,7 +140,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
                 }
             }
         }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             c.scanner.session.collect { s -> if (s != null) _type.value = s.type }
         }
     }
@@ -185,7 +187,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun addToList(row: ResultRow) {
-        viewModelScope.launch { c.log.notify(c.addToAddressList(row.address, row.type)) }
+        viewModelScope.launch(c.guard) { c.log.notify(c.addToAddressList(row.address, row.type)) }
     }
 
     /** Region description for a result address (e.g. "eboot.bin+0x120 [rw-]"). */
@@ -202,7 +204,7 @@ class ScannerViewModel(private val c: AppContainer) : ViewModel() {
 
     /** [background]: a live refresh, which steps aside for user actions (BackgroundRequest). */
     fun loadPage(background: Boolean = false) {
-        viewModelScope.launch(if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
+        viewModelScope.launch(c.guard + if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
             _rowsLoading.value = true
             try {
                 _rows.value = c.scanner.readPage(_page.value, pageSize)
@@ -261,7 +263,7 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit, onPatternSearch: () -> Unit
             } else if (sel.exited) {
                 WarningBanner("${sel.exitedReason}. Scanning is disabled until the game runs again.")
             } else {
-                Text("Process: ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
+                GameHeader(sel)
             }
         }
         resumable?.let { saved ->

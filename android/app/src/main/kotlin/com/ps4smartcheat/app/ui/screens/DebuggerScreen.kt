@@ -172,7 +172,7 @@ class DebuggerViewModel(private val c: AppContainer) : ViewModel() {
         commands = Channel(Channel.UNLIMITED)
         _phase.value = DebugPhase.ATTACHING
         _status.value = "Attaching the debugger to ${sel.name}…"
-        job = viewModelScope.launch {
+        job = viewModelScope.launch(c.guard) {
             var session: DebugSession? = null
             try {
                 val listener = withContext(Dispatchers.IO) { InterruptListener.open() }

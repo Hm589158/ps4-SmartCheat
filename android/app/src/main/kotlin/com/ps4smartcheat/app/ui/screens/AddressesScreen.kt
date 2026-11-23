@@ -1,5 +1,10 @@
 package com.ps4smartcheat.app.ui.screens
 
+import androidx.compose.material.icons.filled.Place
+import com.ps4smartcheat.app.ui.components.EmptyState
+
+import com.ps4smartcheat.app.ui.components.GameHeader
+
 import com.ps4smartcheat.app.ui.components.ltr
 
 import com.ps4smartcheat.app.ui.components.GameRequiredBanner
@@ -110,7 +115,7 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
         val entries = c.addresses.entries(key)
         if (entries.isEmpty()) { _values.value = emptyMap(); _live.value = emptyList(); return }
         reading = true
-        viewModelScope.launch(if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
+        viewModelScope.launch(c.guard + if (background) com.ps4smartcheat.core.backend.BackgroundRequest else kotlin.coroutines.EmptyCoroutineContext) {
             try {
                 val items = WatchResolver.resolveLive(c.backend, sel.pid, entries, sel.regions)
                 _values.value = reader.read(c.backend, sel.pid, items)
@@ -126,7 +131,7 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
 
     fun addManual(addressText: String, type: ValueType, label: String) {
         val addr = Address.parse(addressText) ?: run { _error.value = "Enter a hexadecimal address"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             _message.value = c.addToAddressList(addr, type, label)
             _error.value = null
             refresh()
@@ -136,14 +141,14 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
     fun rename(row: WatchRow, label: String) {
         val key = gameKey() ?: return
         if (label.isBlank()) { _error.value = "Enter a name"; return }
-        viewModelScope.launch { c.addresses.update(key, row.resolved.entry.copy(label = label)) }
+        viewModelScope.launch(c.guard) { c.addresses.update(key, row.resolved.entry.copy(label = label)) }
     }
 
     fun remove(row: WatchRow) {
         val key = gameKey() ?: return
         val sel = c.selectedProcess.value
         if (sel != null) c.freezer.unfreeze(sel.pid, row.resolved.address)
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             c.addresses.remove(key, row.id)
             _message.value = "Removed \"${row.resolved.entry.label}\""
         }
@@ -165,7 +170,7 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
             return
         }
         val bytes = row.value ?: run { _error.value = "Value not read yet"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val plan = c.editor.plan(EditTarget(sel.pid, sel.name, r.address, r.entry.type), ValueCodec.format(r.entry.type, bytes))
                 if (plan.dangerous) { _error.value = "Freeze is not allowed here: ${plan.warnings.joinToString()}"; return@launch }
@@ -183,7 +188,7 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
     fun describe(address: Long): String = c.selectedProcess.value?.regions?.describe(address) ?: ""
 
     /** Writes this game's list (or all lists when no game is selected) to [uri]. */
-    fun exportTo(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch {
+    fun exportTo(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch(c.guard) {
         try {
             val keys = gameKey()?.let { listOf(it) }
             val text = c.addresses.exportJson(keys)
@@ -194,7 +199,7 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
-    fun importFrom(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch {
+    fun importFrom(resolver: android.content.ContentResolver, uri: android.net.Uri) = viewModelScope.launch(c.guard) {
         try {
             val text = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 resolver.openInputStream(uri)!!.use { input ->
@@ -224,7 +229,7 @@ class AddressesViewModel(private val c: AppContainer) : ViewModel() {
         val r = row.resolved
         if (r.entry.pointer != null) { _error.value = "Pointer chains cannot be saved as cheats (GoldHEN files hold fixed offsets only)"; return }
         if (!r.status.readable) { _error.value = "\"${r.entry.label}\" is not mapped in this process"; return }
-        viewModelScope.launch {
+        viewModelScope.launch(c.guard) {
             try {
                 val msg = c.saveCheat(r.address, r.entry.type, name, value, row.value, profileId, newProfileName, version)
                 _message.value = msg
@@ -290,7 +295,7 @@ fun AddressesScreen(
             when {
                 sel == null || !connected -> GameRequiredBanner()
                 sel.exited -> WarningBanner("${sel.exitedReason}. Values are shown again when the game runs.")
-                else -> Text("${sel.titleId ?: "no title ID"} — ${sel.name} (pid ${sel.pid})", style = MaterialTheme.typography.titleSmall)
+                else -> GameHeader(sel)
             }
             Text(
                 "Saved per game. Module-relative entries (e.g. eboot.bin+0x120) and pointer chains follow the game across restarts; " +
@@ -317,7 +322,15 @@ fun AddressesScreen(
                 ErrorText(error)
             }
             if (rows.isEmpty()) {
-                item { Text("No saved addresses for this game yet. Add one with + on a scan result or in the memory editor.") }
+                item {
+                    val openTool = com.ps4smartcheat.app.ui.components.LocalOpenTool.current
+                    EmptyState(
+                        "No saved addresses yet",
+                        "Find a value with the scanner, then tap + on a result (or + List in the memory editor). Saved addresses follow the game across restarts.",
+                        icon = androidx.compose.material.icons.Icons.Filled.Place,
+                        action = "Open scanner" to { openTool(com.ps4smartcheat.core.tabs.Tool.SCANNER) },
+                    )
+                }
             }
             items(rows, key = { it.id }) { row ->
                 WatchRowView(
