@@ -319,6 +319,71 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
             .onFailure { c.log.warn("One-shot flag at ${Address.format(flag.address)} could not be freed: ${it.message}") }
     }
 
+    /** Assembles the code for the cave, plans the injection and reads its current state. Nothing is written. */
+    fun build() {
+        val sel = c.selectedProcess.value ?: return
+        val hook = _hook.value ?: run { _error.value = "Open an instruction to hook first"; return }
+        val src = _source.value
+        launchBusy {
+            checkHookGame(sel)
+            val regions = c.backend.getMemoryRegions(sel.pid).also { c.updateRegions(it) }
+            val region = regions.regionFor(hook)
+            val hookBytes = c.backend.readMemory(sel.pid, hook, minOf(InjectionPlanner.HOOK_WINDOW.toLong(), (region?.end ?: (hook + InjectionPlanner.HOOK_WINDOW)) - hook).toInt())
+            val space = when (_caveKind.value) {
+                CaveKind.MODULE_PADDING -> {
+                    val cand = _cave.value ?: throw CodePatchException("Find caves and pick one first.")
+                    CaveSpace(cand.address, cand.size, CaveKind.MODULE_PADDING, c.backend.readMemory(sel.pid, cand.address, cand.size), cand.atSegmentEnd)
+                }
+                CaveKind.ALLOCATED -> {
+                    val a = _allocation.value ?: throw CodePatchException("Allocate memory first.")
+                    CaveSpace(a.address, a.length, CaveKind.ALLOCATED, c.backend.readMemory(sel.pid, a.address, a.length))
+                }
+            }
+            val id0 = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(space.address)}"
+            val flag = c.injections.value.firstOrNull { it.id == id0 }?.flag
+            val inj = InjectionPlanner.plan(
+                hook, hookBytes, region, space, src, _replaceBytes.value, known = c.knownPatches(sel, regions), flag = flag?.address,
+            ) { text, at ->
+                c.codeTools.assemble(text, at).bytes
+            }
+            val id = "inj-${java.lang.Long.toHexString(hook)}-${java.lang.Long.toHexString(inj.caveAddress)}"
+            val state = c.injectionWriter.state(sel.pid, inj)
+            val name = c.injections.value.firstOrNull { it.id == id }?.name ?: defaultName(inj)
+            val alloc = if (space.kind == CaveKind.ALLOCATED) _allocation.value else null
+            _current.value = AppContainer.ActiveInjection(id, sel.pid, sel.name, name, inj, alloc, state, flag?.takeIf { inj.usesFlag })
+            _saveState.value = SaveState.Idle
+        }
+    }
+
+    private fun defaultName(inj: CodeInjection) = "Injection at ${relative(inj.hookAddress).ifBlank { Address.format(inj.hookAddress) }}"
+
+    /** Prepares switching an injection ON/OFF (checks state and policy); written only after confirmation. */
+    fun prepare(a: AppContainer.ActiveInjection, enable: Boolean) {
+        val sel = c.selectedProcess.value ?: return
+        if (sel.pid != a.pid) { _error.value = "This injection belongs to pid ${a.pid}; the selected process is ${sel.pid}."; return }
+        launchBusy {
+            var target = a
+            var newFlag: CaveAllocation? = null
+            try {
+                // A one-shot injection gets a new flag (reads 0) before it is switched ON; the cave is bound to it.
+                if (enable && a.injection.usesFlag && a.flag == null) {
+                    val (bound, flag) = c.injectionWriter.allocateFlag(a.pid, a.injection, c.caveAllocator)
+                    newFlag = flag
+                    target = a.copy(injection = bound, flag = flag)
+                    store(target)
+                    c.log.info("One-shot flag for \"${a.name}\" at ${Address.format(newFlag.address)} (allocated, reads 0)")
+                }
+                val steps = c.injectionWriter.prepare(target.pid, target.processName, target.injection, enable)
+                _confirm.value = InjectConfirm.Switch(target.id, enable, steps, newFlag)
+            } catch (e: Exception) {
+                newFlag?.let { f -> releaseFlag(target, f) }
+                if (e !is EditDeniedException) throw e
+                refresh(a)
+                throw CodePatchException(e.message + if (e.message?.contains("not writable") == true) " (Settings → Allow writes to non-writable regions)" else "")
+            }
+        }
+    }
+
     fun confirm() {
         val pending = _confirm.value ?: return
         _confirm.value = null
