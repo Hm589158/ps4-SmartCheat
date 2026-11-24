@@ -394,7 +394,7 @@ internal fun SaveCheatForm(
         if (target == null) {
             OutlinedTextField(newName, { newName = it }, label = { Text("New profile name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(version, { version = it }, label = { Text("Game version (e.g. 01.00)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            Text("ps4debug does not report the game version; enter it from the game's info screen.", style = MaterialTheme.typography.bodySmall)
+            Text("Leave empty to use the version ps4debug-NG reads from the running game (param.sfo); classic ps4debug cannot tell, so enter it from the game's info screen.", style = MaterialTheme.typography.bodySmall)
         }
         if (!error.isNullOrBlank()) Text(error, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.testTag("saveError"))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {

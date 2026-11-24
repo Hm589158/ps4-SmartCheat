@@ -50,6 +50,8 @@ class MockPs4DebugServer(
         val titleId: String = "",
         val contentId: String = "",
         val path: String = "",
+        /** param.sfo APP_VER reported by the foreground-app command ("" = unreadable). */
+        val appVersion: String = "",
     ) {
         val regions = CopyOnWriteArrayList<Region>()
         fun region(name: String, start: Long, size: Int, prot: Int, offset: Long = 0): Region =
@@ -195,6 +197,7 @@ class MockPs4DebugServer(
 
     val readRequests = AtomicInteger()
     val writeRequests = AtomicInteger()
+    val foregroundRequests = AtomicInteger()
     val connections = AtomicInteger()
 
     private val acceptThread = thread(name = "mock-ps4debug-accept", isDaemon = true) {
@@ -394,6 +397,21 @@ class MockPs4DebugServer(
                 return true
             }
             CMD_CONSOLE_END -> return false
+            CMD_CONSOLE_FOREGROUND_APP -> {
+                if (faults.brand == null) return false // unknown to classic servers: they drop the connection
+                foregroundRequests.incrementAndGet()
+                // console.c: the first process named eboot.bin, its proc info, version from param.sfo.
+                val p = processes.sortedBy { it.pid }.firstOrNull { it.name == "eboot.bin" }
+                val r = le(132)
+                if (p != null) {
+                    r.putInt(p.pid)
+                    fun fixed(t: String, n: Int) = r.put(t.toByteArray(Charsets.US_ASCII).copyOf(n))
+                    fixed(p.titleId, 16); fixed(p.contentId, 64); fixed(p.name, 40); fixed(p.appVersion, 8)
+                }
+                status(out, CMD_SUCCESS)
+                out.write(r.array())
+                return true
+            }
             CMD_BRANDING -> {
                 val b = faults.brand ?: return !faults.closeOnUnknownCommand
                 val bytes = (b + "\u0000" + faults.capabilityLevel).toByteArray(Charsets.US_ASCII)
@@ -1166,6 +1184,7 @@ class MockPs4DebugServer(
         const val CMD_PROC_MAPS = 0xBDAA0004.toInt()
         const val CMD_PROC_INFO = 0xBDAA000A.toInt()
         const val CMD_CONSOLE_END = 0xBDDD0002.toInt()
+        const val CMD_CONSOLE_FOREGROUND_APP = 0xBDDD0006.toInt()
         const val CMD_BRANDING = 0xBD000501.toInt()
         const val CMD_PROC_AUTH = 0xBDAACCFF.toInt()
         const val CMD_SCAN_START = 0xBDAACC01.toInt()

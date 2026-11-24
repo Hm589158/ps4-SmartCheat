@@ -73,6 +73,9 @@ interface DebugBackend {
 
     suspend fun writeMemory(pid: Int, address: Long, data: ByteArray): WriteStatus
 
+    /** The game in the foreground, when the payload can tell (ps4debug-NG); null otherwise or when there is none. */
+    suspend fun foregroundApp(): com.ps4smartcheat.core.model.ForegroundApp? = null
+
     /** Total bytes received/sent on the debug connection(s) since creation. */
     fun traffic(): Traffic = Traffic(0, 0)
 

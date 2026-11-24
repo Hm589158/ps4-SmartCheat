@@ -5,6 +5,19 @@ import com.ps4smartcheat.core.util.Address
 /** One entry of CMD_PROC_LIST (`struct proc_list_entry { char p_comm[32]; int pid; }`). */
 data class ProcessEntry(val pid: Int, val name: String)
 
+/**
+ * The game running in the foreground (ps4debug-NG `0xBDDD0006`, console.c `console_foreground_app_handle`): the first
+ * `eboot.bin`, its CMD_PROC_INFO data, and the version from the title's `param.sfo` (`APP_VER` / `VERSION`, the larger).
+ */
+data class ForegroundApp(
+    val pid: Int,
+    val titleId: String,
+    val contentId: String,
+    val name: String,
+    /** "XX.YY" from param.sfo; null when the file could not be read. */
+    val appVersion: String?,
+)
+
 /** CMD_PROC_INFO response (188 bytes). */
 data class ProcessInfo(
     val pid: Int,
@@ -79,6 +92,22 @@ data class ServerCapabilities(
      */
     val attachPort: Boolean get() = isNg && CapabilityLevel.atLeast(capabilityLevel, CapabilityLevel.DEBUG_ATTACH_PORT)
 
+    /** `0xBDAACC04` bulk write with per-entry server read-back status (capability 1.0, PROTOCOL.md §2.2). */
+    val bulkWrite: Boolean get() = isNg && CapabilityLevel.atLeast(capabilityLevel, CapabilityLevel.BULK_WRITE)
+
+    /**
+     * CMD_PROC_WRITE answers CMD_SUCCESS only after the PS4 read the bytes back and they match (capability 1.1,
+     * proc.c `proc_write_mem_status`): the fresh read that verifies a write happens on the console.
+     */
+    val verifiedWrite: Boolean get() = isNg && CapabilityLevel.atLeast(capabilityLevel, CapabilityLevel.VERIFIED_WRITE)
+
+    /**
+     * Commands of the current ps4debug-NG release that older builds may lack: foreground app `0xBDDD0006`, stack walk
+     * `0xBDAA0023`, FS/GS base `0xBDBB000E`, Turbo REGIONS `0xBDAACC16`. An unknown command makes the payload drop
+     * the connection (server.c `cmd_handler` → error), so they are only sent to a build that guarantees them.
+     */
+    val ngExtras: Boolean get() = isNg && CapabilityLevel.atLeast(capabilityLevel, CapabilityLevel.NG_EXTRAS)
+
     companion object {
         val NONE = ServerCapabilities()
     }
@@ -88,6 +117,10 @@ data class ServerCapabilities(
 object CapabilityLevel {
     /** Level that adds the `debug_port` field of CMD_DEBUG_ATTACH. */
     const val DEBUG_ATTACH_PORT = "1.2"
+    const val BULK_WRITE = "1.0"
+    const val VERIFIED_WRITE = "1.1"
+    /** First level whose builds (upstream 14ce736 and later) carry every command listed at [ServerCapabilities.ngExtras]. */
+    const val NG_EXTRAS = "1.2"
 
     /** major * 1000 + minor, or null for anything that is not exactly `digits.digits`. */
     fun value(level: String?): Int? {

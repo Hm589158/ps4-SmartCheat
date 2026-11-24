@@ -10,6 +10,9 @@ object NgProtocol {
     const val CMD_BRANDING: Int = 0xBD000501.toInt()
 
     const val CMD_PROC_AUTH: Int = 0xBDAACCFF.toInt()
+    /** Foreground game (console.c `console_foreground_app_handle`), raw literal upstream. */
+    const val CMD_CONSOLE_FOREGROUND_APP: Int = 0xBDDD0006.toInt()
+    const val FOREGROUND_APP_RESPONSE_SIZE = 132
     const val AUTH_MAGIC: Int = 0xBB40E64D.toInt()
     /** Auth flag bit that unlocks the scan family. */
     const val AUTH_FLAG_SCAN = 0x2

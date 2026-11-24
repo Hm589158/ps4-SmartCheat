@@ -26,6 +26,7 @@ import com.ps4smartcheat.core.pointer.PointerChain
 import com.ps4smartcheat.core.watch.WatchRepository
 import com.ps4smartcheat.core.edit.MemoryEditor
 import com.ps4smartcheat.core.live.FreezeManager
+import com.ps4smartcheat.core.model.ForegroundApp
 import com.ps4smartcheat.core.model.MemoryRegion
 import com.ps4smartcheat.core.model.ProcessEntry
 import com.ps4smartcheat.core.model.ProcessInfo
@@ -52,6 +53,8 @@ data class SelectedProcess(
     val kind: ProcessKind = ProcessKind.OTHER,
     /** Set when the process is gone; its scan session and journal were discarded. */
     val exitedReason: String? = null,
+    /** Game version from the title's param.sfo as the PS4 reports it (ps4debug-NG foreground app); null if unknown. */
+    val appVersion: String? = null,
 ) {
     val exited: Boolean get() = exitedReason != null
     val pid: Int get() = entry.pid
@@ -244,17 +247,33 @@ class AppContainer(context: Context) {
         process?.let { log.event(EventLevel.INFO, EventCategory.PROCESS, "process selected", "pid" to it.pid, "name" to it.name, "title" to it.titleId, "kind" to it.kind.name) }
     }
 
-    /** Loads info + memory map and selects [details]. */
-    suspend fun selectDetails(details: ProcessDetails) {
+    /** Loads info + memory map and selects [details] (with the game version the PS4 reports for it, when it can). */
+    suspend fun selectDetails(details: ProcessDetails, foreground: ForegroundApp? = null) {
         val regions = backend.getMemoryRegions(details.pid)
-        select(SelectedProcess(details.entry, details.info, regions, details.kind))
+        val fg = foreground ?: foregroundApp()
+        select(SelectedProcess(details.entry, details.info, regions, details.kind, appVersion = fg?.takeIf { it.pid == details.pid }?.appVersion))
     }
 
-    /** Selects the running game when exactly one is detected. Read-only: nothing is written. */
+    /** The foreground game as ps4debug-NG reports it; null for other payloads or when the request fails. */
+    private suspend fun foregroundApp(): ForegroundApp? = try {
+        backend.foregroundApp()
+    } catch (e: BackendException) {
+        log.warn("Foreground game query failed: ${e.message}", EventCategory.PROCESS)
+        null
+    }
+
+    /**
+     * Selects the running game. ps4debug-NG names it directly (one request instead of the info of every process);
+     * otherwise the process list decides, when exactly one game is found. Read-only: nothing is written.
+     */
     suspend fun autoSelectGame(): ProcessDetails? = try {
-        GameDetector.pickGame(backend.listProcessDetails())?.also {
-            selectDetails(it)
-            log.notify("Detected game ${it.titleId ?: it.name} (pid ${it.pid}) — selected", EventCategory.PROCESS)
+        val fg = foregroundApp()
+        val details = fg?.let { f -> GameDetector.classify(ProcessEntry(f.pid, f.name.ifBlank { "eboot.bin" }), backend.getProcessInfo(f.pid)) }
+            ?: GameDetector.pickGame(backend.listProcessDetails())
+        details?.also {
+            selectDetails(it, fg)
+            val ver = fg?.takeIf { f -> f.pid == it.pid }?.appVersion?.let { v -> " v$v" }.orEmpty()
+            log.notify("Detected game ${it.titleId ?: it.name}$ver (pid ${it.pid}) — selected", EventCategory.PROCESS)
         }
     } catch (e: BackendException) {
         log.warn("Game detection failed: ${e.message}", EventCategory.PROCESS)
@@ -400,7 +419,8 @@ class AppContainer(context: Context) {
     /** [storeCheat] for several entries: all of them are written in one atomic write and verified, or none. */
     private suspend fun storeCheats(entries: List<CheatEntry>, profileId: String?, newProfileName: String, typedVersion: String, sel: SelectedProcess): com.ps4smartcheat.core.cheat.CheatProfile {
         // Store versions in GoldHEN form ("1.25" → "01.25"); anything else is kept as typed (checked at export).
-        val gameVersion = normalizedVersion(typedVersion)
+        // Left empty: the version the PS4 reports for the running game (param.sfo via ps4debug-NG), if any.
+        val gameVersion = normalizedVersion(typedVersion.ifBlank { sel.appVersion.orEmpty() })
         val profile = if (profileId != null) {
             cheats.profile(profileId) ?: throw IllegalArgumentException("The selected profile no longer exists — pick another one")
             cheats.upsertCheats(profileId, entries)

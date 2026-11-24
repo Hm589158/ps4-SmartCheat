@@ -382,6 +382,11 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
         }
     }
 
+    /** The version the PS4 reports for the running game of [p] (ps4debug-NG), in GoldHEN form; null if unknown. */
+    fun detectedVersion(p: CheatProfile): String? = c.selectedProcess.value
+        ?.takeIf { !it.exited && it.name == p.processName && (p.titleId == null || it.titleId == p.titleId) }
+        ?.appVersion?.let { c.normalizedVersion(it) }
+
     private fun runningTitle(p: CheatProfile) = c.selectedProcess.value?.takeIf { !it.exited && it.name == p.processName }?.titleId
 
     /** Live check for the export dialog (normalised title ID/version, file name, what is exported). Read-only. */
@@ -621,7 +626,7 @@ fun CheatsScreen() {
 private fun GoldHenExportForm(p: CheatProfile, vm: CheatsViewModel, onExport: (String) -> Unit, onDismiss: () -> Unit) {
     var gameName by remember(p.id) { mutableStateOf(p.name) }
     var titleId by remember(p.id) { mutableStateOf(p.titleId.orEmpty()) }
-    var version by remember(p.id) { mutableStateOf(p.gameVersion.orEmpty()) }
+    var version by remember(p.id) { mutableStateOf(p.gameVersion ?: vm.detectedVersion(p).orEmpty()) }
     var credits by remember(p.id) { mutableStateOf("") }
     val pre = vm.goldHenPreview(p, titleId, version, gameName)
     val mono = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)

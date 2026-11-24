@@ -41,7 +41,7 @@ fun GameHeader(sel: SelectedProcess, modifier: Modifier = Modifier) {
             Text(sel.name, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(8.dp))
             Text(
-                listOfNotNull("pid ${sel.pid}", sel.titleId).joinToString(" · "),
+                listOfNotNull("pid ${sel.pid}", sel.titleId, sel.appVersion?.let { "v$it" }).joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }

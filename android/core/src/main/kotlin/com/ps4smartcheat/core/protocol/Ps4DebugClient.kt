@@ -15,6 +15,7 @@ import com.ps4smartcheat.core.backend.ProtocolException
 import com.ps4smartcheat.core.backend.Traffic
 import com.ps4smartcheat.core.backend.WriteStatus
 import com.ps4smartcheat.core.model.ConsoleInfo
+import com.ps4smartcheat.core.model.ForegroundApp
 import com.ps4smartcheat.core.model.MemoryRegion
 import com.ps4smartcheat.core.model.ProcessEntry
 import com.ps4smartcheat.core.model.ProcessInfo
@@ -192,6 +193,15 @@ class Ps4DebugClient(
         send(header(P.CMD_PROC_INFO, body.size), body)
         expectSuccess(P.CMD_PROC_INFO, readStatus())
         parseProcessInfo(readExactly(P.PROC_INFO_RESPONSE_SIZE))
+    }
+
+    override suspend fun foregroundApp(): ForegroundApp? {
+        if (!capabilities.ngExtras) return null
+        return request("foreground app") {
+            send(header(NgProtocol.CMD_CONSOLE_FOREGROUND_APP, 0))
+            expectSuccess(NgProtocol.CMD_CONSOLE_FOREGROUND_APP, readStatus())
+            parseForegroundApp(readExactly(NgProtocol.FOREGROUND_APP_RESPONSE_SIZE))
+        }
     }
 
     override suspend fun getMemoryRegions(pid: Int): List<MemoryRegion> = request("memory map") {
@@ -644,6 +654,13 @@ class Ps4DebugClient(
                 offset = LE.i64(data, off + 48),
                 prot = LE.u16(data, off + 56),
             )
+        }
+
+        /** `{u32 pid; char titleid[16]; char contentid[64]; char name[40]; char app_ver[8]}`; null when pid is 0. */
+        fun parseForegroundApp(d: ByteArray): ForegroundApp? {
+            val pid = LE.i32(d, 0)
+            if (pid <= 0) return null
+            return ForegroundApp(pid, d.cString(4, 16), d.cString(20, 64), d.cString(84, 40), d.cString(124, 8).trim().ifEmpty { null })
         }
 
         fun parseProcessInfo(d: ByteArray): ProcessInfo = ProcessInfo(
