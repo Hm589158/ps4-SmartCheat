@@ -480,7 +480,7 @@ class AppJourneyTest {
         val coins = Address.format(DemoGame.COINS_ADDRESS)
         scrollTo("scannerList", "result-$coins")
         waitTag("result-$coins")
-        waitText("Chunked scan (Android)") // range modes are not offloaded to the PS4
+        waitText("Turbo Scan (PS4)") // ps4debug-NG compares "between" on the PS4 (inclusive, same result)
         shot("35_range_scan")
     }
 
