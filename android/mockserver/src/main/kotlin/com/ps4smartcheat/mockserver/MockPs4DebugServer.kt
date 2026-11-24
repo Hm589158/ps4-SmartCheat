@@ -199,6 +199,7 @@ class MockPs4DebugServer(
     val writeRequests = AtomicInteger()
     val foregroundRequests = AtomicInteger()
     val bulkWriteRequests = AtomicInteger()
+    val aobRequests = AtomicInteger()
 
     private fun readBack(p: Process, addr: Long, len: Int): ByteArray = ByteArray(len).also { b -> synchronized(lock) { copyOut(p, addr, b) } }
 
@@ -404,6 +405,45 @@ class MockPs4DebugServer(
                 // ps4debug-NG 1.1+: CMD_SUCCESS only when its own read-back matches (proc.c proc_write_mem_status).
                 if (ok && p != null && faults.brand != null && levelAtLeast(1, 1)) ok = readBack(p, addr, data.size).contentEquals(data)
                 status(out, if (faults.classicWriteStatus || ok) CMD_SUCCESS else CMD_ERROR)
+                return true
+            }
+            CMD_PROC_SCAN_AOB_MULTI -> {
+                // proc.c proc_scan_aob_multi_handle + aob_scan.h: the nth match of each pattern (0 if fewer).
+                if (faults.brand == null) return false
+                aobRequests.incrementAndGet()
+                val pid = body.int; val address = body.long; val length = body.int.toLong() and 0xFFFFFFFFL
+                body.get(); val blobLen = body.int
+                status(out, CMD_SUCCESS); out.flush()
+                val blob = ByteArray(blobLen).also { inp.readFully(it) }
+                val bb = ByteBuffer.wrap(blob).order(ByteOrder.LITTLE_ENDIAN)
+                val pats = ArrayList<Triple<Int, ByteArray, ByteArray>>()
+                var c = 0
+                while (c + 5 <= blobLen) {
+                    val nth = blob[c].toInt() and 0xFF
+                    val len = bb.getInt(c + 1)
+                    if (len <= 0 || c + 5 + 2 * len > blobLen) break
+                    pats += Triple(nth, blob.copyOfRange(c + 5, c + 5 + len), blob.copyOfRange(c + 5 + len, c + 5 + 2 * len))
+                    c += 5 + 2 * len
+                }
+                if (pats.isEmpty()) { status(out, CMD_DATA_NULL); return false }
+                status(out, CMD_SUCCESS)
+                val p = process(pid)
+                val mem = if (p != null) readBack(p, address, length.toInt()) else ByteArray(length.toInt())
+                val res = le(pats.size * 8)
+                for ((nth, pat, mask) in pats) {
+                    var count = 0
+                    var hit = 0L
+                    var j = 0
+                    while (j + pat.size <= mem.size) {
+                        if (pat.indices.all { k -> mask[k].toInt() != 1 || mem[j + k] == pat[k] }) {
+                            if (++count == nth) { hit = address + j; break }
+                        }
+                        j++
+                    }
+                    res.putLong(hit)
+                }
+                out.write(res.array())
+                status(out, CMD_SUCCESS)
                 return true
             }
             CMD_PROC_WRITE_MULTI -> {
@@ -1223,6 +1263,7 @@ class MockPs4DebugServer(
         const val CMD_CONSOLE_END = 0xBDDD0002.toInt()
         const val CMD_CONSOLE_FOREGROUND_APP = 0xBDDD0006.toInt()
         const val CMD_PROC_WRITE_MULTI = 0xBDAACC04.toInt()
+        const val CMD_PROC_SCAN_AOB_MULTI = 0xBDAA0502.toInt()
         const val CMD_BRANDING = 0xBD000501.toInt()
         const val CMD_PROC_AUTH = 0xBDAACCFF.toInt()
         const val CMD_SCAN_START = 0xBDAACC01.toInt()

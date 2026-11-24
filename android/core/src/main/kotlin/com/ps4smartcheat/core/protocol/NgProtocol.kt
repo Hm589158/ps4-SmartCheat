@@ -16,6 +16,14 @@ object NgProtocol {
     const val WRITE_MULTI_F_STATUS = 0x1
     const val WRITE_MULTI_MAX_COUNT = 0xFFFF
     const val WRITE_MULTI_MAX_ENTRY = 0x100000
+    /**
+     * Multi-pattern AOB search (proc.c `proc_scan_aob_multi_handle`, aob_scan.h): body `{u32 pid; u64 address;
+     * u32 length; u8 stop_flag; u32 patterns_length}`; each pattern `{u8 nth; u32 len; len bytes; len mask bytes
+     * (1 = compare)}`; reply: one u64 per pattern, its nth match or 0. (PROTOCOL.md describes a hit list; the source
+     * returns one address per pattern.)
+     */
+    const val CMD_PROC_SCAN_AOB_MULTI: Int = 0xBDAA0502.toInt()
+    const val SCAN_AOB_MULTI_PACKET_SIZE = 21
     /** Foreground game (console.c `console_foreground_app_handle`), raw literal upstream. */
     const val CMD_CONSOLE_FOREGROUND_APP: Int = 0xBDDD0006.toInt()
     const val FOREGROUND_APP_RESPONSE_SIZE = 132

@@ -106,6 +106,31 @@ class SessionValidatorTest {
         assertTrue(X86.signature(X86.decode(DemoGame.SPEND_CODE, 0)).contains("??"))
     }
 
+    /** On ps4debug-NG the PS4 searches its own code for the signature (AOB_MULTI): same answers, no code read here. */
+    @Test fun signaturesAreSearchedOnThePs4WithNg() = runBlocking {
+        server.faults.enableNg()
+        client.connect(ConnectOptions("127.0.0.1", server.port, readTimeoutMs = 3000))
+        val regions = client.getMemoryRegions(DemoGame.PID)
+        val patch = patchEntry(client.readMemory(DemoGame.PID, DemoGame.SUB_ONE, CodePatchPlanner.WINDOW_BYTES), regions)
+        val moved = DemoGame.SPEND_ROUTINE + 0x100
+        val code = DemoGame.SPEND_CODE.copyOf()
+        code[3] = 0xE0.toByte(); code[12] = 0xE0.toByte()
+        server.poke(DemoGame.PID, moved, code)
+        server.poke(DemoGame.PID, DemoGame.SPEND_ROUTINE, ByteArray(16) { 0xCC.toByte() })
+        val profile = CheatProfile("p", "Demo", "MOCK00001", "01.02", "eboot.bin", cheats = listOf(patch))
+        val reads = server.readRequests.get()
+        val item = SessionValidator.validate(client, DemoGame.PID, regions, profile = profile).items.single()
+        assertEquals(Validity.MOVED, item.validity)
+        assertEquals(0x2106L, item.suggestedOffset)
+        assertTrue(server.aobRequests.get() >= 1)
+        assertTrue("only the patch bytes are read, not the code", server.readRequests.get() - reads <= 2)
+        // A second copy makes it ambiguous.
+        server.poke(DemoGame.PID, moved + 0x200, code)
+        val twice = SessionValidator.validate(client, DemoGame.PID, regions, profile = profile).items.single()
+        assertEquals(Validity.INVALID, twice.validity)
+        assertTrue(twice.detail, twice.detail.contains("2+ places"))
+    }
+
     @Test fun pointerCandidatesAreRankedByHowOftenTheySurviveRestarts() = runBlocking {
         // Two good chains reach the object through different static slots; one bad chain points elsewhere.
         val good1 = PointerChain(ModuleRef("eboot.bin", 0x100400), listOf(0x10))

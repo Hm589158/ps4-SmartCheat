@@ -87,6 +87,12 @@ interface DebugBackend {
      */
     suspend fun writeMany(pid: Int, entries: List<Pair<Long, ByteArray>>): List<WriteStatus>? = null
 
+    /**
+     * The [AobQuery.nth] match of each query in `[start, start + length)` of [pid], searched on the PS4 in one pass
+     * (ps4debug-NG `CMD_PROC_SCAN_AOB_MULTI`, 6 threads); 0 where there are fewer matches. Null when unsupported.
+     */
+    suspend fun findPatterns(pid: Int, start: Long, length: Long, queries: List<AobQuery>): LongArray? = null
+
     /** The game in the foreground, when the payload can tell (ps4debug-NG); null otherwise or when there is none. */
     suspend fun foregroundApp(): com.ps4smartcheat.core.model.ForegroundApp? = null
 
@@ -98,6 +104,14 @@ interface DebugBackend {
 
     /** Milliseconds since the last completed request (for idle detection). */
     fun idleMillis(): Long = 0
+}
+
+/** A byte pattern for [DebugBackend.findPatterns]: bytes where [fixed] is set must equal [values]; others are wildcards. */
+class AobQuery(val values: ByteArray, val fixed: BooleanArray, val nth: Int) {
+    init {
+        require(values.isNotEmpty() && values.size == fixed.size) { "pattern and mask differ in length" }
+        require(nth in 1..255) { "nth must be 1..255 (u8 on the wire)" }
+    }
 }
 
 data class Traffic(val bytesIn: Long, val bytesOut: Long) {

@@ -1,5 +1,6 @@
 package com.ps4smartcheat.core.protocol
 
+import com.ps4smartcheat.core.backend.AobQuery
 import com.ps4smartcheat.core.backend.BackendException
 import com.ps4smartcheat.core.backend.CommandFailedException
 import com.ps4smartcheat.core.backend.ConnectionInterruptedException
@@ -193,6 +194,30 @@ class Ps4DebugClient(
         send(header(P.CMD_PROC_INFO, body.size), body)
         expectSuccess(P.CMD_PROC_INFO, readStatus())
         parseProcessInfo(readExactly(P.PROC_INFO_RESPONSE_SIZE))
+    }
+
+    override suspend fun findPatterns(pid: Int, start: Long, length: Long, queries: List<AobQuery>): LongArray? {
+        if (!capabilities.ngExtras || !capabilities.scanAuthorized || queries.isEmpty()) return null
+        if (length <= 0 || length > 0xFFFF_FFFFL) return null // u32 length on the wire
+        val blob = java.io.ByteArrayOutputStream()
+        for (q in queries) {
+            blob.write(q.nth)
+            blob.write(LE.buffer(4).putInt(q.values.size).array())
+            blob.write(q.values)
+            blob.write(ByteArray(q.fixed.size) { if (q.fixed[it]) 1 else 0 })
+        }
+        val data = blob.toByteArray()
+        return exclusive("pattern search on PS4", serverScanTimeoutMs) { w ->
+            val body = LE.buffer(NgProtocol.SCAN_AOB_MULTI_PACKET_SIZE).putInt(pid).putLong(start).putInt(length.toInt())
+                .put(0).putInt(data.size).array()
+            w.send(w.header(NgProtocol.CMD_PROC_SCAN_AOB_MULTI, body.size), body)
+            w.expectSuccess(NgProtocol.CMD_PROC_SCAN_AOB_MULTI, w.readU32())
+            w.send(data)
+            w.expectSuccess(NgProtocol.CMD_PROC_SCAN_AOB_MULTI, w.readU32())
+            val out = w.readExactly(queries.size * 8)
+            w.expectSuccess(NgProtocol.CMD_PROC_SCAN_AOB_MULTI, w.readU32())
+            LongArray(queries.size) { LE.i64(out, it * 8) }
+        }
     }
 
     override suspend fun foregroundApp(): ForegroundApp? {

@@ -116,15 +116,18 @@ object SessionValidator {
                 val sig = c.signature?.takeIf { it.isNotBlank() }
                     ?: return ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.INVALID, "$why; no signature saved", address)
                 val code = regions.filter { (it.name == module.name || ModuleResolver.sameModule(it.name, module.name)) && it.isExecutable && it.isReadable }
-                val hits = PatternSearch.search(backend, pid, code, BytePattern.hex(sig), maxHits = 3).hits
+                val pattern = BytePattern.hex(sig)
+                // On ps4debug-NG the PS4 searches its own code (first two matches); otherwise the code is read here.
+                val hits = PatternSearch.firstTwoOnPs4(backend, pid, code, pattern)
+                    ?: PatternSearch.search(backend, pid, code, pattern, maxHits = 2).hits.map { it.address }
                 when (hits.size) {
                     0 -> ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.INVALID, "$why; signature not found", address)
                     1 -> ValidationItem(
                         ItemKind.CODE_PATCH, c.name, Validity.MOVED,
-                        "$why; signature found at ${module.name}+0x${java.lang.Long.toHexString(hits[0].address - base).uppercase()} — re-create the patch there",
-                        hits[0].address, hits[0].address - base,
+                        "$why; signature found at ${module.name}+0x${java.lang.Long.toHexString(hits[0] - base).uppercase()} — re-create the patch there",
+                        hits[0], hits[0] - base,
                     )
-                    else -> ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.INVALID, "$why; signature matches ${hits.size}+ places (ambiguous)", address)
+                    else -> ValidationItem(ItemKind.CODE_PATCH, c.name, Validity.INVALID, "$why; signature matches 2+ places (ambiguous)", address)
                 }
             }
         }

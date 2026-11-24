@@ -1,5 +1,6 @@
 package com.ps4smartcheat.core.tools
 
+import com.ps4smartcheat.core.backend.AobQuery
 import com.ps4smartcheat.core.backend.DebugBackend
 import com.ps4smartcheat.core.model.MemoryRegion
 import com.ps4smartcheat.core.scan.ProgressListener
@@ -20,6 +21,9 @@ class BytePattern private constructor(
     val description: String,
 ) {
     val length: Int get() = values.size
+
+    /** Whole-byte wildcards only (no nibble wildcards, no case-insensitive text): searchable on the PS4. */
+    val wholeBytes: Boolean get() = alt == null && masks.all { it.toInt() == 0 || it.toInt() == -1 }
 
     fun matchesAt(buf: ByteArray, off: Int): Boolean {
         for (i in values.indices) {
@@ -100,6 +104,25 @@ data class PatternSearchResult(val pattern: String, val hits: List<PatternHit>, 
  * regions. Runs on Android (no server-side pattern command is used).
  */
 object PatternSearch {
+    /**
+     * The first two matches of [pattern] in [regions] (address order), searched on the PS4 (ps4debug-NG AOB_MULTI:
+     * the 1st and 2nd match in one pass per region) instead of reading the regions over the network. Null when the
+     * payload cannot, or the pattern has nibble wildcards / case-insensitive text.
+     */
+    suspend fun firstTwoOnPs4(backend: DebugBackend, pid: Int, regions: List<MemoryRegion>, pattern: BytePattern): List<Long>? {
+        if (!pattern.wholeBytes) return null
+        val fixed = BooleanArray(pattern.length) { pattern.masks[it].toInt() != 0 }
+        val queries = listOf(AobQuery(pattern.values, fixed, 1), AobQuery(pattern.values, fixed, 2))
+        val hits = ArrayList<Long>()
+        for (r in regions.filter { it.isValid && it.isReadable && it.size >= pattern.length }.sortedBy { it.start }) {
+            coroutineContext.ensureActive()
+            val found = backend.findPatterns(pid, r.start, r.size, queries) ?: return null
+            hits += found.filter { it != 0L }
+            if (hits.size >= 2) break
+        }
+        return hits.take(2)
+    }
+
     suspend fun search(
         backend: DebugBackend,
         pid: Int,
