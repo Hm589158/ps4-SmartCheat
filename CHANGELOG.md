@@ -2,6 +2,35 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.14
+
+Uses ps4debug-NG features the app did not use yet (checked in its source, commit 14ce736). Commands newer than the
+classic set are only sent to payloads whose capability level guarantees them: an unknown command makes ps4debug-NG
+drop the connection.
+
+### Faster scans
+- **Unknown initial value on the PS4:** the snapshot is kept on the console (Turbo Phase B) instead of copying all game
+  memory to the phone; increased / decreased / changed / exact refines narrow it there. A refine the PS4 cannot run
+  on such a snapshot says so instead of answering from nothing.
+- Turbo also runs **bigger / smaller than and between** first scans, and **increased / decreased by** refines, for
+  integers; Float/Double bigger / smaller too. Same results as the phone (tests compare both).
+
+### Faster, safer writes
+- **Writes checked on the PS4:** ps4debug-NG 1.1+ reads every written value back on the console and compares it, so
+  the app no longer sends its own extra read: each write takes one round trip less.
+- **Bulk writes:** frozen values are written in one request per game per tick; value cheats with several parts in one
+  request. Code parts (a cave and its jump) still go one at a time in their safe order.
+
+### Game detection and tools
+- The running game, its title ID and its **version** (from param.sfo) come from one ps4debug-NG request. The version
+  shows in the game header, fills an empty version when a cheat is saved and pre-fills the GoldHEN export.
+- After a game update the cheat validator finds a moved code signature **on the PS4** (one pass, 1st and 2nd match)
+  instead of reading the game's code over the network.
+- Optional **notification on the PS4** ("SmartCheat: <cheat> ON/OFF") when a cheat or injection is switched
+  (Settings → Connection, off by default).
+
+All of it is tested against the simulated server; none of it has been measured on a PS4 yet.
+
 ## 1.0.13
 
 ### Faster Float and Double scans

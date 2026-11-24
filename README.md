@@ -117,7 +117,9 @@ You can also build it from source with the project's `build.sh`, which produces 
 
 **🔎 Fast scanning**
 - **Turbo Scan** and **server-side scan** run on the PS4. The app picks them automatically and falls back to scanning on
-  the phone ([benchmark](docs/PERFORMANCE.md))
+  the phone ([benchmark](docs/PERFORMANCE.md)). Float/Double searches and *unknown initial value* (a snapshot kept on
+  the PS4) run there too, with the same results as the phone
+- Writes are read back and checked **on the PS4** itself, and several values go in one request
 - Int8 – Int64, Float, Double · exact, bigger/smaller, between, unknown initial, increased/decreased (by),
   changed/unchanged
 - Byte-pattern (AOB, `??` wildcards) and text search

@@ -7,7 +7,7 @@ The classic ps4debug payload only works in an untested compatibility mode (Andro
 
 **Every firmware ps4debug-NG supports.** The app has no firmware-specific code: it only talks to ps4debug-NG, which
 does all firmware-dependent work on the console. ps4debug-NG lists 39 versions (README "Supported firmwares", commit
-`8be828f`) and refuses to install on others:
+`14ce736`) and refuses to install on others:
 
 | Major | Versions |
 |---|---|

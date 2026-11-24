@@ -22,8 +22,8 @@ Checking the level first matters: ps4debug-NG attaches to the game *before* conn
 that fails can leave the game attached until it is restarted. With the check, an old payload never gets an attach
 request it cannot complete. Settings → Connection diagnostics shows the level ("watchpoints ready").
 
-**Status:** the pull request (commits `5a19d63`, `e5ce2bf`) is **not merged** into the official ps4debug-NG yet
-(upstream is still `8be828f`, v1.3.4). Load a payload built from that branch.
+**Status:** merged into the official ps4debug-NG (upstream commits `00018a4`, `2525cb7`; capability level 1.2 from
+`14ce736`). Any current build supports it.
 
 If attaching still fails with level 1.2 (e.g. phone and PS4 on different networks), the payload may already be
 attached: **restart the game** before trying again.

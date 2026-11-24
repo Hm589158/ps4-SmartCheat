@@ -11,7 +11,7 @@ Only the commands listed under "Used by PS4 SmartCheat" are sent by the app.
 | Source | What was used |
 |---|---|
 | `GoldHEN/ps4debug` | README only (repository ships `ps4debug.bin`, no source). Lists FW 11.00 as supported, v1.1.19. |
-| `Pharaoh2k/ps4debug-NG` | `debugger/include/protocol.h`, `proc.h`, `debug.h`, `debugger/source/server.c`, `proc.c`, `assemble.c`, `debug.c`, `fw.c`, `console.c`, `PROTOCOL.md` (v1.3.4, commit `8be828f`) |
+| `Pharaoh2k/ps4debug-NG` | `debugger/include/protocol.h`, `proc.h`, `debug.h`, `debugger/source/server.c`, `proc.c`, `assemble.c`, `debug.c`, `fw.c`, `console.c`, `scan_turbo.c`, `scan_compare_simd.c`, `aob_scan.h`, `capability.h`, `PROTOCOL.md` (v1.3.4, commit `14ce736`) |
 | `avan06/PS4CheaterNeo` | `common/ps4dbg/libdebug/PS4DBG*.cs` (client library derived from jogolden/ps4debug), `Process.cs`, `Main.cs`, `CheatJson.cs`, `SectionTool.cs` |
 | `GoldHEN/GoldHEN_Cheat_Repository` | 1881 JSON cheat files (schema survey) |
 | `GoldHEN/GoldHEN_Plugins_SDK` | headers listed; not needed for the MVP (no console-side component yet) |
@@ -40,14 +40,30 @@ Only the commands listed under "Used by PS4 SmartCheat" are sent by the app.
 | `CMD_PROC_MAPS` | `0xBDAA0004` | `u32 pid` | status; `u32 n`; n × `{char name[32]; u64 start; u64 end; u64 offset; u16 prot}` (**58 B**) |
 | `CMD_PROC_INFO` | `0xBDAA000A` | `u32 pid` | status; `{u32 pid; char name[40]; char path[64]; char titleid[16]; char contentid[64]}` (188 B) |
 | `CMD_CONSOLE_END` | `0xBDDD0002` | none | none; server closes the client |
+| bulk write (NG ≥ 1.0) | `0xBDAACC04` | `u32 pid, u32 count, u32 flags=1` | status (ready); client sends count × `{u64 addr; u32 len; bytes}`; `count` status bytes (0 ok, 1 invalid, 3 mismatch, 4 r/w failure); final status |
+| foreground app (NG ≥ 1.2) | `0xBDDD0006` | none | status; `{u32 pid; char titleid[16]; char contentid[64]; char name[40]; char app_ver[8]}` (132 B), all zero without a game |
+| `CMD_CONSOLE_NOTIFY` (NG) | `0xBDDD0004` | `u32 type (222), u32 len` + NUL-terminated text, no ack in between | status |
+| `CMD_PROC_SCAN_AOB_MULTI` (NG ≥ 1.2, auth) | `0xBDAA0502` | `u32 pid, u64 addr, u32 len, u8 stop=0, u32 blobLen` | status (ready); client sends patterns `{u8 nth; u32 n; n bytes; n mask bytes (1 = compare)}`; status; one `u64` per pattern (its nth match, 0 if fewer); status |
 
 Notes (verified in source):
 
 * `CMD_PROC_READ` **never reports read failures**: the server zero-fills its 64 KiB buffer and ignores the
   `sys_proc_rw` result. Unmapped memory reads as zeros. The app only reads inside mapped, readable regions.
-* `CMD_PROC_WRITE` in ps4debug-NG ≥ capability 1.1 verifies by read-back and returns `CMD_ERROR` on mismatch
-  (connection stays open). The classic server's behaviour could not be inspected (GoldHEN ships only a binary),
-  so the app **always** verifies writes with its own fresh `CMD_PROC_READ`.
+* `CMD_PROC_WRITE` in ps4debug-NG ≥ capability 1.1 reads the bytes back on the PS4 and answers `CMD_SUCCESS` only when
+  they match (`proc.c` `proc_write_mem_status`; `CMD_ERROR` otherwise, connection kept). That read-back is the fresh
+  read that verifies the write, so with capability ≥ 1.1 the app does not send a second `CMD_PROC_READ`
+  (`WriteStatus.VerifiedOnConsole`). Classic servers and older NG builds (behaviour not inspectable / not guaranteed)
+  are verified with the app's own fresh read as before.
+* **Capability gating.** An unknown command makes the payload drop the connection (`server.c` `cmd_handler` → `goto
+  error`). New commands are sent only when `CMD_BRANDING`'s capability level guarantees them: bulk write ≥ 1.0
+  (PROTOCOL.md: "Capability 1.0 introduced 0xBDAACC04"), verified write ≥ 1.1, and foreground app / AOB_MULTI ≥ 1.2
+  (builds from `14ce736` on, which contain them).
+* Bulk write is **non-atomic** upstream (a failed entry does not stop the rest). The app batches only writes to
+  non-executable memory (value cheats, the freeze loop); code parts (an injection's cave and jump) are written one at a
+  time in their safe order.
+* `CMD_PROC_SCAN_AOB` / `AOB_MULTI` return **one address per pattern** (the nth match, `aob_scan.h` `aob_merge`), not
+  the hit list NG's `PROTOCOL.md` describes. The app asks for the 1st and 2nd match of a code signature in one pass to
+  tell unique / not found / ambiguous (cheat validator after a game update). Whole-byte wildcards only.
 * ps4debug-NG's `PROTOCOL.md` describes map entries as 64 bytes with `prot` as `u64`; the actual source
   (`proc.h`, `struct proc_vm_map_entry`) and the PS4CheaterNeo client use **58 bytes** with `u16 prot`. The source wins.
 * `prot` uses FreeBSD `VM_PROT_*`: READ=1, WRITE=2, EXECUTE=4.
@@ -67,7 +83,7 @@ Notes (verified in source):
   **reopens the socket** so a late reply can never desynchronise the stream. Firmware is shown as "unknown" then.
   It can be disabled in Settings.
 * The firmware list the Connection screen compares with (39 versions, 5.05–14.02) is ps4debug-NG's README
-  "Supported firmwares" at commit `8be828f` (`core.protocol.Ps4Firmware`); ps4debug-NG rejects other firmware before it
+  "Supported firmwares" at commit `14ce736` (`core.protocol.Ps4Firmware`); ps4debug-NG rejects other firmware before it
   installs, so the app itself needs no firmware-specific handling.
 
 ## Server-side scanning (ps4debug-NG) — verified in source
@@ -127,6 +143,14 @@ Detection on connect (each probe uses a short timeout; on timeout/EOF the socket
   **second connection** because the scanning connection is busy; the session is indeterminate afterwards and is ended.
 * The resident set lives per connection slot: a reconnect loses it (the client tracks a connection epoch and
   falls back to local results).
+* **Phase B snapshot (unknown initial value)**, `TURBO_START` with `TS_SNAPSHOT (0x4) | TS_SNAPSHOT_SEGMENTS |
+  TS_SNAPSHOT_INCLUDE_ZEROS (0x8)`, `compareType` 11, `lenData` 0 (`scan_turbo.c` `fs_snapshot_create`): →
+  `CMD_SUCCESS`, `CMD_SUCCESS`; client sends the segment list; plan `{u64 slots; u64 bytes}`; progress `u64 bytes
+  done` per window …; sentinel; summary `{u32 ok; u64 survivors}`; `CMD_SUCCESS`. Zeros are kept like the Android
+  snapshot. Refines are ordinary `TURBO_COUNT`s; on a snapshot session the server streams progress `u64`s before the
+  sentinel (`fs_snapshot_rescan`), and each surviving slot keeps its value of the previous step. Used when CAPS reports
+  `TSE_SNAPSHOT | TSE_SNAPSHOT_SEGMENTS`. A refine the PS4 cannot run on a snapshot session fails with a message (there
+  is no local list to fall back to).
 
 ### Value semantics
 
@@ -147,8 +171,14 @@ finds (`core.scan.FloatRange`, `ServerScanner.query`):
 * Changed / unchanged: `compareType` 9 / 10 with the same-width **integer** `valueType` (5 or 7), so the raw bits are
   compared like on Android (0.0 → -0.0 is a change, an unchanged NaN is unchanged). COUNT only checks that the value
   length matches the resident session's, and takes the value type per request.
-* Not offloaded (Android, from the fetched list): increased/decreased **by** (NG adds exactly, the app rounds),
-  bigger/smaller than, unaligned scans, and the iterative server scan.
+* Bigger / smaller than: the inclusive "between" from just above / below the value to ±Infinity (`FloatRange.above/
+  below`), which the matcher's `>` / `<` accept too.
+* Not offloaded (Android, from the fetched list): increased/decreased **by** for floats (NG adds exactly, the app
+  rounds), unaligned scans, and floats on the iterative server scan.
+
+Integers on Turbo additionally take, in START and COUNT: bigger / smaller than (`compareType` 2 / 3, typed signed
+compare), between (4, inclusive, `low ‖ high`) — all in `proc_scan_compareValues` — and increased / decreased **by**
+(6 / 8, `memory == previous ± value` at the type width in `scan_point_compare`, the same wrap-around as the app).
 
 ### Classic `CMD_PROC_SCAN 0xBDAA0009` — not used
 
@@ -272,8 +302,17 @@ writes, single-stepping and FS/GS writes are not used.
 ## Not implemented on purpose
 
 Kernel read/write (`0xBDCC…`), RPC/ELF loading, protection changes (`CMD_PROC_PROTECT`), software breakpoints
-(`CMD_DEBUG_SET_BREAKPOINT`, which writes `int3` into the code), register writes, server-side AOB scans (`0xBDAA0501/0502`; pattern search runs on the phone), console
-reboot, Turbo snapshot (Phase B) scans.
+(`CMD_DEBUG_SET_BREAKPOINT`, which writes `int3` into the code), register and FS/GS-base writes, console reboot.
+
+Verified but not used:
+* `CMD_PROC_SCAN_AOB 0xBDAA0501`: one address per call (the nth match); `AOB_MULTI` does the same for many patterns.
+  The pattern-search *tool* lists up to 10,000 hits, which neither can return, so it reads on the phone.
+* `0xBDBB000E` FS/GS base: a failing kernel read answers `CMD_ERROR` **and drops the connection** (`debug.c`
+  returns 1), which would end a debug session for a display value.
+* `CMD_PROC_READ_STACK 0xBDAA0023`: walks only the saved-`rbp` chain; the app's unwinder already follows that chain
+  and also finds callers in code built without frame pointers.
+* Turbo `REGIONS 0xBDAACC16` / `CONFIG 0xBDAACC15`, `TS_PARALLEL_COMPARE` (applies only to non-resident streaming
+  scans, which the app does not use).
 
 ## Limits applied by the client
 

@@ -4,10 +4,13 @@
   `ANDROID_SDK_ROOT` or `local.properties`); `-PskipAndroid=true` excludes it explicitly.
 * Run `./gradlew :core:test` before every commit. All protocol/scanner/editor logic belongs in `:core`
   (no Android imports) so it stays JVM-testable against `:mockserver`.
-* Never add protocol commands or packet layouts that are not verified in upstream source; document them in
+* Never add protocol commands or packet layouts that are not verified in upstream source (reference checkout:
+  ps4debug-NG `14ce736`); gate commands newer than the classic set on the capability level (an unknown command drops
+  the connection); document them in
   `docs/PROTOCOL.md` with the source file.
 * Never report hardware results that were not observed. Mock results are labelled as such.
-* Safety invariants: every write confirmed + verified by fresh read; no automatic re-application of cheats;
+* Safety invariants: every write confirmed + verified by fresh read (on ps4debug-NG capability ≥ 1.1 the PS4's own
+  read-back is that read: `WriteStatus.VerifiedOnConsole`); no automatic re-application of cheats;
   local-network-only hosts by default; no kernel memory editing; no telemetry. Memory editing (and writes to code /
   system processes) is enabled by default by the project owner's decision; it can be switched off for a read-only
   session, and each write still needs confirmation.
