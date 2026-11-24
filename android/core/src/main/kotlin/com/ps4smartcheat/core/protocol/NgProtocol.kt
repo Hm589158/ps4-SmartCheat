@@ -24,6 +24,9 @@ object NgProtocol {
      */
     const val CMD_PROC_SCAN_AOB_MULTI: Int = 0xBDAA0502.toInt()
     const val SCAN_AOB_MULTI_PACKET_SIZE = 21
+    const val CMD_CONSOLE_NOTIFY: Int = 0xBDDD0004.toInt()
+    const val NOTIFY_TYPE_GENERIC = 222
+    const val NOTIFY_MAX_CHARS = 120
     /** Foreground game (console.c `console_foreground_app_handle`), raw literal upstream. */
     const val CMD_CONSOLE_FOREGROUND_APP: Int = 0xBDDD0006.toInt()
     const val FOREGROUND_APP_RESPONSE_SIZE = 132

@@ -200,6 +200,8 @@ class MockPs4DebugServer(
     val foregroundRequests = AtomicInteger()
     val bulkWriteRequests = AtomicInteger()
     val aobRequests = AtomicInteger()
+    /** CMD_CONSOLE_NOTIFY messages received (type, text). */
+    val notifications = CopyOnWriteArrayList<Pair<Int, String>>()
 
     private fun readBack(p: Process, addr: Long, len: Int): ByteArray = ByteArray(len).also { b -> synchronized(lock) { copyOut(p, addr, b) } }
 
@@ -474,6 +476,14 @@ class MockPs4DebugServer(
                 return true
             }
             CMD_CONSOLE_END -> return false
+            CMD_CONSOLE_NOTIFY -> {
+                // console.c console_notify_handle: {u32 type; u32 length} then the text, then CMD_SUCCESS.
+                val type = body.int; val len = body.int
+                val text = ByteArray(len).also { inp.readFully(it) }
+                notifications += type to String(text, Charsets.UTF_8).trimEnd('\u0000')
+                status(out, CMD_SUCCESS)
+                return true
+            }
             CMD_CONSOLE_FOREGROUND_APP -> {
                 if (faults.brand == null) return false // unknown to classic servers: they drop the connection
                 foregroundRequests.incrementAndGet()
@@ -1264,6 +1274,7 @@ class MockPs4DebugServer(
         const val CMD_CONSOLE_FOREGROUND_APP = 0xBDDD0006.toInt()
         const val CMD_PROC_WRITE_MULTI = 0xBDAACC04.toInt()
         const val CMD_PROC_SCAN_AOB_MULTI = 0xBDAA0502.toInt()
+        const val CMD_CONSOLE_NOTIFY = 0xBDDD0004.toInt()
         const val CMD_BRANDING = 0xBD000501.toInt()
         const val CMD_PROC_AUTH = 0xBDAACCFF.toInt()
         const val CMD_SCAN_START = 0xBDAACC01.toInt()

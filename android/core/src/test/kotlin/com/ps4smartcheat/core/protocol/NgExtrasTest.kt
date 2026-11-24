@@ -170,4 +170,17 @@ class NgExtrasTest {
             scope.cancel()
         }
     }
+
+    @Test fun notificationOnThePs4() = runBlocking {
+        connect { it.enableNg() }
+        assertTrue(client.notify("SmartCheat: Infinite health ON"))
+        assertEquals(listOf(222 to "SmartCheat: Infinite health ON"), server.notifications.toList())
+        client.getProcesses() // the connection is kept
+    }
+
+    @Test fun noNotificationToOtherPayloads() = runBlocking {
+        connect { it.closeOnUnknownCommand = true }
+        assertTrue(!client.notify("x"))
+        assertTrue(server.notifications.isEmpty())
+    }
 }

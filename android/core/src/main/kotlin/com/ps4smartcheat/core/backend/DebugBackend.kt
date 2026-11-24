@@ -93,6 +93,9 @@ interface DebugBackend {
      */
     suspend fun findPatterns(pid: Int, start: Long, length: Long, queries: List<AobQuery>): LongArray? = null
 
+    /** Shows [text] as a notification on the PS4 (CMD_CONSOLE_NOTIFY); false when the payload is not known to support it. */
+    suspend fun notify(text: String): Boolean = false
+
     /** The game in the foreground, when the payload can tell (ps4debug-NG); null otherwise or when there is none. */
     suspend fun foregroundApp(): com.ps4smartcheat.core.model.ForegroundApp? = null
 

@@ -319,6 +319,7 @@ class CheatsViewModel(private val c: AppContainer) : ViewModel() {
                 if (r.ok) {
                     _message.value = "\"$name\" ${if (t.enable) "enabled" else "disabled"}: ${r.message}"
                     c.log.info("GoldHEN mod $name ${if (t.enable) "on" else "off"}")
+                    c.notifyPs4("$name ${if (t.enable) "ON" else "OFF"}")
                 } else {
                     _error.value = "\"$name\": ${r.message} — use Undo in the editor or switch it again"
                 }

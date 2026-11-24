@@ -220,6 +220,22 @@ class Ps4DebugClient(
         }
     }
 
+    /**
+     * CMD_CONSOLE_NOTIFY (console.c `console_notify_handle`): `{u32 messageType; u32 length}` and the NUL-terminated
+     * text in one go (no ack in between), then CMD_SUCCESS. Type 222 is the generic icon the payload itself uses.
+     */
+    override suspend fun notify(text: String): Boolean {
+        if (!capabilities.isNg) return false
+        val bytes = text.take(NgProtocol.NOTIFY_MAX_CHARS).toByteArray(Charsets.UTF_8) + 0
+        return request("PS4 notification", idempotent = false) {
+            val body = LE.buffer(8).putInt(NgProtocol.NOTIFY_TYPE_GENERIC).putInt(bytes.size).array()
+            send(header(NgProtocol.CMD_CONSOLE_NOTIFY, body.size), body)
+            send(bytes)
+            expectSuccess(NgProtocol.CMD_CONSOLE_NOTIFY, readStatus())
+            true
+        }
+    }
+
     override suspend fun foregroundApp(): ForegroundApp? {
         if (!capabilities.ngExtras) return null
         return request("foreground app") {

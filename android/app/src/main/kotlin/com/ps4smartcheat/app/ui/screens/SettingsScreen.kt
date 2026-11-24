@@ -112,6 +112,10 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
                 "Auto-select the running game", s.autoSelectGame, { v -> vm.update { it.copy(autoSelectGame = v) } },
                 "After connecting, and when the same game restarts (matched by title ID and path).",
             )
+            LabeledSwitch(
+                "Notify on the PS4", s.ps4Notifications, { v -> vm.update { it.copy(ps4Notifications = v) } },
+                "Shows \"SmartCheat: <cheat> ON/OFF\" on the TV when a cheat is switched (ps4debug-NG).",
+            )
             LabeledSwitch("Query firmware version", s.queryFirmware, { v -> vm.update { it.copy(queryFirmware = v) } }, "Uses CMD_FW_VERSION when the payload supports it.")
             LabeledSwitch(
                 "Allow non-local addresses", s.allowNonLocalHosts,

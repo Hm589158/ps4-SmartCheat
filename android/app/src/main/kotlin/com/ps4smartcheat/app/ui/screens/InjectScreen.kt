@@ -397,7 +397,7 @@ class InjectViewModel(private val c: AppContainer) : ViewModel() {
                 // OFF verified: the cave can no longer reach the flag, so its memory is freed (a new one at 0 next ON).
                 if (!pending.enable && r.ok && updated.flag != null) releaseFlag(updated, updated.flag)
                 c.log.info("Code injection ${if (pending.enable) "on" else "off"} at ${Address.format(a.injection.hookAddress)}: ${r.message}")
-                if (r.ok) _message.value = r.message else _error.value = r.message
+                if (r.ok) { _message.value = r.message; c.notifyPs4("${a.name} ${if (pending.enable) "ON" else "OFF"}") } else _error.value = r.message
             }
             is InjectConfirm.Allocate -> launchBusy {
                 val sel = c.selectedProcess.value ?: return@launchBusy

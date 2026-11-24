@@ -254,6 +254,14 @@ class AppContainer(context: Context) {
         select(SelectedProcess(details.entry, details.info, regions, details.kind, appVersion = fg?.takeIf { it.pid == details.pid }?.appVersion))
     }
 
+    /** "SmartCheat: [what]" as a PS4 notification, when enabled in Settings. Best effort, in the background. */
+    fun notifyPs4(what: String) {
+        if (!settings.value.ps4Notifications) return
+        appScope.launch(com.ps4smartcheat.core.backend.BackgroundRequest) {
+            try { backend.notify("SmartCheat: $what") } catch (e: BackendException) { log.warn("PS4 notification failed: ${e.message}") }
+        }
+    }
+
     /** The foreground game as ps4debug-NG reports it; null for other payloads or when the request fails. */
     private suspend fun foregroundApp(): ForegroundApp? = try {
         backend.foregroundApp()

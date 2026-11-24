@@ -40,6 +40,8 @@ data class AppSettings(
     val maxRegionMiB: Int = 0,
     /** Select the running game automatically after connecting / when it restarts. */
     val autoSelectGame: Boolean = true,
+    /** Show a notification on the PS4 when a cheat is switched ON/OFF (ps4debug-NG). */
+    val ps4Notifications: Boolean = false,
 ) {
     fun connectOptions() = ConnectOptions(
         host = host, port = port, connectTimeoutMs = connectTimeoutMs, readTimeoutMs = readTimeoutMs,
@@ -103,6 +105,7 @@ class SettingsStore(context: Context) {
             monitorIntervalMs = prefs.getInt("monitorIntervalMs", d.monitorIntervalMs),
             maxRegionMiB = prefs.getInt("maxRegionMiB", d.maxRegionMiB),
             autoSelectGame = prefs.getBoolean("autoSelectGame", d.autoSelectGame),
+            ps4Notifications = prefs.getBoolean("ps4Notifications", d.ps4Notifications),
         )
     }
 
@@ -130,6 +133,7 @@ class SettingsStore(context: Context) {
             .putInt("monitorIntervalMs", s.monitorIntervalMs)
             .putInt("maxRegionMiB", s.maxRegionMiB)
             .putBoolean("autoSelectGame", s.autoSelectGame)
+            .putBoolean("ps4Notifications", s.ps4Notifications)
             .apply()
     }
 }
