@@ -51,6 +51,7 @@ import com.ps4smartcheat.app.ui.components.SectionCard
 import com.ps4smartcheat.app.ui.components.Selector
 import com.ps4smartcheat.app.ui.components.WarningBanner
 import com.ps4smartcheat.core.backend.ConnectionState
+import com.ps4smartcheat.core.scan.ScanBackendKind
 import com.ps4smartcheat.core.scan.ResultRow
 import com.ps4smartcheat.core.scan.ScanMode
 import com.ps4smartcheat.core.scan.ScanStatus
@@ -372,12 +373,18 @@ fun ScannerScreen(onEdit: (Long, ValueType) -> Unit, onPatternSearch: () -> Unit
         if (hasSession && s != null) {
             item {
                 Text(
-                    "Scan ${s.step}: ${if (s.snapshotCandidates != null) "${s.snapshotCandidates} candidates in snapshot" else plural(s.resultCount.toLong(), "result")}" +
-                        (s.serverTotal?.takeIf { it > s.resultCount }?.let { " ($it kept on PS4)" } ?: "") +
-                        if (s.truncated) " (list capped)" else "",
+                    if (s.snapshotCandidates != null) {
+                        "Scan ${s.step}: ${s.snapshotCandidates} candidates in snapshot" + if (s.backend == ScanBackendKind.TURBO) " (on the PS4)" else ""
+                    } else {
+                        "Scan ${s.step}: ${plural(s.resultCount.toLong(), "result")}" +
+                            (s.serverTotal?.takeIf { it > s.resultCount }?.let { " ($it kept on PS4)" } ?: "") +
+                            if (s.truncated) " (list capped)" else ""
+                    },
                     style = MaterialTheme.typography.titleSmall,
                 )
-                if (s.truncated && (s.serverTotal ?: 0) > s.resultCount) {
+                if (s.snapshotCandidates != null) {
+                    // Nothing to list until the first refine.
+                } else if (s.truncated && (s.serverTotal ?: 0) > s.resultCount) {
                     Text("The PS4 still holds all ${s.serverTotal} candidates: the next Turbo scan narrows the full set.", style = MaterialTheme.typography.bodySmall)
                 } else if (s.truncated) WarningBanner("Too many matches: only the first ${s.resultCount} were kept. Refine with a more specific value or a narrower region filter.")
             }

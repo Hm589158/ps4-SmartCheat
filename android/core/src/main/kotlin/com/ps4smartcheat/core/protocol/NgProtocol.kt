@@ -39,11 +39,17 @@ object NgProtocol {
     const val TSE_SIMD_COMPARE = 0x1
     const val TSE_ALIASING = 0x2
     const val TSE_SERVER_RESIDENT = 0x4
+    const val TSE_SNAPSHOT = 0x8
+    const val TSE_SNAPSHOT_SEGMENTS = 0x10
     const val TSE_RESCAN_ALIASING = 0x200
 
     // TS_* request flags.
     const val TS_USE_ALIASING = 0x1
     const val TS_SERVER_RESIDENT = 0x2
+    /** Phase B: snapshot every slot of the segments on the PS4 (unknown initial value). */
+    const val TS_SNAPSHOT = 0x4
+    /** Keep zero-valued slots in the snapshot (the Android tier keeps them too). */
+    const val TS_SNAPSHOT_INCLUDE_ZEROS = 0x8
     const val TS_SNAPSHOT_SEGMENTS = 0x10
     const val TS_RESCAN_ALIASING = 0x100
 
@@ -63,12 +69,18 @@ object NgProtocol {
 
     // cmd_proc_scan_comparetype
     const val CT_EXACT = 0
+    const val CT_BIGGER = 2
+    const val CT_SMALLER = 3
     /** Inclusive, value data = low ‖ high (`proc.c` proc_scan_compareValues; legacy compare is exclusive). */
     const val CT_BETWEEN = 4
     const val CT_INCREASED = 5
+    /** memory == previous + value, wrapping at the type width (scan_compare_simd.c scan_point_compare). */
+    const val CT_INCREASED_BY = 6
     const val CT_DECREASED = 7
+    const val CT_DECREASED_BY = 8
     const val CT_CHANGED = 9
     const val CT_UNCHANGED = 10
+    const val CT_UNKNOWN_INITIAL = 11
 
     /**
      * Client half of CMD_PROC_AUTH: the server expects `challenge XOR keystream`, where the keystream is

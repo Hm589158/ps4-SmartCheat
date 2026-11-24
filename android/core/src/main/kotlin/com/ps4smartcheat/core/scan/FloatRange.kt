@@ -29,6 +29,14 @@ object FloatRange {
     fun between(type: ValueType, low: Double, high: Double): Bounds? =
         interval(type, low, high) { it >= low && it <= high }
 
+    /** Values bigger than [v] (up to +Infinity, which the matcher's ">" accepts too). */
+    fun above(type: ValueType, v: Double): Bounds? =
+        interval(type, v, Double.POSITIVE_INFINITY) { it > v }
+
+    /** Values smaller than [v] (down to -Infinity). */
+    fun below(type: ValueType, v: Double): Bounds? =
+        interval(type, Double.NEGATIVE_INFINITY, v) { it < v }
+
     /** Little-endian low ‖ high in the type's encoding: the value data of an NG "between" compare. */
     fun encode(type: ValueType, b: Bounds): ByteArray =
         ValueCodec.encodeDouble(type, b.low) + ValueCodec.encodeDouble(type, b.high)

@@ -55,6 +55,8 @@ class ServerScanner(private val t: ServerScanTransport) {
         /** Max segment length for Turbo (u32 length field). */
         const val TURBO_SEGMENT_MAX = 0xFFFF_0000L
         const val GET_PAGE = 65_536
+        /** Guard against a stream that never sends its sentinel (one frame per 16 MiB / 1/256 of the slots upstream). */
+        private const val MAX_PROGRESS_FRAMES = 1L shl 24
 
         fun typeCode(type: ValueType): Int? = when (type) {
             ValueType.INT8 -> NgProtocol.VT_INT8
@@ -78,27 +80,56 @@ class ServerScanner(private val t: ServerScanTransport) {
             val type = matcher.type
             if (type.isFloat && !turbo) return "${type.label} runs on Turbo Scan or Android (the iterative server compare differs)"
             if (!type.isFloat && typeCode(type) == null) return "${type.label} is compared on Android"
-            val firstModes = if (type.isFloat) setOf(ScanMode.EXACT, ScanMode.BETWEEN) else setOf(ScanMode.EXACT)
-            if (first && matcher.mode !in firstModes) return "only exact${if (type.isFloat) " and between" else ""} first scans are offloaded"
+            val firstModes = if (turbo) TURBO_FIRST_MODES else setOf(ScanMode.EXACT)
+            if (first && matcher.mode !in firstModes) {
+                return "only ${firstModes.joinToString(", ") { it.label.lowercase() }} first scans are offloaded"
+            }
             if (options.effectiveAlignment(type) != type.size) return "unaligned scans run on Android"
             if (query(matcher, turbo) == null) {
-                return if (type.isFloat && matcher.mode in setOf(ScanMode.EXACT, ScanMode.BETWEEN)) "no ${type.label} value matches ${matcher.value?.text}"
+                return if (type.isFloat && matcher.mode in RANGE_MODES) "no ${type.label} value matches ${matcher.value?.text}"
                 else "${matcher.mode.label} compares run on Android (no verified PS4-side code)"
             }
             return null
         }
 
+        /** First scans Turbo START runs (ps4debug-NG compares them with `proc_scan_compareValues`). */
+        val TURBO_FIRST_MODES = setOf(ScanMode.EXACT, ScanMode.BIGGER_THAN, ScanMode.SMALLER_THAN, ScanMode.BETWEEN)
+        private val RANGE_MODES = setOf(ScanMode.EXACT, ScanMode.BETWEEN, ScanMode.BIGGER_THAN, ScanMode.SMALLER_THAN)
+
         /** What the PS4 compares: NG value type, compare type and value data (low ‖ high for "between"). */
         class Query(val valueType: Int, val compareType: Int, val data: ByteArray?)
 
-        /** The NG compare equivalent to [matcher], or null when there is none (floats: [turbo] only). */
+        /**
+         * The NG compare equivalent to [matcher], or null when there is none. The iterative server scan takes the
+         * original five integer compares; Turbo Scan also takes, verified in ps4debug-NG's source:
+         * * integers: bigger / smaller than (2 / 3, typed signed compare) and between (4, inclusive, low ‖ high) in
+         *   `proc_scan_compareValues`; increased / decreased by (6 / 8: memory == previous ± value at the type width,
+         *   the same wrap-around as this app) in `scan_point_compare`;
+         * * floats: exact (rounded), between, bigger / smaller than as an inclusive "between" over [FloatRange]'s
+         *   bounds; increased / decreased as float compares; changed / unchanged on the raw bits.
+         */
         fun query(matcher: Matcher, turbo: Boolean): Query? {
             val type = matcher.type
             if (!type.isFloat) {
                 val vt = typeCode(type) ?: return null
-                val ct = compareCode(matcher.mode) ?: return null
-                val data = if (matcher.mode.needsValue) (matcher.value as? ParsedValue.IntValue)?.let { ValueCodec.encode(it) } ?: return null else null
-                return Query(vt, ct, data)
+                fun v(p: ParsedValue?) = (p as? ParsedValue.IntValue)?.let { ValueCodec.encode(it) }
+                compareCode(matcher.mode)?.let { ct ->
+                    val data = if (matcher.mode.needsValue) v(matcher.value) ?: return null else null
+                    return Query(vt, ct, data)
+                }
+                if (!turbo) return null
+                return when (matcher.mode) {
+                    ScanMode.BIGGER_THAN -> v(matcher.value)?.let { Query(vt, NgProtocol.CT_BIGGER, it) }
+                    ScanMode.SMALLER_THAN -> v(matcher.value)?.let { Query(vt, NgProtocol.CT_SMALLER, it) }
+                    ScanMode.INCREASED_BY -> v(matcher.value)?.let { Query(vt, NgProtocol.CT_INCREASED_BY, it) }
+                    ScanMode.DECREASED_BY -> v(matcher.value)?.let { Query(vt, NgProtocol.CT_DECREASED_BY, it) }
+                    ScanMode.BETWEEN -> {
+                        val a = (matcher.value as? ParsedValue.IntValue)?.value ?: return null
+                        val b = (matcher.value2 as? ParsedValue.IntValue)?.value ?: a
+                        Query(vt, NgProtocol.CT_BETWEEN, ValueCodec.encodeLong(type, minOf(a, b)) + ValueCodec.encodeLong(type, maxOf(a, b)))
+                    }
+                    else -> null
+                }
             }
             if (!turbo) return null
             val fvt = if (type == ValueType.FLOAT32) NgProtocol.VT_FLOAT else NgProtocol.VT_DOUBLE
@@ -112,12 +143,21 @@ class ServerScanner(private val t: ServerScanTransport) {
                     val b = num(matcher.value2) ?: a
                     range(FloatRange.between(type, minOf(a, b), maxOf(a, b)))
                 }
+                ScanMode.BIGGER_THAN -> num(matcher.value)?.let { range(FloatRange.above(type, it)) }
+                ScanMode.SMALLER_THAN -> num(matcher.value)?.let { range(FloatRange.below(type, it)) }
                 ScanMode.INCREASED -> Query(fvt, NgProtocol.CT_INCREASED, null)
                 ScanMode.DECREASED -> Query(fvt, NgProtocol.CT_DECREASED, null)
                 ScanMode.CHANGED -> Query(raw, NgProtocol.CT_CHANGED, null)
                 ScanMode.UNCHANGED -> Query(raw, NgProtocol.CT_UNCHANGED, null)
                 else -> null
             }
+        }
+
+        /** Null when an unknown-initial-value snapshot of [type] can be kept on the PS4, otherwise why not. */
+        fun snapshotIneligibility(type: ValueType, options: ScanOptions): String? = when {
+            type.size > 8 || (!type.isFloat && typeCode(type) == null) -> "${type.label} snapshots are kept on Android"
+            options.effectiveAlignment(type) != type.size -> "unaligned scans run on Android"
+            else -> null
         }
     }
 
@@ -257,17 +297,7 @@ class ServerScanner(private val t: ServerScanTransport) {
     ): TurboStep {
         val q = query(matcher, turbo = true)?.takeIf { it.data != null } ?: throw ServerScanUnavailableException("value required")
         val pat = q.data!!
-        val segs = ArrayList<Pair<Long, Long>>()
-        for (r in regions) {
-            var p = r.start
-            while (p < r.end) {
-                val len = minOf(TURBO_SEGMENT_MAX, r.end - p)
-                segs += p to len
-                p += len
-            }
-        }
-        if (segs.isEmpty()) throw ServerScanUnavailableException("no regions")
-        if (segs.size > NgProtocol.TURBO_MAX_SEGMENTS) throw ServerScanUnavailableException("too many segments")
+        val segs = segments(regions)
         val total = regions.sumOf { it.size }
         val caps = t.capabilities
         val flags = NgProtocol.TS_SERVER_RESIDENT or NgProtocol.TS_SNAPSHOT_SEGMENTS or
@@ -304,6 +334,73 @@ class ServerScanner(private val t: ServerScanTransport) {
         return TurboStep(turboFetch(matcher.type, count, options), count, epoch)
     }
 
+    /**
+     * Unknown initial value on the PS4 (Turbo Phase B, `scan_turbo.c` START with `TS_SNAPSHOT`): every naturally aligned
+     * slot of [regions] is copied into a snapshot held on the console (RAM, spilling to its disk), zeros included like
+     * the Android tier. Nothing but progress crosses the network; refines run with [turboNext] against the snapshot
+     * (it keeps each slot's value of the previous step). Wire: header → `CMD_SUCCESS`, `CMD_SUCCESS` → segment list →
+     * plan `{u64 slots; u64 bytes}`, progress `u64 bytes done`… sentinel → summary `{u32 ok; u64 survivors}` →
+     * `CMD_SUCCESS`.
+     */
+    suspend fun turboSnapshot(
+        pid: Int, regions: List<MemoryRegion>, type: ValueType, progress: ProgressListener,
+    ): TurboStep {
+        val vt = if (type.isFloat) (if (type == ValueType.FLOAT32) NgProtocol.VT_FLOAT else NgProtocol.VT_DOUBLE) else typeCode(type)!!
+        val segs = segments(regions)
+        val total = regions.sumOf { it.size }
+        val flags = NgProtocol.TS_SNAPSHOT or NgProtocol.TS_SNAPSHOT_SEGMENTS or NgProtocol.TS_SNAPSHOT_INCLUDE_ZEROS or NgProtocol.TS_SERVER_RESIDENT
+        progress(ScanProgress(0, total, 0, "Snapshot on PS4"))
+        var epoch = 0L
+        val count = withServerCancel(pid) {
+            t.exclusive("turbo snapshot", t.serverScanTimeoutMs) { w ->
+                epoch = t.connectionEpoch
+                val body = LE.buffer(NgProtocol.TURBO_START_PACKET_SIZE)
+                    .putInt(pid).putLong(segs[0].first).putInt(segs[0].second.toInt())
+                    .put(vt.toByte()).put(NgProtocol.CT_UNKNOWN_INITIAL.toByte()).put(0).putInt(0).putInt(flags).array()
+                w.send(w.header(NgProtocol.TURBO_START, body.size), body)
+                w.expectSuccess(NgProtocol.TURBO_START, w.readU32())
+                w.expectSuccess(NgProtocol.TURBO_START, w.readU32())
+                val segBuf = LE.buffer(4 + segs.size * 12).putInt(segs.size)
+                for ((a, l) in segs) segBuf.putLong(a).putInt(l.toInt())
+                w.send(segBuf.array())
+                val plan = w.readExactly(16)
+                val planBytes = LE.i64(plan, 8)
+                var frames = 0L
+                while (true) {
+                    val done = w.readU64()
+                    if (done == NgProtocol.SENTINEL) break
+                    if (++frames > MAX_PROGRESS_FRAMES) { w.invalidate(); throw ProtocolException("Turbo snapshot: missing sentinel") }
+                    progress(ScanProgress(done.coerceIn(0, planBytes), planBytes, 0, "Snapshot on PS4"))
+                }
+                val summary = w.readExactly(12)
+                val ok = LE.i32(summary, 0)
+                val n = LE.i64(summary, 4)
+                w.expectSuccess(NgProtocol.TURBO_START, w.readU32())
+                if (ok != 1) throw ServerScanUnavailableException("PS4 snapshot could not be stored (memory or disk space on the console)")
+                if (n < 0) { w.invalidate(); throw ProtocolException("Turbo snapshot: invalid count $n") }
+                n
+            }
+        }
+        progress(ScanProgress(total, total, count, "Snapshot kept on PS4"))
+        return TurboStep(ScanResults(type, LongArray(0), ByteArray(0), 0, count > 0, count), count, epoch)
+    }
+
+    /** Segments of at most [TURBO_SEGMENT_MAX] bytes covering [regions] (Turbo's segment list has u32 lengths). */
+    private fun segments(regions: List<MemoryRegion>): List<Pair<Long, Long>> {
+        val segs = ArrayList<Pair<Long, Long>>()
+        for (r in regions) {
+            var p = r.start
+            while (p < r.end) {
+                val len = minOf(TURBO_SEGMENT_MAX, r.end - p)
+                segs += p to len
+                p += len
+            }
+        }
+        if (segs.isEmpty()) throw ServerScanUnavailableException("no regions")
+        if (segs.size > NgProtocol.TURBO_MAX_SEGMENTS) throw ServerScanUnavailableException("too many segments")
+        return segs
+    }
+
     suspend fun turboNext(pid: Int, matcher: Matcher, options: ScanOptions, progress: ProgressListener): TurboStep {
         val q = query(matcher, turbo = true) ?: throw ServerScanUnavailableException("no PS4-side compare")
         val pat = q.data
@@ -319,7 +416,14 @@ class ServerScanner(private val t: ServerScanTransport) {
                 w.send(w.header(NgProtocol.TURBO_COUNT, body.size), body)
                 w.expectSuccess(NgProtocol.TURBO_COUNT, w.readU32())
                 if (pat != null) w.send(pat)
-                if (w.readU64() != NgProtocol.SENTINEL) { w.invalidate(); throw ProtocolException("Turbo COUNT: missing progress sentinel") }
+                // A snapshot session streams progress (u64, below the sentinel) before the sentinel; a list session none.
+                var frames = 0
+                while (true) {
+                    val p = w.readU64()
+                    if (p == NgProtocol.SENTINEL) break
+                    if (++frames > MAX_PROGRESS_FRAMES) { w.invalidate(); throw ProtocolException("Turbo COUNT: missing progress sentinel") }
+                    progress(ScanProgress(0, 0, 0, "Turbo refine on PS4", indeterminate = true))
+                }
                 val n = w.readU64()
                 w.expectSuccess(NgProtocol.TURBO_COUNT, w.readU32())
                 if (n < 0) { w.invalidate(); throw ProtocolException("Turbo COUNT: invalid count $n") }

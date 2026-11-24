@@ -70,6 +70,8 @@ data class ServerCapabilities(
     val turboResident: Boolean get() = serverScan && turboEngines != null && (turboEngines and 0x4) != 0
     val turboRescanAliasing: Boolean get() = turboResident && (turboEngines!! and 0x200) != 0
     val turboAliasing: Boolean get() = turboResident && (turboEngines!! and 0x2) != 0
+    /** Phase B snapshot store with a segment list (TSE_SNAPSHOT | TSE_SNAPSHOT_SEGMENTS): unknown initial value on the PS4. */
+    val turboSnapshot: Boolean get() = turboResident && (turboEngines!! and 0x18) == 0x18
 
     /**
      * `CMD_DEBUG_ATTACH` accepts the optional `debug_port` (connect back to a client-chosen port). Advertised as

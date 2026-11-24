@@ -164,6 +164,8 @@ class MockPs4DebugServer(
         var turboAddrs: LongArray? = null
         var turboVals: ByteArray? = null
         var turboCount = 0
+        /** The resident set is a Phase B snapshot (COUNT streams progress frames before its sentinel). */
+        var turboSnapshot = false
     }
 
     @Volatile private var authBits = 0
@@ -810,6 +812,8 @@ class MockPs4DebugServer(
                 val r = ref?.let { f(it, ro) } ?: 0.0
                 return when (ct) {
                     0 -> m == r
+                    2 -> m > r
+                    3 -> m < r
                     4 -> { val hi = f(ref!!, ro + len); if (hi > r) m >= r && m <= hi else m <= r && m >= hi }
                     5 -> m > r
                     7 -> m < r
@@ -825,6 +829,8 @@ class MockPs4DebugServer(
             val c = cmp(m, r)
             return when (ct) {
                 0 -> m == r
+                2 -> c > 0
+                3 -> c < 0
                 4 -> { val hi = raw(ref!!, ro + len); if (cmp(hi, r) > 0) c >= 0 && cmp(m, hi) <= 0 else c <= 0 && cmp(m, hi) >= 0 }
                 5 -> c > 0
                 7 -> c < 0
@@ -832,6 +838,14 @@ class MockPs4DebugServer(
                 10 -> m == r
                 else -> false
             }
+        }
+
+        /** Increased / decreased by (6 / 8) on integers: memory == previous ± value at the type width (scan_point_compare). */
+        private fun deltaMatches(ct: Int, len: Int, mem: ByteArray, prev: ByteArray, po: Int, delta: ByteArray): Boolean {
+            fun raw(b: ByteArray, o: Int): Long { var r = 0L; for (i in len - 1 downTo 0) r = (r shl 8) or (b[o + i].toLong() and 0xFF); return r }
+            val mask = if (len == 8) -1L else (1L shl (len * 8)) - 1
+            val want = if (ct == 6) raw(prev, po) + raw(delta, 0) else raw(prev, po) - raw(delta, 0)
+            return raw(mem, 0) == (want and mask)
         }
 
         private fun readMem(pid: Int, addr: Long, len: Int): ByteArray {
@@ -932,11 +946,12 @@ class MockPs4DebugServer(
             val vt = body.get().toInt(); val ct = body.get().toInt(); val align = body.get().toInt() and 0xFF
             val lenData = body.int; val flags = body.int
             if (turboCancelPid == pid) turboCancelPid = 0
-            if (ct > 12 || lenData == 0) { status(out, CMD_DATA_NULL); return false }
+            if (ct > 12 || (lenData == 0 && flags and TS_SNAPSHOT == 0)) { status(out, CMD_DATA_NULL); return false }
             val vl = sizeOf(vt)
             status(out, CMD_SUCCESS); out.flush()
-            val pattern = if (needsValue(ct)) ByteArray(lenData).also { inp.readFully(it) } else null
+            val pattern = if (needsValue(ct) && lenData > 0) ByteArray(lenData).also { inp.readFully(it) } else null
             status(out, CMD_SUCCESS); out.flush()
+            if (flags and TS_SNAPSHOT != 0) return turboSnapshot(pid, vt, vl, align, flags, inp, out, conn)
             val resident = flags and TS_SERVER_RESIDENT != 0
             val segmented = flags and TS_SNAPSHOT_SEGMENTS != 0
             val segs = ArrayList<Pair<Long, Long>>()
@@ -982,9 +997,56 @@ class MockPs4DebugServer(
                 status(out, CMD_SUCCESS)
                 return true
             }
-            conn.turboPid = pid; conn.turboType = vt; conn.turboLen = vl
+            conn.turboPid = pid; conn.turboType = vt; conn.turboLen = vl; conn.turboSnapshot = false
             conn.turboAddrs = addrs.toLongArray(); conn.turboVals = vals.toByteArray(); conn.turboCount = addrs.size
             out.write(le(12).putInt(1).putLong(addrs.size.toLong()).array())
+            status(out, CMD_SUCCESS)
+            return true
+        }
+
+        /**
+         * Turbo START with TS_SNAPSHOT (scan_turbo.c fs_snapshot_create): every slot of the segments, zeros only with
+         * TS_SNAPSHOT_INCLUDE_ZEROS; plan, progress (bytes done) per segment, sentinel, summary, CMD_SUCCESS.
+         */
+        private fun turboSnapshot(pid: Int, vt: Int, vl: Int, align: Int, flags: Int, inp: DataInputStream, out: OutputStream, conn: Conn): Boolean {
+            val segs = ArrayList<Pair<Long, Long>>()
+            if (flags and TS_SNAPSHOT_SEGMENTS != 0) {
+                val n = Integer.reverseBytes(inp.readInt())
+                repeat(n) {
+                    val b = ByteArray(12).also { inp.readFully(it) }
+                    val bb = ByteBuffer.wrap(b).order(ByteOrder.LITTLE_ENDIAN)
+                    segs += bb.long to (bb.int.toLong() and 0xFFFFFFFFL)
+                }
+            }
+            val step = if (align == 0) vl else align
+            val slots = segs.sumOf { (_, len) -> if (len >= vl) (len - vl) / step + 1 else 0L }
+            out.write(le(16).putLong(slots).putLong(segs.sumOf { it.second }).array())
+            val zeros = flags and TS_SNAPSHOT_INCLUDE_ZEROS != 0
+            val addrs = ArrayList<Long>()
+            val vals = java.io.ByteArrayOutputStream()
+            var done = 0L
+            var cancelled = false
+            for ((start, len) in segs) {
+                if (turboCancelPid == pid) { cancelled = true; break }
+                val buf = readMem(pid, start, len.toInt())
+                delayFor(len)
+                var j = 0
+                while (j + vl <= len) {
+                    if (zeros || (0 until vl).any { buf[j + it] != 0.toByte() }) { addrs += start + j; vals.write(buf, j, vl) }
+                    j += step
+                }
+                done += len
+                out.write(le(8).putLong(done).array())
+            }
+            out.write(le(8).putLong(-1L).array())
+            if (cancelled) {
+                conn.turboAddrs = null; conn.turboVals = null; conn.turboCount = 0
+                out.write(le(12).putInt(0).putLong(0).array())
+            } else {
+                conn.turboPid = pid; conn.turboType = vt; conn.turboLen = vl; conn.turboSnapshot = true
+                conn.turboAddrs = addrs.toLongArray(); conn.turboVals = vals.toByteArray(); conn.turboCount = addrs.size
+                out.write(le(12).putInt(1).putLong(addrs.size.toLong()).array())
+            }
             status(out, CMD_SUCCESS)
             return true
         }
@@ -1011,12 +1073,17 @@ class MockPs4DebugServer(
                     if (turboCancelPid == conn.turboPid) break
                     val cur = readMem(conn.turboPid, addrs[i], vl)
                     delayFor(vl.toLong())
-                    val ok = if (needsPrevious(ct)) compare(ct, vt, vl, cur, 0, vals, i * vl) else compare(ct, vt, vl, cur, 0, pattern, 0)
+                    val ok = when {
+                        ct == 6 || ct == 8 -> deltaMatches(ct, vl, cur, vals, i * vl, pattern!!)
+                        needsPrevious(ct) -> compare(ct, vt, vl, cur, 0, vals, i * vl)
+                        else -> compare(ct, vt, vl, cur, 0, pattern, 0)
+                    }
                     if (ok) { addrs[newCount] = addrs[i]; System.arraycopy(cur, 0, nv, newCount * vl, vl); newCount++ }
                 }
                 conn.turboVals = nv
                 conn.turboCount = newCount
             }
+            if (conn.turboSnapshot) out.write(le(8).putLong(conn.turboCount.toLong()).array()) // a progress frame (slot index)
             out.write(le(8).putLong(-1L).array())
             out.write(le(8).putLong(newCount.toLong()).array())
             status(out, CMD_SUCCESS)
@@ -1127,6 +1194,8 @@ class MockPs4DebugServer(
         const val CMD_INVALID_INDEX = 0xF0000005.toInt()
         const val TS_SERVER_RESIDENT = 0x2
         const val TS_SNAPSHOT_SEGMENTS = 0x10
+        const val TS_SNAPSHOT = 0x4
+        const val TS_SNAPSHOT_INCLUDE_ZEROS = 0x8
 
         /** lfsr113 keystream XOR as in ps4debug-NG proc.c (independent copy for the mock). */
         fun xorKeystream(input: ByteArray): ByteArray {

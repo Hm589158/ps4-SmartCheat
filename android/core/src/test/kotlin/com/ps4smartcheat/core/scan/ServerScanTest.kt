@@ -221,6 +221,85 @@ class ServerScanTest {
         }
     }
 
+    /**
+     * Unknown initial value runs as a snapshot on the PS4 (Turbo Phase B): nothing but progress crosses the network,
+     * and every refine finds what the Android snapshot finds — integers and floats, zeros included.
+     */
+    @Test fun unknownInitialValueRunsOnThePs4WithTheSameResults() = runBlocking {
+        for (type in listOf(ValueType.INT32, ValueType.FLOAT32, ValueType.INT16)) {
+            val outcomes = listOf(BackendPreference.CLIENT, BackendPreference.TURBO).map { pref ->
+                val r = rig()
+                val planted = (0 until 30).map { 0x1_0000_0000L + 4096L * it + type.size * 5 }
+                fun set(i: Int, v: Double) = r.server.poke(pid, planted[i],
+                    if (type.isFloat) ValueCodec.encodeDouble(type, v) else ValueCodec.encodeLong(type, v.toLong()))
+                for (i in planted.indices) set(i, 0.0) // zeros must be in the snapshot
+                val readsBefore = r.server.readRequests.get()
+                r.controller.firstScan(pid, "eboot.bin", type, ScanMode.UNKNOWN_INITIAL, null, options = ScanOptions(backend = pref))
+                r.await()
+                val seq = ArrayList<List<Long>>()
+                val backends = ArrayList<ScanBackendKind>()
+                backends += r.controller.session.value!!.backend!!
+                val readsAfterFirst = r.server.readRequests.get()
+                for (i in 0 until 10) set(i, 7.0)
+                for (i in 10 until 15) set(i, -3.0)
+                r.next(ScanMode.INCREASED); seq += r.addresses(); backends += r.controller.lastStats.value!!.backend
+                for (i in 0 until 4) set(i, 9.0)
+                r.next(ScanMode.UNCHANGED); seq += r.addresses(); backends += r.controller.lastStats.value!!.backend
+                r.next(ScanMode.EXACT, "7"); seq += r.addresses(); backends += r.controller.lastStats.value!!.backend
+                if (pref == BackendPreference.TURBO) assertEquals("no memory reads for a PS4 snapshot", readsBefore, readsAfterFirst)
+                seq to backends
+            }
+            assertEquals("TURBO vs CLIENT for $type", outcomes[0].first, outcomes[1].first)
+            assertTrue("$type: ${outcomes[1].second}", outcomes[1].second.all { it == ScanBackendKind.TURBO })
+            assertEquals(6, outcomes[0].first.last().size) // the 10 set to 7, minus the 4 changed again
+        }
+    }
+
+    @Test fun aSnapshotOnThePs4RefusesWhatItCannotRefine() = runBlocking {
+        val r = rig()
+        r.controller.firstScan(pid, "eboot.bin", ValueType.FLOAT32, ScanMode.UNKNOWN_INITIAL, null)
+        val first = r.await()
+        assertEquals("$first ${r.controller.lastStats.value?.fallbacks}", ScanBackendKind.TURBO, r.controller.session.value!!.backend)
+        assertTrue(r.controller.session.value!!.serverTotal!! >= (4 shl 20) / 4)
+        // Rounded "increased by" has no exact PS4 compare: refused, never answered from an empty local list.
+        val st = r.next(ScanMode.INCREASED_BY, "1")
+        assertTrue(st.toString(), st is ScanStatus.Failed && st.toString().contains("kept on the PS4"))
+        // Lost after a reconnect: refused as well.
+        r.client.disconnect()
+        r.client.connect(ConnectOptions("127.0.0.1", r.server.port, readTimeoutMs = 5000, firmwareProbeTimeoutMs = 300))
+        val lost = r.next(ScanMode.CHANGED)
+        assertTrue(lost.toString(), lost is ScanStatus.Failed && lost.toString().contains("lost after reconnect"))
+    }
+
+    /** Bigger / smaller / between first scans and increased / decreased by refines run on Turbo with the same results. */
+    @Test fun rangeAndDeltaComparesRunOnTurbo() = runBlocking {
+        for (type in listOf(ValueType.INT8, ValueType.INT32, ValueType.INT64, ValueType.FLOAT64)) {
+            val outcomes = listOf(BackendPreference.CLIENT, BackendPreference.TURBO).map { pref ->
+                val r = rig()
+                val planted = (0 until 20).map { 0x1_0000_0000L + 4096L * it + type.size * 2 }
+                fun set(i: Int, v: Long) = r.server.poke(pid, planted[i],
+                    if (type.isFloat) ValueCodec.encodeDouble(type, v.toDouble()) else ValueCodec.encodeLong(type, v))
+                for (i in planted.indices) set(i, 100L + i)
+                val seq = ArrayList<List<Long>>()
+                val backends = ArrayList<ScanBackendKind>()
+                fun record() { seq += r.addresses(); backends += r.controller.lastStats.value!!.backend }
+                r.controller.firstScan(pid, "eboot.bin", type, ScanMode.BETWEEN, "100", valueText2 = "119", options = ScanOptions(backend = pref, turboFetchMax = 1_000_000))
+                r.await(); record()
+                for (i in 0 until 8) set(i, 100L + i + 5)
+                for (i in 8 until 12) set(i, 100L + i - 2)
+                if (!type.isFloat) { r.next(ScanMode.INCREASED_BY, "5"); record() } else { r.next(ScanMode.INCREASED); record() }
+                r.next(ScanMode.BIGGER_THAN, "107"); record()
+                r.next(ScanMode.SMALLER_THAN, "112"); record()
+                r.controller.firstScan(pid, "eboot.bin", type, ScanMode.BIGGER_THAN, "118", options = ScanOptions(backend = pref, turboFetchMax = 1_000_000))
+                r.await(); record()
+                seq to backends
+            }
+            assertEquals("TURBO vs CLIENT for $type", outcomes[0].first, outcomes[1].first)
+            assertTrue("$type: ${outcomes[1].second}", outcomes[1].second.all { it == ScanBackendKind.TURBO })
+            assertEquals(type.toString(), listOf(3, 4, 5, 6).map { 0x1_0000_0000L + 4096L * it + type.size * 2 }, outcomes[0].first[3])
+        }
+    }
+
     @Test fun floatsWithoutTurboAndUnalignedStayOnAndroid() = runBlocking {
         val r = rig()
         r.server.poke(pid, 0x1_0000_0040L, ValueCodec.encodeDouble(ValueType.FLOAT32, 12.5))

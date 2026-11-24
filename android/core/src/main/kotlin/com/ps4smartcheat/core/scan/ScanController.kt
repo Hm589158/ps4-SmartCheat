@@ -86,10 +86,15 @@ private class Session(
     var backend: ScanBackendKind? = null
     /** Connection epoch of the Turbo server-resident session backing [results], if any. */
     var turboEpoch: Long? = null
+    /**
+     * The candidates exist only on the PS4 (an unknown-initial-value snapshot there): no local list to fall back to, so
+     * a refine that cannot run on Turbo Scan fails instead of silently answering from nothing.
+     */
+    var onPs4Only = false
 
     fun view() = ScanSessionView(
         pid, processName, type, step, results?.count ?: 0, results?.truncated ?: false,
-        snapshot?.candidateCount, lastMode, backend, results?.serverTotal,
+        snapshot?.candidateCount ?: results?.serverTotal?.takeIf { onPs4Only }, lastMode, backend, results?.serverTotal,
     )
 
     fun dispose() {
@@ -173,10 +178,11 @@ class ScanController(
             val fallbacks = ArrayList<String>()
             val total = regions.sumOf { it.size }
             if (mode == ScanMode.UNKNOWN_INITIAL) {
-                currentBackend = ScanBackendKind.CLIENT
-                session.snapshot = ScanEngine.snapshot(backend, pid, regions, type, options, storageFactory, ::report)
-                session.backend = ScanBackendKind.CLIENT
-                fallbacks += "unknown-initial-value snapshots are kept on Android"
+                if (!snapshotOnPs4(session, pid, regions, type, options, fallbacks)) {
+                    currentBackend = ScanBackendKind.CLIENT
+                    session.snapshot = ScanEngine.snapshot(backend, pid, regions, type, options, storageFactory, ::report)
+                    session.backend = ScanBackendKind.CLIENT
+                }
             } else {
                 runFirst(session, pid, regions, matcher, options, fallbacks)
             }
@@ -189,6 +195,38 @@ class ScanController(
             activate(pid)
             finishStats(session, mode, total, 0, fallbacks)
             summary(session)
+        }
+    }
+
+    /**
+     * Unknown initial value kept on the PS4 (Turbo Phase B) when the preference, the payload and the type allow it.
+     * False (with the reason in [fallbacks]) when the Android snapshot has to be used.
+     */
+    private suspend fun snapshotOnPs4(
+        session: Session, pid: Int, regions: List<MemoryRegion>, type: ValueType, options: ScanOptions, fallbacks: MutableList<String>,
+    ): Boolean {
+        if (ScanBackendKind.TURBO !in order(options.backend)) return false
+        val caps = transport?.capabilities
+        val reason = when {
+            caps == null || !caps.isNg -> "connected payload is not ps4debug-NG"
+            !caps.scanAuthorized -> "ps4debug-NG scan authorisation failed"
+            !caps.turboSnapshot -> "the PS4 snapshot store is not offered by this build"
+            else -> ServerScanner.snapshotIneligibility(type, options)
+        }
+        if (reason != null) { fallbacks += "${ScanBackendKind.TURBO.label}: $reason"; return false }
+        currentBackend = ScanBackendKind.TURBO
+        return try {
+            val step = server!!.turboSnapshot(pid, regions, type, ::report)
+            session.results = step.results
+            session.turboEpoch = step.epoch
+            session.onPs4Only = true
+            session.backend = ScanBackendKind.TURBO
+            turboOwner = session
+            true
+        } catch (e: ServerScanUnavailableException) {
+            fallbacks += "${ScanBackendKind.TURBO.label}: ${e.message}"; false
+        } catch (e: CommandFailedException) {
+            fallbacks += "${ScanBackendKind.TURBO.label}: ${e.message}"; false
         }
     }
 
@@ -245,7 +283,8 @@ class ScanController(
             } else {
                 val prev = session.results ?: throw IllegalStateException("No previous results")
                 var out: ScanResults? = null
-                for (kind in order(session.options.backend)) {
+                val kinds = if (session.onPs4Only) listOf(ScanBackendKind.TURBO) else order(session.options.backend)
+                for (kind in kinds) {
                     val reason = nextIneligible(kind, session, prev, matcher, current)
                     if (reason != null) { if (kind != ScanBackendKind.CLIENT) fallbacks += "${kind.label}: $reason"; continue }
                     currentBackend = kind
@@ -263,7 +302,11 @@ class ScanController(
                         fallbacks += "${kind.label}: ${e.message}"
                     }
                 }
-                out ?: throw IllegalStateException("No scan backend could refine: ${fallbacks.joinToString("; ")}")
+                out ?: throw IllegalStateException(
+                    if (session.onPs4Only) "The unknown-value snapshot is kept on the PS4 and this refine cannot run there " +
+                        "(${fallbacks.joinToString("; ")}). Use another compare, or start a new scan."
+                    else "No scan backend could refine: ${fallbacks.joinToString("; ")}",
+                )
             }
             lock.withLock {
                 session.snapshot?.close()
@@ -274,6 +317,8 @@ class ScanController(
                 session.backend = usedBackend
                 if (usedBackend == ScanBackendKind.TURBO) { session.turboEpoch = turboEpoch; turboOwner = session }
                 else if (turboOwner === session) { session.turboEpoch = null }
+                // After a refine the fetched list is a real (possibly capped) local copy of the survivors.
+                session.onPs4Only = session.onPs4Only && usedBackend == ScanBackendKind.TURBO && newResults.count == 0 && (newResults.serverTotal ?: 0) > 0
             }
             if (activePid == pid) _session.value = session.view()
             finishStats(session, mode, 0, candidates, fallbacks)
@@ -386,7 +431,7 @@ class ScanController(
     fun exportSession(identity: ProcessIdentity, clock: () -> Long = System::currentTimeMillis): SavedScanSession? {
         if (isRunning) return null
         val s = sessions[identity.pid] ?: return null
-        if (s.processName != identity.name || s.snapshot != null) return null
+        if (s.processName != identity.name || s.snapshot != null || s.onPs4Only) return null
         val r = s.results ?: return null
         if (r.count > SavedScanSession.MAX_RESULTS) return null
         return SavedScanSession(identity, s.type, s.step, s.lastMode, ScanResults(r.type, r.addressArray(), r.valuesArray(), r.count, r.truncated), clock())
@@ -502,6 +547,7 @@ class ScanController(
     private fun summary(s: Session): String {
         s.snapshot?.let { return "Snapshot of ${it.totalBytes / 1024} KiB taken (${it.candidateCount} candidates). Change the value in game, then run a next scan." }
         val r = s.results ?: return "Done"
+        if (s.onPs4Only) return "Snapshot of ${r.serverTotal} values kept on the PS4. Change the value in game, then run a next scan."
         return buildString {
             if (r.serverTotal != null && r.serverTotal > r.count) append("${r.serverTotal} on PS4, ${r.count} fetched after scan ${s.step}")
             else append("${r.count} result(s) after scan ${s.step}")

@@ -78,8 +78,7 @@ class RangeModesTest {
         val expected = (0 until 0x1000).filter { ((it * 37) % 1000 - 300) in 100..150 }.map { 0x10_0000L + it * 4 }
         val res = controller.results()!!
         assertEquals(expected, (0 until res.count).map { res.address(it) })
-        assertEquals(ScanBackendKind.CLIENT, controller.lastStats.value!!.backend) // range modes run on Android
-        assertTrue(controller.lastStats.value!!.fallbacks.isNotEmpty())
+        assertEquals(ScanBackendKind.TURBO, controller.lastStats.value!!.backend) // NG's inclusive between on Turbo
         // Next: values change, keep those now bigger than 140.
         for (a in expected) buf.putInt((a - 0x10_0000).toInt(), buf.getInt((a - 0x10_0000).toInt()) + 5)
         controller.nextScan(ScanMode.BIGGER_THAN, "140").join()
@@ -87,5 +86,11 @@ class RangeModesTest {
         val res2 = controller.results()!!
         val expected2 = expected.filter { buf.getInt((it - 0x10_0000).toInt()) > 140 }
         assertEquals(expected2, (0 until res2.count).map { res2.address(it) })
+        assertEquals(ScanBackendKind.TURBO, controller.lastStats.value!!.backend)
+        // The iterative server scan has no verified range compare: it falls back to Android with the same answer.
+        controller.firstScan(5, "eboot.bin", ValueType.INT32, ScanMode.BETWEEN, "100", RegionFilter(), ScanOptions(backend = BackendPreference.SERVER), valueText2 = "150").join()
+        withTimeout(20_000) { controller.status.first { it !is ScanStatus.Running } }
+        assertEquals(ScanBackendKind.CLIENT, controller.lastStats.value!!.backend)
+        assertTrue(controller.lastStats.value!!.fallbacks.isNotEmpty())
     }
 }
