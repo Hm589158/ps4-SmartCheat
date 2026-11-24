@@ -175,7 +175,7 @@ class NgExtrasTest {
         connect { it.enableNg() }
         assertTrue(client.notify("SmartCheat: Infinite health ON"))
         assertEquals(listOf(222 to "SmartCheat: Infinite health ON"), server.notifications.toList())
-        client.getProcesses() // the connection is kept
+        assertTrue(client.getProcesses().isEmpty()) // the connection is kept (no processes in this mock)
     }
 
     @Test fun noNotificationToOtherPayloads() = runBlocking {
