@@ -198,6 +198,14 @@ class MockPs4DebugServer(
     val readRequests = AtomicInteger()
     val writeRequests = AtomicInteger()
     val foregroundRequests = AtomicInteger()
+    val bulkWriteRequests = AtomicInteger()
+
+    private fun readBack(p: Process, addr: Long, len: Int): ByteArray = ByteArray(len).also { b -> synchronized(lock) { copyOut(p, addr, b) } }
+
+    private fun levelAtLeast(major: Int, minor: Int): Boolean {
+        val (a, b) = faults.capabilityLevel.split('.').map { it.toIntOrNull() ?: 0 }.let { it.getOrElse(0) { 0 } to it.getOrElse(1) { 0 } }
+        return a > major || (a == major && b >= minor)
+    }
     val connections = AtomicInteger()
 
     private val acceptThread = thread(name = "mock-ps4debug-accept", isDaemon = true) {
@@ -393,7 +401,36 @@ class MockPs4DebugServer(
                 if (!faults.ignoreWrites && p != null) {
                     synchronized(lock) { ok = copyIn(p, addr, data) }
                 }
+                // ps4debug-NG 1.1+: CMD_SUCCESS only when its own read-back matches (proc.c proc_write_mem_status).
+                if (ok && p != null && faults.brand != null && levelAtLeast(1, 1)) ok = readBack(p, addr, data.size).contentEquals(data)
                 status(out, if (faults.classicWriteStatus || ok) CMD_SUCCESS else CMD_ERROR)
+                return true
+            }
+            CMD_PROC_WRITE_MULTI -> {
+                if (faults.brand == null) return false
+                bulkWriteRequests.incrementAndGet()
+                val pid = body.int; val count = body.int; val flags = body.int
+                if (count > 0xFFFF) { status(out, CMD_ERROR); return true }
+                status(out, CMD_SUCCESS); out.flush()
+                val st = ByteArray(count)
+                val p = process(pid)
+                for (i in 0 until count) {
+                    val h = ByteArray(12).also { inp.readFully(it) }
+                    val hb = ByteBuffer.wrap(h).order(ByteOrder.LITTLE_ENDIAN)
+                    val addr = hb.long; val len = hb.int
+                    if (len > 0x100000) { status(out, CMD_ERROR); return false }
+                    val data = ByteArray(len).also { inp.readFully(it) }
+                    var ok = p != null
+                    if (ok && !faults.ignoreWrites) synchronized(lock) { ok = copyIn(p!!, addr, data) }
+                    st[i] = when {
+                        p == null -> 1
+                        !ok -> 4
+                        !readBack(p, addr, len).contentEquals(data) -> 3
+                        else -> 0
+                    }
+                }
+                if (flags and 1 != 0) out.write(st)
+                status(out, if (flags and 1 == 0 && st.any { it.toInt() != 0 }) CMD_ERROR else CMD_SUCCESS)
                 return true
             }
             CMD_CONSOLE_END -> return false
@@ -1185,6 +1222,7 @@ class MockPs4DebugServer(
         const val CMD_PROC_INFO = 0xBDAA000A.toInt()
         const val CMD_CONSOLE_END = 0xBDDD0002.toInt()
         const val CMD_CONSOLE_FOREGROUND_APP = 0xBDDD0006.toInt()
+        const val CMD_PROC_WRITE_MULTI = 0xBDAACC04.toInt()
         const val CMD_BRANDING = 0xBD000501.toInt()
         const val CMD_PROC_AUTH = 0xBDAACCFF.toInt()
         const val CMD_SCAN_START = 0xBDAACC01.toInt()

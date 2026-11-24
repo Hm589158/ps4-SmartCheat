@@ -76,8 +76,17 @@ class LibrarySwitch(
         }
     }
 
-    /** Writes [p]'s parts in order, each verified; stops at the first one that is not. */
+    /**
+     * Writes [p]'s parts in order, each verified; stops at the first one that is not. Parts that are all data (no code)
+     * go in one bulk write on ps4debug-NG, every part read back on the PS4 ([MemoryEditor.executeBatch]).
+     */
     suspend fun execute(p: Prepared): Result {
+        editor.executeBatch(p.plans)?.let { outs ->
+            val ok = outs.count { it is WriteOutcome.Verified }
+            val bad = outs.withIndex().filter { it.value !is WriteOutcome.Verified }
+            return if (bad.isEmpty()) Result(true, ok, "${p.plans.size} patch(es) verified")
+            else Result(false, ok, "${bad.joinToString("; ") { "part ${it.index + 1}: ${it.value.message}" }} ($ok of ${p.plans.size} part(s) verified; they stay written)")
+        }
         var done = 0
         for (plan in p.plans) {
             val out = editor.execute(plan)

@@ -166,12 +166,9 @@ class MemoryEditor(
             // Journal the bytes present right before our first modification of this address.
             val before = backend.readMemory(t.pid, t.address, t.length)
             recordOriginal(t, before)
-            when (val st = backend.writeMemory(t.pid, t.address, plan.replacement)) {
-                is WriteStatus.Rejected -> WriteOutcome.Rejected(st.statusCode)
-                WriteStatus.Accepted -> verify(t, plan.replacement).also {
-                    updateLastWritten(t, plan.replacement)
-                    if (it is WriteOutcome.Verified) pushHistory(HistoryItem(t, before, plan.replacement.copyOf(), plan.replacementText, clock()))
-                }
+            confirm(t, plan.replacement, backend.writeMemory(t.pid, t.address, plan.replacement)).also { out ->
+                if (out !is WriteOutcome.Rejected) updateLastWritten(t, plan.replacement)
+                if (out is WriteOutcome.Verified) pushHistory(HistoryItem(t, before, plan.replacement.copyOf(), plan.replacementText, clock()))
             }
         } catch (e: BackendException) {
             WriteOutcome.Failed(e.message ?: "Write failed")
@@ -186,15 +183,10 @@ class MemoryEditor(
         return try {
             val t = EditTarget(pid, entry.processName, address, entry.type, entry.original.size)
             val before = backend.readMemory(pid, address, entry.original.size)
-            when (val st = backend.writeMemory(pid, address, entry.original)) {
-                is WriteStatus.Rejected -> WriteOutcome.Rejected(st.statusCode)
-                WriteStatus.Accepted -> {
-                    val out = verify(t, entry.original)
-                    if (out is WriteOutcome.Verified) {
-                        _journal.update { list -> list.filterNot { it === entry } }
-                        pushHistory(HistoryItem(t, before, entry.original.copyOf(), "restore original", clock()))
-                    }
-                    out
+            confirm(t, entry.original, backend.writeMemory(pid, address, entry.original)).also { out ->
+                if (out is WriteOutcome.Verified) {
+                    _journal.update { list -> list.filterNot { it === entry } }
+                    pushHistory(HistoryItem(t, before, entry.original.copyOf(), "restore original", clock()))
                 }
             }
         } catch (e: BackendException) {
@@ -244,13 +236,10 @@ class MemoryEditor(
         if (!policy().editingEnabled) return WriteOutcome.Failed("Read-only mode: enable memory editing first.")
         return try {
             val t = item.target
-            when (val st = backend.writeMemory(t.pid, t.address, bytes(item))) {
-                is WriteStatus.Rejected -> WriteOutcome.Rejected(st.statusCode)
-                WriteStatus.Accepted -> verify(t, bytes(item)).also {
-                    if (it is WriteOutcome.Verified) {
-                        from.update { l -> l.dropLast(1) }
-                        to.update { l -> (l + item).takeLast(MAX_HISTORY) }
-                    }
+            confirm(t, bytes(item), backend.writeMemory(t.pid, t.address, bytes(item))).also {
+                if (it is WriteOutcome.Verified) {
+                    from.update { l -> l.dropLast(1) }
+                    to.update { l -> (l + item).takeLast(MAX_HISTORY) }
                 }
             }
         } catch (e: BackendException) {
@@ -259,6 +248,43 @@ class MemoryEditor(
     }
 
     fun clearJournal() { _journal.value = emptyList() }
+
+    /**
+     * The outcome of a write: rejected; verified on the PS4 (ps4debug-NG read the bytes back and compared them, so no
+     * second read crosses the network); or accepted and then verified here with a fresh read.
+     */
+    private suspend fun confirm(t: EditTarget, expected: ByteArray, st: WriteStatus): WriteOutcome = when (st) {
+        is WriteStatus.Rejected -> WriteOutcome.Rejected(st.statusCode)
+        WriteStatus.VerifiedOnConsole -> WriteOutcome.Verified(expected.copyOf())
+        WriteStatus.Accepted -> verify(t, expected)
+    }
+
+    /**
+     * Confirmed writes to data memory of one process in a single exchange (ps4debug-NG `0xBDAACC04`), each read back
+     * and compared on the PS4. Every entry is attempted even when one fails (upstream: non-atomic), so only plans in
+     * non-executable regions are accepted here: code (an injection's cave and jump) depends on its order and goes through
+     * [execute] one part at a time. Null when the payload has no bulk write or the plans do not qualify — the caller
+     * then uses [execute].
+     */
+    suspend fun executeBatch(plans: List<WritePlan>): List<WriteOutcome>? {
+        if (plans.size < 2 || plans.any { it.region.isExecutable } || plans.map { it.target.pid }.distinct().size != 1) return null
+        if (plans.map { it.target.address }.distinct().size != plans.size) return null
+        val pid = plans.first().target.pid
+        return try {
+            val befores = plans.map { backend.readMemory(pid, it.target.address, it.target.length) }
+            val statuses = backend.writeMany(pid, plans.map { it.target.address to it.replacement }) ?: return null
+            plans.indices.map { i ->
+                val plan = plans[i]
+                recordOriginal(plan.target, befores[i])
+                confirm(plan.target, plan.replacement, statuses[i]).also { out ->
+                    if (out !is WriteOutcome.Rejected) updateLastWritten(plan.target, plan.replacement)
+                    if (out is WriteOutcome.Verified) pushHistory(HistoryItem(plan.target, befores[i], plan.replacement.copyOf(), plan.replacementText, clock()))
+                }
+            }
+        } catch (e: BackendException) {
+            plans.map { WriteOutcome.Failed(e.message ?: "Write failed") }
+        }
+    }
 
     private suspend fun verify(t: EditTarget, expected: ByteArray): WriteOutcome {
         val back = backend.readMemory(t.pid, t.address, expected.size)

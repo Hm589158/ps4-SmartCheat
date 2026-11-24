@@ -42,9 +42,16 @@ data class ConnectOptions(
     }
 }
 
-/** Outcome reported by the debugger for a write. Content verification is done separately by the caller. */
+/** Outcome reported by the debugger for a write. */
 sealed interface WriteStatus {
+    /** Written; the caller verifies the content with a fresh read. */
     data object Accepted : WriteStatus
+    /**
+     * Written and read back on the PS4 itself, bytes equal (ps4debug-NG capability 1.1 `CMD_PROC_WRITE`, or a
+     * `0xBDAACC04` entry status 0: proc.c `proc_write_mem_status`). That read-back is the fresh read: no second one
+     * over the network is needed.
+     */
+    data object VerifiedOnConsole : WriteStatus
     data class Rejected(val statusCode: Long) : WriteStatus
 }
 
@@ -72,6 +79,13 @@ interface DebugBackend {
     suspend fun readMemory(pid: Int, address: Long, length: Int): ByteArray
 
     suspend fun writeMemory(pid: Int, address: Long, data: ByteArray): WriteStatus
+
+    /**
+     * Writes several independent [entries] (address → bytes) of [pid] in one exchange (ps4debug-NG `0xBDAACC04`), each
+     * read back on the PS4; one status per entry, in order. A failed entry does not stop the others (upstream: "best
+     * effort and non-atomic"), so callers only batch writes that do not depend on each other. Null when unsupported.
+     */
+    suspend fun writeMany(pid: Int, entries: List<Pair<Long, ByteArray>>): List<WriteStatus>? = null
 
     /** The game in the foreground, when the payload can tell (ps4debug-NG); null otherwise or when there is none. */
     suspend fun foregroundApp(): com.ps4smartcheat.core.model.ForegroundApp? = null

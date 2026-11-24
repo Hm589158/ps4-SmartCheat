@@ -91,11 +91,15 @@ class FreezeManager(
                             _frozen.update { list -> list.filter { it.pid in alive } }
                         }
                     }
-                    for (fv in _frozen.value) {
-                        val st = backend.writeMemory(fv.pid, fv.address, fv.bytes)
-                        if (st is WriteStatus.Rejected) {
-                            _lastStopReason.value = "write to ${fv.label} was rejected by the PS4"
-                            unfreeze(fv.id)
+                    // One bulk write per process on ps4debug-NG (0xBDAACC04); one write per value otherwise.
+                    for ((pid, values) in _frozen.value.groupBy { it.pid }) {
+                        val statuses = if (values.size > 1) backend.writeMany(pid, values.map { it.address to it.bytes }) else null
+                        values.forEachIndexed { i, fv ->
+                            val st = statuses?.getOrNull(i) ?: backend.writeMemory(fv.pid, fv.address, fv.bytes)
+                            if (st is WriteStatus.Rejected) {
+                                _lastStopReason.value = "write to ${fv.label} was rejected by the PS4"
+                                unfreeze(fv.id)
+                            }
                         }
                     }
                     tick++

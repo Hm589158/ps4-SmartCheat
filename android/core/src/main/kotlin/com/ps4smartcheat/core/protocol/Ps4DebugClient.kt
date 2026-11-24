@@ -240,11 +240,31 @@ class Ps4DebugClient(
         send(data)
         val final = readStatus()
         if (final == P.CMD_SUCCESS) {
-            WriteStatus.Accepted
+            if (capabilities.verifiedWrite) WriteStatus.VerifiedOnConsole else WriteStatus.Accepted
         } else {
             // ps4debug-NG reports CMD_ERROR when its own read-back does not match. The session stays open
             // in that case (handler returns 0), so no reconnect is needed.
             WriteStatus.Rejected(final)
+        }
+    }
+
+    override suspend fun writeMany(pid: Int, entries: List<Pair<Long, ByteArray>>): List<WriteStatus>? {
+        if (!capabilities.bulkWrite || entries.isEmpty()) return null
+        require(entries.size <= NgProtocol.WRITE_MULTI_MAX_COUNT) { "at most ${NgProtocol.WRITE_MULTI_MAX_COUNT} entries" }
+        require(entries.all { it.second.size in 1..NgProtocol.WRITE_MULTI_MAX_ENTRY }) { "entry size out of range" }
+        return request("bulk write", idempotent = false) {
+            val body = LE.buffer(NgProtocol.WRITE_MULTI_PACKET_SIZE).putInt(pid).putInt(entries.size).putInt(NgProtocol.WRITE_MULTI_F_STATUS).array()
+            send(header(NgProtocol.CMD_PROC_WRITE_MULTI, body.size), body)
+            expectSuccess(NgProtocol.CMD_PROC_WRITE_MULTI, readStatus())
+            val out = java.io.ByteArrayOutputStream()
+            for ((address, bytes) in entries) {
+                out.write(LE.buffer(12).putLong(address).putInt(bytes.size).array())
+                out.write(bytes)
+            }
+            send(out.toByteArray())
+            val status = readExactly(entries.size)
+            expectSuccess(NgProtocol.CMD_PROC_WRITE_MULTI, readStatus())
+            status.map { b -> if (b.toInt() == 0) WriteStatus.VerifiedOnConsole else WriteStatus.Rejected(b.toLong() and 0xFF) }
         }
     }
 
