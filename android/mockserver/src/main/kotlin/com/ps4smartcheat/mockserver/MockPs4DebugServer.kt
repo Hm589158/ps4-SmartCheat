@@ -795,18 +795,39 @@ class MockPs4DebugServer(
         private fun needsValue(ct: Int) = ((1 shl ct) and 0x114F) != 0 || ct == 4
         private fun needsPrevious(ct: Int) = ct in 5..10
 
-        /** Integer compare for the compare types the app uses (0, 5, 7, 9, 10), signed or unsigned by type. */
+        /**
+         * Compare for the types the app sends: 0, 5, 7, 9, 10 on integers (signed or unsigned by type), and on Float /
+         * Double (vt 8/9) 4 = between, inclusive with low ‖ high in [ref] (proc.c proc_scan_compareValues), 5/7/9/10
+         * as C float compares (scan_compare_simd.c scan_point_compare: NaN is never bigger, smaller or equal).
+         * Integers also take 4 (inclusive between).
+         */
         fun compare(ct: Int, vt: Int, len: Int, mem: ByteArray, mo: Int, ref: ByteArray?, ro: Int): Boolean {
             fun raw(b: ByteArray, o: Int): Long { var r = 0L; for (i in len - 1 downTo 0) r = (r shl 8) or (b[o + i].toLong() and 0xFF); return r }
             fun signed(v: Long): Long = when (len) { 1 -> v.toByte().toLong(); 2 -> v.toShort().toLong(); 4 -> v.toInt().toLong(); else -> v }
+            if (vt == 8 || vt == 9) {
+                fun f(b: ByteArray, o: Int): Double = if (vt == 8) java.lang.Float.intBitsToFloat(raw(b, o).toInt()).toDouble() else java.lang.Double.longBitsToDouble(raw(b, o))
+                val m = f(mem, mo)
+                val r = ref?.let { f(it, ro) } ?: 0.0
+                return when (ct) {
+                    0 -> m == r
+                    4 -> { val hi = f(ref!!, ro + len); if (hi > r) m >= r && m <= hi else m <= r && m >= hi }
+                    5 -> m > r
+                    7 -> m < r
+                    9 -> m != r
+                    10 -> m == r
+                    else -> false
+                }
+            }
             val isSigned = vt % 2 == 1
             val m = raw(mem, mo)
             val r = ref?.let { raw(it, ro) } ?: 0L
-            val cmp = if (isSigned) signed(m).compareTo(signed(r)) else java.lang.Long.compareUnsigned(m, r)
+            fun cmp(a: Long, b: Long) = if (isSigned) signed(a).compareTo(signed(b)) else java.lang.Long.compareUnsigned(a, b)
+            val c = cmp(m, r)
             return when (ct) {
                 0 -> m == r
-                5 -> cmp > 0
-                7 -> cmp < 0
+                4 -> { val hi = raw(ref!!, ro + len); if (cmp(hi, r) > 0) c >= 0 && cmp(m, hi) <= 0 else c <= 0 && cmp(m, hi) >= 0 }
+                5 -> c > 0
+                7 -> c < 0
                 9 -> m != r
                 10 -> m == r
                 else -> false

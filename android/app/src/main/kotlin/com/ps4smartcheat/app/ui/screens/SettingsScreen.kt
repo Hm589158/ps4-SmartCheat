@@ -152,7 +152,7 @@ fun SettingsScreen(onDiagnostics: () -> Unit = {}, onHelp: () -> Unit = {}) {
             Selector("Backend", BackendPreference.entries, s.scanBackend, { it.label }, { b -> vm.update { it.copy(scanBackend = b) } })
             Text(
                 "Automatic: Turbo Scan → server-side scan (ps4debug-NG) → Android scan, falling back when one is missing. " +
-                    "Float and unaligned scans always run on Android.",
+                    "Float/Double scans use Turbo Scan too (same results as Android); unaligned scans always run on Android.",
                 style = MaterialTheme.typography.bodySmall, color = dim,
             )
             LabeledSwitch(

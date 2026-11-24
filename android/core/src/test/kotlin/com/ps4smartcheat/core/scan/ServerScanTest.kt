@@ -179,14 +179,67 @@ class ServerScanTest {
         assertTrue(r.controller.results()!!.count >= 2048)
     }
 
-    @Test fun floatsAndUnalignedStayOnAndroid() = runBlocking {
+    /**
+     * Float and Double scans run on Turbo Scan and find exactly what the Android compare finds: rounded exact values,
+     * between, increased / decreased (NaN never counts), changed / unchanged on the raw bits (0.0 → -0.0 is a change).
+     */
+    @Test fun floatsRunOnTurboWithTheSameResultsAsAndroid() = runBlocking {
+        for (type in listOf(ValueType.FLOAT32, ValueType.FLOAT64)) {
+            val outcomes = listOf(BackendPreference.CLIENT, BackendPreference.TURBO).map { pref ->
+                val r = rig()
+                val planted = (0 until 40).map { 0x1_0000_0000L + 4096L * it + type.size * 3 }
+                fun set(i: Int, v: Double) = r.server.poke(pid, planted[i], ValueCodec.encodeDouble(type, v))
+                // 12.5 typed with one decimal matches 12.45 ≤ x < 12.55: plant inside, on and past the edges.
+                for (i in planted.indices) set(i, listOf(12.5, 12.46, 12.549, 12.45, 12.55, 12.6, 12.4)[i % 7])
+                val seq = ArrayList<List<Long>>()
+                val backends = ArrayList<ScanBackendKind>()
+                fun record() { seq += r.addresses(); backends += r.controller.lastStats.value!!.backend }
+                r.first(type, "12.5", pref); record()
+                for (i in 0 until 6) set(i, 13.0)
+                for (i in 7 until 12) set(i, 12.0)
+                set(14, Double.NaN)
+                r.next(ScanMode.CHANGED); record()
+                r.next(ScanMode.UNCHANGED); record()
+                set(0, 14.0); set(7, 11.0); set(14, 20.0)
+                r.next(ScanMode.INCREASED); record()
+                r.next(ScanMode.EXACT, "14"); record()
+                // Between as a first scan, then a sign-only change of zero.
+                for (i in 20 until 25) set(i, 0.0)
+                r.controller.firstScan(pid, "eboot.bin", type, ScanMode.BETWEEN, "-0.5", valueText2 = "0.25", options = ScanOptions(backend = pref, turboFetchMax = 1_000_000))
+                r.await(); record()
+                set(20, -0.0)
+                r.next(ScanMode.CHANGED); record()
+                seq to backends
+            }
+            assertTrue(outcomes[0].second.toString(), outcomes[0].second.all { it == ScanBackendKind.CLIENT })
+            assertTrue("$type turbo tier used ${outcomes[1].second}", outcomes[1].second.all { it == ScanBackendKind.TURBO })
+            assertEquals("TURBO vs CLIENT for $type", outcomes[0].first, outcomes[1].first)
+            val first = outcomes[0].first[0]
+            assertTrue(first.toString(), first.size >= 18) // 12.5, 12.46, 12.549, 12.45 (×4 each, plus 12.5 at index 35+)
+            assertEquals(listOf(0x1_0000_0000L + type.size * 3), outcomes[0].first[4]) // only the value raised to 14
+            assertEquals(listOf(0x1_0000_0000L + 4096L * 20 + type.size * 3), outcomes[0].first[6]) // 0.0 → -0.0
+        }
+    }
+
+    @Test fun floatsWithoutTurboAndUnalignedStayOnAndroid() = runBlocking {
         val r = rig()
         r.server.poke(pid, 0x1_0000_0040L, ValueCodec.encodeDouble(ValueType.FLOAT32, 12.5))
-        r.first(ValueType.FLOAT32, "12.5", BackendPreference.AUTO)
+        r.first(ValueType.FLOAT32, "12.5", BackendPreference.SERVER)
+        assertEquals(ScanBackendKind.CLIENT, r.controller.lastStats.value!!.backend)
+        assertTrue(r.addresses().contains(0x1_0000_0040L))
+        r.controller.firstScan(pid, "eboot.bin", ValueType.FLOAT32, ScanMode.EXACT, "12.5", options = ScanOptions(alignment = 1))
+        r.await()
         assertEquals(ScanBackendKind.CLIENT, r.controller.lastStats.value!!.backend)
         r.controller.firstScan(pid, "eboot.bin", ValueType.INT32, ScanMode.EXACT, "5", options = ScanOptions(alignment = 1))
         r.await()
         assertEquals(ScanBackendKind.CLIENT, r.controller.lastStats.value!!.backend)
+        // A float refine NG has no equal compare for (rounded "increased by") runs on Android from the Turbo results.
+        r.first(ValueType.FLOAT32, "12.5", BackendPreference.AUTO)
+        assertEquals(ScanBackendKind.TURBO, r.controller.lastStats.value!!.backend)
+        r.server.poke(pid, 0x1_0000_0040L, ValueCodec.encodeDouble(ValueType.FLOAT32, 13.5))
+        r.next(ScanMode.INCREASED_BY, "1")
+        assertEquals(ScanBackendKind.CLIENT, r.controller.lastStats.value!!.backend)
+        assertEquals(listOf(0x1_0000_0040L), r.addresses())
     }
 
     @Test fun serverKeepsFullSetWhenLocalListIsCapped() = runBlocking {

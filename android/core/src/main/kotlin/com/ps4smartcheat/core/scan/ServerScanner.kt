@@ -38,10 +38,14 @@ class ServerScanUnavailableException(message: String) : com.ps4smartcheat.core.p
 
 /**
  * ps4debug-NG server-side scanning. Wire sequences follow `proc.c` (iterative START/COUNT) and
- * `scan_turbo.c` (Turbo START/COUNT/GET/END/CANCEL, server-resident + segment list). Only integer
- * types with natural alignment are sent to the server: NG compares floats with its own fuzzy policy,
- * which differs from this app's rounded matching, and the iterative COUNT window is only exact for
- * naturally aligned candidates.
+ * `scan_turbo.c` (Turbo START/COUNT/GET/END/CANCEL, server-resident + segment list). Only naturally aligned
+ * values are sent to the server (the iterative COUNT window is only exact for aligned candidates).
+ *
+ * Floats run on Turbo Scan only, translated so the PS4 finds exactly what the Android compare finds ([query]):
+ * NG's own float "exact" is a fuzzy relative compare that differs from this app's rounded matching, so an exact
+ * (rounded) or "between" scan is sent as NG's inclusive "value between" over [FloatRange]'s bounds; increased /
+ * decreased compare the floats (NaN never counts, as here); changed / unchanged compare the raw bits, like the app,
+ * by naming the same-width integer type for that step.
  */
 class ServerScanner(private val t: ServerScanTransport) {
 
@@ -69,13 +73,51 @@ class ServerScanner(private val t: ServerScanTransport) {
             else -> null
         }
 
-        /** Null when the request can run server-side, otherwise the reason it cannot. */
-        fun ineligibility(matcher: Matcher, options: ScanOptions, first: Boolean): String? {
-            if (typeCode(matcher.type) == null) return "${matcher.type.label} is compared on Android (server float policy differs)"
-            if (compareCode(matcher.mode) == null) return "${matcher.mode.label} compares run on Android (no verified PS4-side code)"
-            if (first && matcher.mode != ScanMode.EXACT) return "only exact first scans are offloaded"
-            if (options.effectiveAlignment(matcher.type) != matcher.type.size) return "unaligned scans run on Android"
+        /** Null when the request can run server-side ([turbo]: on Turbo Scan), otherwise the reason it cannot. */
+        fun ineligibility(matcher: Matcher, options: ScanOptions, first: Boolean, turbo: Boolean = false): String? {
+            val type = matcher.type
+            if (type.isFloat && !turbo) return "${type.label} runs on Turbo Scan or Android (the iterative server compare differs)"
+            if (!type.isFloat && typeCode(type) == null) return "${type.label} is compared on Android"
+            val firstModes = if (type.isFloat) setOf(ScanMode.EXACT, ScanMode.BETWEEN) else setOf(ScanMode.EXACT)
+            if (first && matcher.mode !in firstModes) return "only exact${if (type.isFloat) " and between" else ""} first scans are offloaded"
+            if (options.effectiveAlignment(type) != type.size) return "unaligned scans run on Android"
+            if (query(matcher, turbo) == null) {
+                return if (type.isFloat && matcher.mode in setOf(ScanMode.EXACT, ScanMode.BETWEEN)) "no ${type.label} value matches ${matcher.value?.text}"
+                else "${matcher.mode.label} compares run on Android (no verified PS4-side code)"
+            }
             return null
+        }
+
+        /** What the PS4 compares: NG value type, compare type and value data (low ‖ high for "between"). */
+        class Query(val valueType: Int, val compareType: Int, val data: ByteArray?)
+
+        /** The NG compare equivalent to [matcher], or null when there is none (floats: [turbo] only). */
+        fun query(matcher: Matcher, turbo: Boolean): Query? {
+            val type = matcher.type
+            if (!type.isFloat) {
+                val vt = typeCode(type) ?: return null
+                val ct = compareCode(matcher.mode) ?: return null
+                val data = if (matcher.mode.needsValue) (matcher.value as? ParsedValue.IntValue)?.let { ValueCodec.encode(it) } ?: return null else null
+                return Query(vt, ct, data)
+            }
+            if (!turbo) return null
+            val fvt = if (type == ValueType.FLOAT32) NgProtocol.VT_FLOAT else NgProtocol.VT_DOUBLE
+            val raw = if (type == ValueType.FLOAT32) NgProtocol.VT_INT32 else NgProtocol.VT_INT64
+            fun range(b: FloatRange.Bounds?) = b?.let { Query(fvt, NgProtocol.CT_BETWEEN, FloatRange.encode(type, it)) }
+            fun num(v: ParsedValue?) = (v as? ParsedValue.FloatValue)?.value
+            return when (matcher.mode) {
+                ScanMode.EXACT -> range((matcher.value as? ParsedValue.FloatValue)?.let { FloatRange.exact(type, it) })
+                ScanMode.BETWEEN -> {
+                    val a = num(matcher.value) ?: return null
+                    val b = num(matcher.value2) ?: a
+                    range(FloatRange.between(type, minOf(a, b), maxOf(a, b)))
+                }
+                ScanMode.INCREASED -> Query(fvt, NgProtocol.CT_INCREASED, null)
+                ScanMode.DECREASED -> Query(fvt, NgProtocol.CT_DECREASED, null)
+                ScanMode.CHANGED -> Query(raw, NgProtocol.CT_CHANGED, null)
+                ScanMode.UNCHANGED -> Query(raw, NgProtocol.CT_UNCHANGED, null)
+                else -> null
+            }
         }
     }
 
@@ -213,9 +255,8 @@ class ServerScanner(private val t: ServerScanTransport) {
     suspend fun turboFirst(
         pid: Int, regions: List<MemoryRegion>, matcher: Matcher, options: ScanOptions, progress: ProgressListener,
     ): TurboStep {
-        val vt = typeCode(matcher.type)!!
-        val pat = pattern(matcher) ?: throw ServerScanUnavailableException("exact value required")
-        val vl = matcher.type.size
+        val q = query(matcher, turbo = true)?.takeIf { it.data != null } ?: throw ServerScanUnavailableException("value required")
+        val pat = q.data!!
         val segs = ArrayList<Pair<Long, Long>>()
         for (r in regions) {
             var p = r.start
@@ -238,7 +279,7 @@ class ServerScanner(private val t: ServerScanTransport) {
                 epoch = t.connectionEpoch
                 val body = LE.buffer(NgProtocol.TURBO_START_PACKET_SIZE)
                     .putInt(pid).putLong(segs[0].first).putInt(segs[0].second.toInt())
-                    .put(vt.toByte()).put(NgProtocol.CT_EXACT.toByte()).put(0).putInt(vl).putInt(flags).array()
+                    .put(q.valueType.toByte()).put(q.compareType.toByte()).put(0).putInt(pat.size).putInt(flags).array()
                 w.send(w.header(NgProtocol.TURBO_START, body.size), body)
                 w.expectSuccess(NgProtocol.TURBO_START, w.readU32())
                 w.send(pat)
@@ -264,10 +305,8 @@ class ServerScanner(private val t: ServerScanTransport) {
     }
 
     suspend fun turboNext(pid: Int, matcher: Matcher, options: ScanOptions, progress: ProgressListener): TurboStep {
-        val vt = typeCode(matcher.type)!!
-        val ct = compareCode(matcher.mode)!!
-        val vl = matcher.type.size
-        val pat = if (matcher.mode.needsValue) pattern(matcher) ?: throw ServerScanUnavailableException("value required") else null
+        val q = query(matcher, turbo = true) ?: throw ServerScanUnavailableException("no PS4-side compare")
+        val pat = q.data
         val flags = NgProtocol.TS_SERVER_RESIDENT or
             (if (options.turboAliasing && t.capabilities.turboRescanAliasing) NgProtocol.TS_RESCAN_ALIASING else 0)
         progress(ScanProgress(0, 0, 0, "Turbo refine on PS4", indeterminate = true))
@@ -276,7 +315,7 @@ class ServerScanner(private val t: ServerScanTransport) {
             t.exclusive("turbo refine", t.serverScanTimeoutMs) { w ->
                 epoch = t.connectionEpoch
                 val body = LE.buffer(NgProtocol.TURBO_COUNT_PACKET_SIZE)
-                    .putInt(pid).putLong(0).put(vt.toByte()).put(ct.toByte()).putInt(if (pat != null) vl else 0).putInt(flags).array()
+                    .putInt(pid).putLong(0).put(q.valueType.toByte()).put(q.compareType.toByte()).putInt(pat?.size ?: 0).putInt(flags).array()
                 w.send(w.header(NgProtocol.TURBO_COUNT, body.size), body)
                 w.expectSuccess(NgProtocol.TURBO_COUNT, w.readU32())
                 if (pat != null) w.send(pat)

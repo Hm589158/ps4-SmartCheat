@@ -312,7 +312,7 @@ class ScanController(
         if (!caps.isNg) return "connected payload is not ps4debug-NG"
         if (!caps.scanAuthorized) return "ps4debug-NG scan authorisation failed"
         if (kind == ScanBackendKind.TURBO && !caps.turboResident) return "Turbo Scan (server-resident) not offered by this build"
-        return ServerScanner.ineligibility(matcher, options, first)
+        return ServerScanner.ineligibility(matcher, options, first, turbo = kind == ScanBackendKind.TURBO)
     }
 
     private suspend fun nextIneligible(kind: ScanBackendKind, session: Session, prev: ScanResults, matcher: Matcher, currentRegions: List<MemoryRegion>): String? {

@@ -58,9 +58,13 @@ object NgProtocol {
     const val VT_INT16 = 3
     const val VT_INT32 = 5
     const val VT_INT64 = 7
+    const val VT_FLOAT = 8
+    const val VT_DOUBLE = 9
 
     // cmd_proc_scan_comparetype
     const val CT_EXACT = 0
+    /** Inclusive, value data = low ‖ high (`proc.c` proc_scan_compareValues; legacy compare is exclusive). */
+    const val CT_BETWEEN = 4
     const val CT_INCREASED = 5
     const val CT_DECREASED = 7
     const val CT_CHANGED = 9

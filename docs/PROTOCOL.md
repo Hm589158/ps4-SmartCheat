@@ -130,8 +130,25 @@ Detection on connect (each probe uses a short timeout; on timeout/EOF the socket
 
 ### Value semantics
 
-Integer compares are typed (signed for the signed `valueType` codes 1/3/5/7 used here). Float/double exact
-compares use NG's fuzzy policy, which differs from this app's rounded matching, so floats are never offloaded.
+Integer compares are typed (signed for the signed `valueType` codes 1/3/5/7 used here).
+
+Float/double (`valueType` 8/9) run on **Turbo Scan only**, translated so the PS4 finds exactly what the Android compare
+finds (`core.scan.FloatRange`, `ServerScanner.query`):
+
+* NG's float "exact" (`compareType` 0) is a fuzzy relative compare (`proc.c` `fuzzy_float_compare`), not this app's
+  rounding to the decimals typed, so it is never sent. An exact (rounded) or "between" scan is sent as `compareType` 4
+  (`cmpTypeValueBetween`) with `lenData = 2 × size` and value data `low ‖ high`: the smallest and largest value of the
+  type the app's matcher accepts. `proc_scan_compareValues` (used by Turbo START and COUNT through
+  `turboscan_policy_compare` when `TS_FLOAT_EXACT` is not set) compares it **inclusively** in the type's precision;
+  NaN never matches. (The legacy compare, `proc_scan_legacy_compareValues`, is exclusive and is not on this path.)
+  START reads the high bound at `pattern + size` (`prev_for_between`), COUNT at `between_hi`.
+* Increased / decreased: `compareType` 5 / 7 with `valueType` 8/9 (`scan_point_compare`, C float `>` / `<`; NaN never
+  counts, as on Android).
+* Changed / unchanged: `compareType` 9 / 10 with the same-width **integer** `valueType` (5 or 7), so the raw bits are
+  compared like on Android (0.0 → -0.0 is a change, an unchanged NaN is unchanged). COUNT only checks that the value
+  length matches the resident session's, and takes the value type per request.
+* Not offloaded (Android, from the fetched list): increased/decreased **by** (NG adds exactly, the app rounds),
+  bigger/smaller than, unaligned scans, and the iterative server scan.
 
 ### Classic `CMD_PROC_SCAN 0xBDAA0009` — not used
 

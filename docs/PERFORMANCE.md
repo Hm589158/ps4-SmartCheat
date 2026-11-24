@@ -4,11 +4,11 @@
 
 | Tier | Requires | What crosses the network |
 |---|---|---|
-| **Turbo Scan (PS4)** | ps4debug-NG ≥ 1.3 (CAPS reports server-resident), auth OK, integer type, natural alignment | First scan: segment list up + count down + fetched survivors (≤ max results). Refines: one small request + survivors |
+| **Turbo Scan (PS4)** | ps4debug-NG ≥ 1.3 (CAPS reports server-resident), auth OK, integer, Float or Double type (see below), natural alignment | First scan: segment list up + count down + fetched survivors (≤ max results). Refines: one small request + survivors |
 | **Server-side scan (PS4)** | ps4debug-NG, auth OK, integer type, natural alignment | First scan: matches only `(offset, value)`. Refines: candidate offsets up, matches down |
 | **Chunked scan (Android)** | any ps4debug | First scan: every byte of every scanned region. Refines: spans around candidates |
 
-Fallback is automatic and the reason is shown under the scan result (e.g. "Float is compared on Android",
+Fallback is automatic and the reason is shown under the scan result (e.g. "unaligned scans run on Android",
 "PS4 resident result buffer full", "PS4 session lost after reconnect"). Settings → Scan backend can force a tier;
 unsupported choices still fall back.
 

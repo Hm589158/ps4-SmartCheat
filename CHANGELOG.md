@@ -2,6 +2,17 @@
 
 All hardware-related items remain **unverified on a real PS4** unless stated otherwise.
 
+## 1.0.13
+
+### Faster Float and Double scans
+- Float and Double scans now use **Turbo Scan** on ps4debug-NG instead of reading the whole game memory over Wi-Fi to
+  compare it on the phone. The app's rounded match (e.g. "12.5" finds 12.45 ≤ x < 12.55) is sent as the exact range of
+  values the phone would accept, so the PS4 finds the same addresses: first scan exact or "between", then exact,
+  between, increased, decreased, changed and unchanged refines. Increased/decreased **by** and bigger/smaller refines
+  still run on the phone from the fetched results. Unaligned scans stay on Android.
+- Tested against the simulated server (same results as the Android scan, including NaN and -0.0); not yet measured on
+  a PS4.
+
 ## 1.0.12
 
 ### Stability
